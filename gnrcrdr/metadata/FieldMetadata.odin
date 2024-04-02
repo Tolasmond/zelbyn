@@ -1,6 +1,6 @@
 package metadata
 
-import "../datatype"
+import "../data"
 
 FieldMetadata :: struct {
   id: i32,
