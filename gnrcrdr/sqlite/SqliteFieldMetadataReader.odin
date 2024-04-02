@@ -3,7 +3,7 @@ package sqlite
 import "core:log"
 import "core:mem"
 import "core:strings"
-import "../datatype"
+import "../data"
 import "../metadata"
 import sql "../../sqlite3"
 
