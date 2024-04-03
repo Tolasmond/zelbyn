@@ -3,8 +3,8 @@ package metadata
 import "../data"
 
 FieldMetadata :: struct {
-  id: i32,
+  id: int,
   name: string,
-  dataTypeId: i32,
-  packedFields: []^PackedRecord
+  dataType: ^data.DataTypeRecord,
+  packedFields: []^data.PackedRecord
 }
