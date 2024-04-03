@@ -1,16 +1,18 @@
 package sqlite
 
+import sql "../../sqlite3"
+import "../data"
+import "../manip"
+import "../metadata"
 import "core:log"
 import "core:mem"
 import "core:strings"
-import "../metadata"
-import sql "../../sqlite3"
 
-readFileFormat :: proc(dbFilePath: string, formatId: i32, fileFormat: ^metadata.FileFormat) {
+readFileFormat :: proc(dbFilePath: string, formatId: int, fileFormat: ^metadata.FileFormat) {
 	log.debugf("Opening database and reading format ID %v", formatId)
 	db, err := db_init(strings.clone_to_cstring(dbFilePath))
 	db_check(db, err)
-	defer db_destroy(db)
+	defer sql.close(db)
 
 	result := readDataType(db, &fileFormat.metadataProvider.dataTypeMap)
 
@@ -20,28 +22,41 @@ readFileFormat :: proc(dbFilePath: string, formatId: i32, fileFormat: ^metadata.
 
 	result = readSetHelper(db, &fileFormat.metadataProvider.setHelperMap)
 
-	packedRecords := make([dynamic]^metadata.PackedRecord)
+	packedRecords := make([dynamic]^data.PackedRecord)
 
 	result = readPacked(db, &packedRecords)
 
-  fileFormat.metadataProvider.packedRecords = packedRecords
+	fileFormat.metadataProvider.packedRecords = packedRecords
 
-  result = readField(db, packedRecords[:], &fileFormat.metadataProvider.fieldMetadataMap)
+	result = readField(
+		db,
+		packedRecords[:],
+		&fileFormat.metadataProvider.dataTypeMap,
+		&fileFormat.metadataProvider.fieldMetadataMap,
+	)
 
-  result = readFormat(db, &fileFormat.metadataProvider.formatRecord)
+	result = readFormat(db, &fileFormat.metadataProvider.formatRecord)
 
 	result = readParent(db, &fileFormat.metadataProvider.parentMap)
 
-	fileFormat.rootMetadataTreeNode.fieldMetadata = fileFormat.metadataProvider.fieldMetadataMap[fileFormat.metadataProvider.formatRecord.rootField]
+	fileFormat.rootMetadataTreeNode.fieldMetadata =
+		fileFormat.metadataProvider.fieldMetadataMap[fileFormat.metadataProvider.formatRecord.rootField]
+
+	log.debug("reading children")
 
 	readChildren(&fileFormat.rootMetadataTreeNode, &fileFormat.metadataProvider)
+
+  log.debug("closing database connection")
 }
 
-@(private="file")
-readChildren :: proc(parentTreeNode: ^metadata.FieldMetadataTreeNode, fieldMetadataProvider: ^metadata.FieldMetadataProvider) {
+@(private = "file")
+readChildren :: proc(
+	parentTreeNode: ^metadata.FieldMetadataTreeNode, fieldMetadataProvider: ^metadata.FieldMetadataProvider) {
 
-  parentMap := &fieldMetadataProvider.parentMap
-  fieldMetadataMap := &fieldMetadataProvider.fieldMetadataMap
+	parentMap := &fieldMetadataProvider.parentMap
+	fieldMetadataMap := &fieldMetadataProvider.fieldMetadataMap
+
+	keyExists := parentTreeNode.fieldMetadata.id in parentMap
 
 	for childRecord in parentMap[parentTreeNode.fieldMetadata.id] {
 
@@ -53,6 +68,8 @@ readChildren :: proc(parentTreeNode: ^metadata.FieldMetadataTreeNode, fieldMetad
 
 		append(&parentTreeNode.children, childTreeNode)
 
-		readChildren(childTreeNode, fieldMetadataProvider)
-  }
+		if (data.DataType(childTreeNode.fieldMetadata.dataType.type) == .Set) {
+      readChildren(childTreeNode, fieldMetadataProvider)
+		}
+	}
 }

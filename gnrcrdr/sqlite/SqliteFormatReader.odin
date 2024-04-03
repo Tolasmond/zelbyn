@@ -1,16 +1,17 @@
 package sqlite
 
 import sql "../../sqlite3"
+import "../data"
 import "../metadata"
 import "core:log"
 import "core:mem"
 import "core:strings"
 
-readFormat :: proc(db: ^sql.sqlite3, record: ^metadata.FormatRecord) -> (result: Result_Code) {
+readFormat :: proc(db: ^sql.sqlite3, record: ^data.FormatRecord) -> (result: Result_Code) {
 	log.debug("Reading Format table")
 
 	stmt: ^Stmt
-	queryText := "SELECT * FROM Length"
+	queryText := "SELECT * FROM Format"
 	data := mem.raw_data(queryText)
 	sql.prepare_v2(db, data, i32(len(queryText)), &stmt, nil)
 
@@ -18,14 +19,14 @@ readFormat :: proc(db: ^sql.sqlite3, record: ^metadata.FormatRecord) -> (result:
 
   if result != .ROW do return;
 
-	record.id = sql.column_int(stmt, i32(FormatColumn.id))
+	record.id = sql.column_int64(stmt, i32(FormatColumn.id))
 
 	if (sql.column_type(stmt, i32(FormatColumn.name)) != sql.SqliteColumnType.NULL) {
 		name: cstring = sql.column_text(stmt, i32(FormatColumn.name))
 		record.name = strings.clone(string(name))
 	}
 
-	record.rootField = sql.column_int(stmt, i32(FormatColumn.rootField))
+	record.rootField = sql.column_int64(stmt, i32(FormatColumn.rootField))
 
 	return
 }

@@ -3,26 +3,27 @@ package sqlite
 import "core:log"
 import "core:mem"
 import "core:strings"
+import "../data"
 import "../metadata"
 import sql "../../sqlite3"
 
-readDataType :: proc(db: ^sql.sqlite3, dataTypeMap: ^map[i32]^metadata.DataTypeRecord) -> (result: Result_Code) {
+readDataType :: proc(db: ^sql.sqlite3, dataTypeMap: ^map[int]^data.DataTypeRecord) -> (result: Result_Code) {
 	log.debug("Reading DataType table")
 
   stmt: ^Stmt
   queryText := "SELECT * FROM DataType"
-	data := mem.raw_data(queryText);
-  sql.prepare_v2(db, data, i32(len(queryText)), &stmt, nil);
+	queryData := mem.raw_data(queryText);
+  sql.prepare_v2(db, queryData, i32(len(queryText)), &stmt, nil);
 
 	for {
 		result = sql.step(stmt)
 
 		if result != .ROW do break;
 
-		record := new(metadata.DataTypeRecord)
+		record := new(data.DataTypeRecord)
 
-  	record.id = sql.column_int(stmt, i32(DataTypeColumn.id))
-  	record.type = sql.column_int(stmt, i32(DataTypeColumn.type))
+  	record.id = sql.column_int64(stmt, i32(DataTypeColumn.id))
+  	record.type = sql.column_int64(stmt, i32(DataTypeColumn.type))
 
   	if (sql.column_type(stmt, i32(DataTypeColumn.minValue)) != sql.SqliteColumnType.NULL) {
   		minValue : cstring = sql.column_text(stmt, i32(DataTypeColumn.minValue))
@@ -45,15 +46,15 @@ readDataType :: proc(db: ^sql.sqlite3, dataTypeMap: ^map[i32]^metadata.DataTypeR
   	}
 
   	if (sql.column_type(stmt, i32(DataTypeColumn.minArrayLength)) != sql.SqliteColumnType.NULL) {
-    	record.minArrayLength = sql.column_int(stmt, i32(DataTypeColumn.minArrayLength))
+    	record.minArrayLength = sql.column_int64(stmt, i32(DataTypeColumn.minArrayLength))
   	}
 
   	if (sql.column_type(stmt, i32(DataTypeColumn.maxArrayLength)) != sql.SqliteColumnType.NULL) {
-    	record.maxArrayLength = sql.column_int(stmt, i32(DataTypeColumn.maxArrayLength))
+    	record.maxArrayLength = sql.column_int64(stmt, i32(DataTypeColumn.maxArrayLength))
   	}
 
   	if (sql.column_type(stmt, i32(DataTypeColumn.isGrowAsNeeded)) != sql.SqliteColumnType.NULL) {
-    	record.isGrowAsNeeded = sql.column_int(stmt, i32(DataTypeColumn.isGrowAsNeeded))
+    	record.isGrowAsNeeded = sql.column_int64(stmt, i32(DataTypeColumn.isGrowAsNeeded))
   	}
 
   	if (sql.column_type(stmt, i32(DataTypeColumn.pattern)) != sql.SqliteColumnType.NULL) {
@@ -66,11 +67,11 @@ readDataType :: proc(db: ^sql.sqlite3, dataTypeMap: ^map[i32]^metadata.DataTypeR
   	}
 
   	if (sql.column_type(stmt, i32(DataTypeColumn.minBufferLength)) != sql.SqliteColumnType.NULL) {
-    	record.minBufferLength = sql.column_int(stmt, i32(DataTypeColumn.minBufferLength))
+    	record.minBufferLength = sql.column_int64(stmt, i32(DataTypeColumn.minBufferLength))
   	}
 
   	if (sql.column_type(stmt, i32(DataTypeColumn.maxBufferLength)) != sql.SqliteColumnType.NULL) {
-    	record.maxBufferLength = sql.column_int(stmt, i32(DataTypeColumn.maxBufferLength))
+    	record.maxBufferLength = sql.column_int64(stmt, i32(DataTypeColumn.maxBufferLength))
   	}
 
   	dataTypeMap[record.id] = record
