@@ -7,89 +7,89 @@ import "../data"
 import "../metadata"
 import sql "../../sqlite3"
 
-readLength :: proc(db: ^sql.sqlite3, setLengthMap: ^map[int]^data.LengthRecord) -> (result: Result_Code) {
+read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^data.Length_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading Length table")
 
-  stmt: ^Stmt
-  queryText := "SELECT * FROM Length"
-	queryData := mem.raw_data(queryText);
-  sql.prepare_v2(db, queryData, i32(len(queryText)), &stmt, nil);
+  stmt: ^sql.Stmt
+  query_text := "SELECT * FROM Length"
+	query_data := mem.raw_data(query_text);
+  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil);
 
 	for {
 		result = sql.step(stmt)
 
 		if result != .ROW do break;
 
-		record := new(data.LengthRecord)
+		record := new(data.Length_Record)
 
-  	record.id = sql.column_int64(stmt, i32(LengthColumn.id))
-  	record.dataTypeId = sql.column_int64(stmt, i32(LengthColumn.dataTypeId))
+  	record.id = sql.column_int64(stmt, i32(Length_Column.id))
+  	record.data_type_id = sql.column_int64(stmt, i32(Length_Column.data_type_id))
 
-  	if (sql.column_type(stmt, i32(LengthColumn.flagAbsouteOffsetFromBeginning)) != sql.SqliteColumnType.NULL) {
-    	record.flagAbsouteOffsetFromBeginning = sql.column_int64(stmt, i32(LengthColumn.flagAbsouteOffsetFromBeginning))
+  	if (sql.column_type(stmt, i32(Length_Column.flag_absoute_offset_from_beginning)) != sql.SqliteColumnType.NULL) {
+    	record.flag_absoute_offset_from_beginning = sql.column_int64(stmt, i32(Length_Column.flag_absoute_offset_from_beginning))
   	}
 
-  	if (sql.column_type(stmt, i32(LengthColumn.flagRelativeOffsetFromField)) != sql.SqliteColumnType.NULL) {
-    	record.flagRelativeOffsetFromField = sql.column_int64(stmt, i32(LengthColumn.flagRelativeOffsetFromField))
+  	if (sql.column_type(stmt, i32(Length_Column.flag_relative_offset_from_field)) != sql.SqliteColumnType.NULL) {
+    	record.flag_relative_offset_from_field = sql.column_int64(stmt, i32(Length_Column.flag_relative_offset_from_field))
   	}
 
-  	if (sql.column_type(stmt, i32(LengthColumn.valueAbsoluteOffsetFromBeginning)) != sql.SqliteColumnType.NULL) {
-    	record.valueAbsoluteOffsetFromBeginning = sql.column_int64(stmt, i32(LengthColumn.valueAbsoluteOffsetFromBeginning))
+  	if (sql.column_type(stmt, i32(Length_Column.value_absolute_offset_from_beginning)) != sql.SqliteColumnType.NULL) {
+    	record.value_absolute_offset_from_beginning = sql.column_int64(stmt, i32(Length_Column.value_absolute_offset_from_beginning))
   	}
 
-  	if (sql.column_type(stmt, i32(LengthColumn.valueRelativeOffsetFromField)) != sql.SqliteColumnType.NULL) {
-    	record.valueRelativeOffsetFromField = sql.column_int64(stmt, i32(LengthColumn.valueRelativeOffsetFromField))
+  	if (sql.column_type(stmt, i32(Length_Column.value_relative_offset_from_field)) != sql.SqliteColumnType.NULL) {
+    	record.value_relative_offset_from_field = sql.column_int64(stmt, i32(Length_Column.value_relative_offset_from_field))
   	}
 
-  	if (sql.column_type(stmt, i32(LengthColumn.continuator)) != sql.SqliteColumnType.NULL) {
-    	record.continuator = sql.column_int64(stmt, i32(LengthColumn.continuator))
+  	if (sql.column_type(stmt, i32(Length_Column.continuator)) != sql.SqliteColumnType.NULL) {
+    	record.continuator = sql.column_int64(stmt, i32(Length_Column.continuator))
   	}
 
-  	if (sql.column_type(stmt, i32(LengthColumn.terminator)) != sql.SqliteColumnType.NULL) {
-    	record.terminator = sql.column_int64(stmt, i32(LengthColumn.terminator))
+  	if (sql.column_type(stmt, i32(Length_Column.terminator)) != sql.SqliteColumnType.NULL) {
+    	record.terminator = sql.column_int64(stmt, i32(Length_Column.terminator))
   	}
 
-  	if (sql.column_type(stmt, i32(LengthColumn.flagMask)) != sql.SqliteColumnType.NULL) {
-    	record.flagMask = sql.column_int64(stmt, i32(LengthColumn.flagMask))
+  	if (sql.column_type(stmt, i32(Length_Column.flag_mask)) != sql.SqliteColumnType.NULL) {
+    	record.flag_mask = sql.column_int64(stmt, i32(Length_Column.flag_mask))
   	}
 
-  	if (sql.column_type(stmt, i32(LengthColumn.valueMask)) != sql.SqliteColumnType.NULL) {
-    	record.valueMask = sql.column_int64(stmt, i32(LengthColumn.valueMask))
+  	if (sql.column_type(stmt, i32(Length_Column.value_mask)) != sql.SqliteColumnType.NULL) {
+    	record.value_mask = sql.column_int64(stmt, i32(Length_Column.value_mask))
   	}
 
-  	if (sql.column_type(stmt, i32(LengthColumn.valueShift)) != sql.SqliteColumnType.NULL) {
-    	record.valueShift = sql.column_int64(stmt, i32(LengthColumn.valueShift))
+  	if (sql.column_type(stmt, i32(Length_Column.value_shift)) != sql.SqliteColumnType.NULL) {
+    	record.value_shift = sql.column_int64(stmt, i32(Length_Column.value_shift))
   	}
 
-  	if (sql.column_type(stmt, i32(LengthColumn.flagExpression)) != sql.SqliteColumnType.NULL) {
-  		flagExpression : cstring = sql.column_text(stmt, i32(LengthColumn.flagExpression))
-  		record.flagExpression = strings.clone(string(flagExpression))
+  	if (sql.column_type(stmt, i32(Length_Column.flag_expression)) != sql.SqliteColumnType.NULL) {
+  		flag_expression : cstring = sql.column_text(stmt, i32(Length_Column.flag_expression))
+  		record.flag_expression = strings.clone(string(flag_expression))
   	}
 
-  	if (sql.column_type(stmt, i32(LengthColumn.valueExpression)) != sql.SqliteColumnType.NULL) {
-  		valueExpression : cstring = sql.column_text(stmt, i32(LengthColumn.valueExpression))
-  		record.valueExpression = strings.clone(string(valueExpression))
+  	if (sql.column_type(stmt, i32(Length_Column.value_expression)) != sql.SqliteColumnType.NULL) {
+  		value_expression : cstring = sql.column_text(stmt, i32(Length_Column.value_expression))
+  		record.value_expression = strings.clone(string(value_expression))
   	}
 
-  	setLengthMap[record.id] = record
+  	set_length_map[record.id] = record
 	}
 
 	return
 }
 
-LengthColumn :: enum i32 {
+Length_Column :: enum i32 {
 	id,
-	dataTypeId,
-	flagAbsouteOffsetFromBeginning,
-	flagRelativeOffsetFromField,
-	valueAbsoluteOffsetFromBeginning,
-	valueRelativeOffsetFromField,
+	data_type_id,
+	flag_absoute_offset_from_beginning,
+	flag_relative_offset_from_field,
+	value_absolute_offset_from_beginning,
+	value_relative_offset_from_field,
 	continuator,
 	terminator,
-	flagMask,
-	flagShift,
-	valueMask,
-	valueShift,
-	flagExpression,
-	valueExpression
+	flag_mask,
+	flag_shift,
+	value_mask,
+	value_shift,
+	flag_expression,
+	value_expression
 }

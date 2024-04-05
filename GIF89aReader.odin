@@ -5,32 +5,28 @@ import "core:log"
 import "gnrcrdr/data"
 import "gnrcrdr/manip"
 import "gnrcrdr/metadata"
+import "gnrcrdr/reader"
 import "gnrcrdr/sqlite"
 
 main :: proc() {
 
   context.logger = log.create_console_logger()  
 
-  fileFormat: metadata.FileFormat
+  file_format: metadata.File_Format
   dbFilePath:= "GIF89aMetadata.sqlite3"
 
   log.debugf("reading %v", dbFilePath)
 
-  sqlite.readFileFormat(dbFilePath, 1, &fileFormat)
+  sqlite.read_file_format(dbFilePath, 1, &file_format)
 
   log.debug("populating field value array")
   
-  rootFieldValueArray := make([dynamic]data.FieldValue)
+  root_field_value_array := make([dynamic]data.Field_Value)
 
-  log.debugf("rootFieldValueArray len = %v", len(rootFieldValueArray))
+  log.debugf("root_field_value_array len = %v", len(root_field_value_array))
 
-  manip.populateFieldValueArray(&rootFieldValueArray, &fileFormat.rootMetadataTreeNode)
+  manip.initializeFieldValueArray(&root_field_value_array, &file_format.root_metadata_tree_node)
 
-  log.debugf("rootFieldValueArray len = %v", len(rootFieldValueArray))
+  reader.read("data/855.gif", &file_format, &root_field_value_array)
 
-  log.debug("getting count")
-
-  count := manip.getCount(&rootFieldValueArray)
-
-  log.debugf("count = %v", count)
 }

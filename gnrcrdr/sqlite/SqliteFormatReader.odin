@@ -7,32 +7,32 @@ import "core:log"
 import "core:mem"
 import "core:strings"
 
-readFormat :: proc(db: ^sql.sqlite3, record: ^data.FormatRecord) -> (result: Result_Code) {
+read_format :: proc(db: ^sql.sqlite3, record: ^data.Format_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading Format table")
 
-	stmt: ^Stmt
-	queryText := "SELECT * FROM Format"
-	data := mem.raw_data(queryText)
-	sql.prepare_v2(db, data, i32(len(queryText)), &stmt, nil)
+	stmt: ^sql.Stmt
+	query_text := "SELECT * FROM Format"
+	data := mem.raw_data(query_text)
+	sql.prepare_v2(db, data, i32(len(query_text)), &stmt, nil)
 
 	result = sql.step(stmt)
 
   if result != .ROW do return;
 
-	record.id = sql.column_int64(stmt, i32(FormatColumn.id))
+	record.id = sql.column_int64(stmt, i32(Format_Column.id))
 
-	if (sql.column_type(stmt, i32(FormatColumn.name)) != sql.SqliteColumnType.NULL) {
-		name: cstring = sql.column_text(stmt, i32(FormatColumn.name))
+	if (sql.column_type(stmt, i32(Format_Column.name)) != sql.SqliteColumnType.NULL) {
+		name: cstring = sql.column_text(stmt, i32(Format_Column.name))
 		record.name = strings.clone(string(name))
 	}
 
-	record.rootField = sql.column_int64(stmt, i32(FormatColumn.rootField))
+	record.root_field = sql.column_int64(stmt, i32(Format_Column.root_field))
 
 	return
 }
 
-FormatColumn :: enum i32 {
+Format_Column :: enum i32 {
 	id,
 	name,
-	rootField,
+	root_field,
 }

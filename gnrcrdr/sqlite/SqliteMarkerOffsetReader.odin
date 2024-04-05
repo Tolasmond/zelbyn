@@ -7,35 +7,39 @@ import "../data"
 import "../metadata"
 import sql "../../sqlite3"
 
-readMarkerOffset :: proc(db: ^sql.sqlite3, markerOffsetMap: ^map[int]^data.MarkerOffsetRecord) -> (result: Result_Code) {
+read_marker_offset :: proc(db: ^sql.sqlite3, marker_offset_map: ^map[int][dynamic]^data.Marker_Offset_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading MarkerOffset table")
 
-  stmt: ^Stmt
-  queryText := "SELECT * FROM MarkerOffset"
-	queryData := mem.raw_data(queryText);
-  result = sql.prepare_v2(db, queryData, i32(len(queryText)), &stmt, nil);
+  stmt: ^sql.Stmt
+  query_text := "SELECT * FROM MarkerOffset"
+	query_data := mem.raw_data(query_text);
+  result = sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil);
 
 	for {
 		result = sql.step(stmt)
 
 		if result != .ROW do break;
 
-		record := new(data.MarkerOffsetRecord)
+		record := new(data.Marker_Offset_Record)
 
-  	record.markerId = sql.column_int64(stmt, i32(MarkerOffsetColumn.markerId))
-  	record.byteOffset = sql.column_int64(stmt, i32(MarkerOffsetColumn.byteOffset))
-  	record.dataTypeId = sql.column_int64(stmt, i32(MarkerOffsetColumn.dataTypeId))
-  	record.marker = sql.column_int64(stmt, i32(MarkerOffsetColumn.marker))
+  	record.marker_id = sql.column_int64(stmt, i32(Marker_Offset_Column.marker_id))
+  	record.byte_offset = sql.column_int64(stmt, i32(Marker_Offset_Column.byte_offset))
+  	record.data_type_id = sql.column_int64(stmt, i32(Marker_Offset_Column.data_type_id))
+  	record.marker = sql.column_int64(stmt, i32(Marker_Offset_Column.marker))
 
-  	markerOffsetMap[record.markerId] = record
+		key_exists := record.marker_id in marker_offset_map
+
+		if !key_exists do marker_offset_map[record.marker_id] = make([dynamic]^data.Marker_Offset_Record)
+
+		append(&marker_offset_map[record.marker_id], record)
 	}
 
 	return
 }
 
-MarkerOffsetColumn :: enum i32 {
-	markerId,
-	byteOffset,
-	dataTypeId,
+Marker_Offset_Column :: enum i32 {
+	marker_id,
+	byte_offset,
+	data_type_id,
 	marker
 }

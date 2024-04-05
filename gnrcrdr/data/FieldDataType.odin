@@ -2,22 +2,22 @@ package data
 
 import "core:fmt"
 
-FieldDataType :: struct {
+Field_Data_Type :: struct {
   id: i32,
-  dataType: DataType,
-  minValue: Maybe(string),
-  maxValue: Maybe(string),
-  defaultValue: Maybe(string),
+  data_type: Data_Type,
+  min_value: Maybe(string),
+  max_value: Maybe(string),
+  default_value: Maybe(string),
   units: Maybe(string),
-  minLength: Maybe(i32),
-  maxLength: Maybe(i32),
-  minArrayLength: Maybe(i32),
-  maxArrayLength: Maybe(i32),
-  growAsNeeded: Maybe(bool),
+  min_length: Maybe(i32),
+  max_length: Maybe(i32),
+  min_array_length: Maybe(i32),
+  max_array_length: Maybe(i32),
+  grow_as_needed: Maybe(bool),
   pattern: Maybe(string),
-  comparisonTolerance: Maybe(f64)
+  comparison_tolerance: Maybe(f64)
 }
 
-description :: proc(fieldDataType: ^FieldDataType) -> string {
-	return fmt.aprintf("id = %v", fieldDataType.id)
+description :: proc(field_data_type: ^Field_Data_Type) -> string {
+	return fmt.aprintf("id = %v", field_data_type.id)
 }
