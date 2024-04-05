@@ -8,48 +8,48 @@ import "core:mem"
 import "core:slice"
 import "core:strings"
 
-readParent :: proc(
+read_parent :: proc(
 	db: ^sql.sqlite3,
-	parentMap: ^map[int][dynamic]^data.ParentRecord,
+	parent_map: ^map[int][dynamic]^data.Parent_Record,
 ) -> (
-	result: Result_Code,
+	result: sql.ResultCode,
 ) {
 	log.debug("Reading Parent table")
 
-	stmt: ^Stmt
-	queryText := "SELECT * FROM Parent"
-	queryData := mem.raw_data(queryText)
-	sql.prepare_v2(db, queryData, i32(len(queryText)), &stmt, nil)
+	stmt: ^sql.Stmt
+	query_text := "SELECT * FROM Parent"
+	query_data := mem.raw_data(query_text)
+	sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
 
 	for {
 		result = sql.step(stmt)
 
 		if result != .ROW do break
 
-		record := new(data.ParentRecord)
+		record := new(data.Parent_Record)
 
-		record.formatId = sql.column_int64(stmt, i32(ParentColumn.formatId))
-		record.parentId = sql.column_int64(stmt, i32(ParentColumn.parentId))
-		record.childId = sql.column_int64(stmt, i32(ParentColumn.childId))
-		record.childIndex = sql.column_int64(stmt, i32(ParentColumn.childIndex))
+		record.format_id = sql.column_int64(stmt, i32(ParentColumn.format_id))
+		record.parent_id = sql.column_int64(stmt, i32(ParentColumn.parent_id))
+		record.child_id = sql.column_int64(stmt, i32(ParentColumn.child_id))
+		record.child_index = sql.column_int64(stmt, i32(ParentColumn.child_index))
 
-		keyExists := record.parentId in parentMap
+		key_exists := record.parent_id in parent_map
 
-		if !keyExists do parentMap[record.parentId] = make([dynamic]^data.ParentRecord)
+		if !key_exists do parent_map[record.parent_id] = make([dynamic]^data.Parent_Record)
 
-		append(&parentMap[record.parentId], record)
+		append(&parent_map[record.parent_id], record)
 	}
 
-	for id, parentRecords in parentMap {
-		slice.sort_by(parentRecords[:], data.sortParentRecordsByChildIndex)
+	for id, parent_records in parent_map {
+		slice.sort_by(parent_records[:], data.sort_parent_records_by_child_index)
 	}
 
 	return
 }
 
 ParentColumn :: enum i32 {
-	formatId,
-	parentId,
-	childId,
-	childIndex,
+	format_id,
+	parent_id,
+	child_id,
+	child_index,
 }

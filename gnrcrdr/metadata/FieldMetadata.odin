@@ -2,9 +2,9 @@ package metadata
 
 import "../data"
 
-FieldMetadata :: struct {
+Field_Metadata :: struct {
   id: int,
   name: string,
-  dataType: ^data.DataTypeRecord,
-  packedFields: []^data.PackedRecord
+  data_type: ^data.Data_Type_Record,
+  packed_fields: []^data.Packed_Record
 }

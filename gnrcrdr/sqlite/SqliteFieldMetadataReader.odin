@@ -7,56 +7,56 @@ import "../data"
 import "../metadata"
 import sql "../../sqlite3"
 
-readField :: proc(db: ^sql.sqlite3, packedRecords: []^data.PackedRecord, dataTypeMap: ^map[int]^data.DataTypeRecord, fieldMetadataMap: ^map[int]^metadata.FieldMetadata) -> (result: Result_Code) {
+read_field :: proc(db: ^sql.sqlite3, packed_records: []^data.Packed_Record, data_type_map: ^map[int]^data.Data_Type_Record, field_metadata_map: ^map[int]^metadata.Field_Metadata) -> (result: sql.ResultCode) {
 	log.debug("Reading Field table")
 
-  stmt: ^Stmt
-  queryText := "SELECT * FROM Field"
-	queryData := mem.raw_data(queryText);
-  sql.prepare_v2(db, queryData, i32(len(queryText)), &stmt, nil);
+  stmt: ^sql.Stmt
+  query_text := "SELECT * FROM Field"
+	query_data := mem.raw_data(query_text);
+  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil);
 
 	for {
 		result = sql.step(stmt)
 
 		if result != .ROW do break;
 
-		record: data.FieldRecord
+		record: data.Field_Record
 
-  	record.id = sql.column_int64(stmt, i32(FieldColumn.id))
+  	record.id = sql.column_int64(stmt, i32(Field_Column.id))
 
-		name : cstring = sql.column_text(stmt, i32(FieldColumn.name))
+		name : cstring = sql.column_text(stmt, i32(Field_Column.name))
  		record.name = strings.clone(string(name))
 
-  	record.dataTypeId = sql.column_int64(stmt, i32(FieldColumn.dataTypeId))
+  	record.data_type_id = sql.column_int64(stmt, i32(Field_Column.data_type_id))
 
-  	fieldMetadata := new(metadata.FieldMetadata)
-  	fieldMetadata.id = record.id;
-  	fieldMetadata.name = record.name;
-  	fieldMetadata.dataType = dataTypeMap[record.dataTypeId]
+  	field_metadata := new(metadata.Field_Metadata)
+  	field_metadata.id = record.id;
+  	field_metadata.name = record.name;
+  	field_metadata.data_type = data_type_map[record.data_type_id]
 
-    startIndex := -1
-    endIndex := -1
+    start_index := -1
+    end_index := -1
 
-    for packedRecord, index in packedRecords {
+    for packedRecord, index in packed_records {
 			if packedRecord.id == record.id {
-			  if startIndex < 0 {
-				  startIndex = index
+			  if start_index < 0 {
+				  start_index = index
 			  } else {
-			  	endIndex = index
+			  	end_index = index
 			  }
 			}
 		}
 
-    if startIndex >= 0 do fieldMetadata.packedFields = packedRecords[startIndex:endIndex]
+    if start_index >= 0 do field_metadata.packed_fields = packed_records[start_index:end_index]
 
-  	fieldMetadataMap[record.id] = fieldMetadata
+  	field_metadata_map[record.id] = field_metadata
 	}
 
 	return
 }
 
-FieldColumn :: enum i32 {
+Field_Column :: enum i32 {
 	id,
 	name,
-	dataTypeId
+	data_type_id
 }

@@ -7,91 +7,91 @@ import "../data"
 import "../metadata"
 import sql "../../sqlite3"
 
-readDataType :: proc(db: ^sql.sqlite3, dataTypeMap: ^map[int]^data.DataTypeRecord) -> (result: Result_Code) {
+read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^data.Data_Type_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading DataType table")
 
-  stmt: ^Stmt
-  queryText := "SELECT * FROM DataType"
-	queryData := mem.raw_data(queryText);
-  sql.prepare_v2(db, queryData, i32(len(queryText)), &stmt, nil);
+  stmt: ^sql.Stmt
+  query_text := "SELECT * FROM DataType"
+	query_data := mem.raw_data(query_text);
+  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil);
 
 	for {
 		result = sql.step(stmt)
 
 		if result != .ROW do break;
 
-		record := new(data.DataTypeRecord)
+		record := new(data.Data_Type_Record)
 
-  	record.id = sql.column_int64(stmt, i32(DataTypeColumn.id))
-  	record.type = sql.column_int64(stmt, i32(DataTypeColumn.type))
+  	record.id = sql.column_int64(stmt, i32(Data_Type_Column.id))
+  	record.type = sql.column_int64(stmt, i32(Data_Type_Column.type))
 
-  	if (sql.column_type(stmt, i32(DataTypeColumn.minValue)) != sql.SqliteColumnType.NULL) {
-  		minValue : cstring = sql.column_text(stmt, i32(DataTypeColumn.minValue))
-  		record.minValue = strings.clone(string(minValue))
+  	if (sql.column_type(stmt, i32(Data_Type_Column.min_value)) != sql.SqliteColumnType.NULL) {
+  		min_value : cstring = sql.column_text(stmt, i32(Data_Type_Column.min_value))
+  		record.min_value = strings.clone(string(min_value))
   	}
 
-  	if (sql.column_type(stmt, i32(DataTypeColumn.maxValue)) != sql.SqliteColumnType.NULL) {
-  		maxValue : cstring = sql.column_text(stmt, i32(DataTypeColumn.maxValue))
-  		record.maxValue = strings.clone(string(maxValue))
+  	if (sql.column_type(stmt, i32(Data_Type_Column.max_value)) != sql.SqliteColumnType.NULL) {
+  		max_value : cstring = sql.column_text(stmt, i32(Data_Type_Column.max_value))
+  		record.max_value = strings.clone(string(max_value))
   	}
 
-  	if (sql.column_type(stmt, i32(DataTypeColumn.defaultValue)) != sql.SqliteColumnType.NULL) {
-  		defaultValue : cstring = sql.column_text(stmt, i32(DataTypeColumn.defaultValue))
-  		record.defaultValue = strings.clone(string(defaultValue))
+  	if (sql.column_type(stmt, i32(Data_Type_Column.default_value)) != sql.SqliteColumnType.NULL) {
+  		default_value : cstring = sql.column_text(stmt, i32(Data_Type_Column.default_value))
+  		record.default_value = strings.clone(string(default_value))
   	}
 
-  	if (sql.column_type(stmt, i32(DataTypeColumn.units)) != sql.SqliteColumnType.NULL) {
-  		units : cstring = sql.column_text(stmt, i32(DataTypeColumn.units))
+  	if (sql.column_type(stmt, i32(Data_Type_Column.units)) != sql.SqliteColumnType.NULL) {
+  		units : cstring = sql.column_text(stmt, i32(Data_Type_Column.units))
   		record.units = strings.clone(string(units))
   	}
 
-  	if (sql.column_type(stmt, i32(DataTypeColumn.minArrayLength)) != sql.SqliteColumnType.NULL) {
-    	record.minArrayLength = sql.column_int64(stmt, i32(DataTypeColumn.minArrayLength))
+  	if (sql.column_type(stmt, i32(Data_Type_Column.min_array_length)) != sql.SqliteColumnType.NULL) {
+    	record.min_array_length = sql.column_int64(stmt, i32(Data_Type_Column.min_array_length))
   	}
 
-  	if (sql.column_type(stmt, i32(DataTypeColumn.maxArrayLength)) != sql.SqliteColumnType.NULL) {
-    	record.maxArrayLength = sql.column_int64(stmt, i32(DataTypeColumn.maxArrayLength))
+  	if (sql.column_type(stmt, i32(Data_Type_Column.max_array_length)) != sql.SqliteColumnType.NULL) {
+    	record.max_array_length = sql.column_int64(stmt, i32(Data_Type_Column.max_array_length))
   	}
 
-  	if (sql.column_type(stmt, i32(DataTypeColumn.isGrowAsNeeded)) != sql.SqliteColumnType.NULL) {
-    	record.isGrowAsNeeded = sql.column_int64(stmt, i32(DataTypeColumn.isGrowAsNeeded))
+  	if (sql.column_type(stmt, i32(Data_Type_Column.is_grow_as_needed)) != sql.SqliteColumnType.NULL) {
+    	record.is_grow_as_needed = sql.column_int64(stmt, i32(Data_Type_Column.is_grow_as_needed))
   	}
 
-  	if (sql.column_type(stmt, i32(DataTypeColumn.pattern)) != sql.SqliteColumnType.NULL) {
-  		pattern : cstring = sql.column_text(stmt, i32(DataTypeColumn.pattern))
+  	if (sql.column_type(stmt, i32(Data_Type_Column.pattern)) != sql.SqliteColumnType.NULL) {
+  		pattern : cstring = sql.column_text(stmt, i32(Data_Type_Column.pattern))
   		record.pattern = strings.clone(string(pattern))
   	}
 
-  	if (sql.column_type(stmt, i32(DataTypeColumn.comparisonTolerance)) != sql.SqliteColumnType.NULL) {
-    	record.comparisonTolerance = sql.column_double(stmt, i32(DataTypeColumn.comparisonTolerance))
+  	if (sql.column_type(stmt, i32(Data_Type_Column.comparison_tolerance)) != sql.SqliteColumnType.NULL) {
+    	record.comparison_tolerance = sql.column_double(stmt, i32(Data_Type_Column.comparison_tolerance))
   	}
 
-  	if (sql.column_type(stmt, i32(DataTypeColumn.minBufferLength)) != sql.SqliteColumnType.NULL) {
-    	record.minBufferLength = sql.column_int64(stmt, i32(DataTypeColumn.minBufferLength))
+  	if (sql.column_type(stmt, i32(Data_Type_Column.min_buffer_length)) != sql.SqliteColumnType.NULL) {
+    	record.min_buffer_length = sql.column_int64(stmt, i32(Data_Type_Column.min_buffer_length))
   	}
 
-  	if (sql.column_type(stmt, i32(DataTypeColumn.maxBufferLength)) != sql.SqliteColumnType.NULL) {
-    	record.maxBufferLength = sql.column_int64(stmt, i32(DataTypeColumn.maxBufferLength))
+  	if (sql.column_type(stmt, i32(Data_Type_Column.max_buffer_length)) != sql.SqliteColumnType.NULL) {
+    	record.max_buffer_length = sql.column_int64(stmt, i32(Data_Type_Column.max_buffer_length))
   	}
 
-  	dataTypeMap[record.id] = record
+  	data_type_map[record.id] = record
 	}
 
 	return
 }
 
-DataTypeColumn :: enum i32 {
+Data_Type_Column :: enum i32 {
 	id,
 	type,
-	minValue,
-	maxValue,
-	defaultValue,
+	min_value,
+	max_value,
+	default_value,
 	units,
-	minArrayLength,
-	maxArrayLength,
-	isGrowAsNeeded,
+	min_array_length,
+	max_array_length,
+	is_grow_as_needed,
 	pattern,
-	comparisonTolerance,
-	minBufferLength,
-	maxBufferLength
+	comparison_tolerance,
+	min_buffer_length,
+	max_buffer_length
 }

@@ -1,6 +1,6 @@
 package data
 
-DataType :: enum {
+Data_Type :: enum {
 	Set,
 	Int8,
 	UInt8,

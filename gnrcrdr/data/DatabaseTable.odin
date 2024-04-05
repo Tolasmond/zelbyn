@@ -1,79 +1,79 @@
 package data
 
 
-DataTypeRecord :: struct {
+Data_Type_Record :: struct {
 	id: int,
 	type: int,
-	minValue: Maybe(string),
-	maxValue: Maybe(string),
-	defaultValue: Maybe(string),
+	min_value: Maybe(string),
+	max_value: Maybe(string),
+	default_value: Maybe(string),
 	units: Maybe(string),
-	minArrayLength: Maybe(int),
-	maxArrayLength: Maybe(int),
-	isGrowAsNeeded: Maybe(int),
+	min_array_length: Maybe(int),
+	max_array_length: Maybe(int),
+	is_grow_as_needed: Maybe(int),
 	pattern: Maybe(string),
-	comparisonTolerance: Maybe(f64),
-	minBufferLength: Maybe(int),
-	maxBufferLength: Maybe(int)
+	comparison_tolerance: Maybe(f64),
+	min_buffer_length: Maybe(int),
+	max_buffer_length: Maybe(int)
 }
 
-FieldRecord :: struct {
+Field_Record :: struct {
 	id: int,
 	name: string,
-	dataTypeId: int
+	data_type_id: int
 }
 
-SetHelperRecord :: struct {
-	formatId: int,
-	fieldId: int,
-	lengthId: Maybe(int),
-	markerId: Maybe(int)
+Set_Helper_Record :: struct {
+	format_id: int,
+	field_id: int,
+	length_id: Maybe(int),
+	marker_id: Maybe(int)
 }
 
-LengthRecord :: struct {
+Length_Record :: struct {
 	id: int,
-	dataTypeId: int,
-	flagAbsouteOffsetFromBeginning: Maybe(int),
-	flagRelativeOffsetFromField: Maybe(int),
-	valueAbsoluteOffsetFromBeginning: Maybe(int),
-	valueRelativeOffsetFromField: Maybe(int),
+	data_type_id: int,
+	flag_absoute_offset_from_beginning: Maybe(int),
+	flag_relative_offset_from_field: Maybe(int),
+	value_absolute_offset_from_beginning: Maybe(int),
+	value_relative_offset_from_field: Maybe(int),
 	continuator: Maybe(int),
 	terminator: Maybe(int),
-	flagMask: Maybe(int),
-	flagShift: Maybe(int),
-	valueMask: Maybe(int),
-	valueShift: Maybe(int),
-	flagExpression: Maybe(string),
-	valueExpression: Maybe(string)
+	flag_mask: Maybe(int),
+	flag_shift: Maybe(int),
+	value_mask: Maybe(int),
+	value_shift: Maybe(int),
+	flag_expression: Maybe(string),
+	value_expression: Maybe(string)
 }
 
-MarkerOffsetRecord :: struct {
-	markerId: int,
-	byteOffset: int,
-	dataTypeId: int,
+Marker_Offset_Record :: struct {
+	marker_id: int,
+	byte_offset: int,
+	data_type_id: int,
 	marker: int
 }
 
-PackedRecord :: struct {
+Packed_Record :: struct {
 	id: int,
-	fieldId: int,
-	lowBit: int,
-	highBit: int
+	field_id: int,
+	low_bit: int,
+	high_bit: int
 }
 
-FormatRecord :: struct {
+Format_Record :: struct {
 	id: int,
 	name: string,
-	rootField: int
+	root_field: int
 }
 
-ParentRecord :: struct {
-	formatId: int,
-	parentId: int,
-	childId: int,
-	childIndex: int
+Parent_Record :: struct {
+	format_id: int,
+	parent_id: int,
+	child_id: int,
+	child_index: int
 }
 
-sortParentRecordsByChildIndex :: proc(i, j: ^ParentRecord) -> bool {
-	return i.childIndex < j.childIndex
+sort_parent_records_by_child_index :: proc(i, j: ^Parent_Record) -> bool {
+	return i.child_index < j.child_index
 }
