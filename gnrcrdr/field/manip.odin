@@ -128,6 +128,20 @@ add :: proc(metadata_node: ^mdat.Field_Metadata_Tree_Node, parent_field: ^[dynam
     metadata_node)
 }
 
+destroy_field :: proc(field: [dynamic]fld.Value) {
+  for value in field {
+    set_map, is_set_map := value.(map[int][dynamic]fld.Value)
+
+    if is_set_map {
+      for _, fld_value in set_map {
+        destroy_field(fld_value)
+      }
+      delete(set_map)
+    }
+  }
+  delete(field)
+}
+
 @(private = "file")
 initialize_set_map :: proc(
   set_map: ^map[int][dynamic]fld.Value,
@@ -137,3 +151,4 @@ initialize_set_map :: proc(
     initializeFieldValueArray(&set_map[child.metadata.id], child)
   }
 }
+

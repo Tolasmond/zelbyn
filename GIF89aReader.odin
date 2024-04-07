@@ -23,15 +23,17 @@ main :: proc() {
 
   sql.read_file_format(dbFilePath, 1, &file_format)
 
-  // log.debug("populating field value array")
+  log.debug("populating field value array")
   
-  // root_field := make([dynamic]fld.Value)
+  root_field := make([dynamic]fld.Value)
 
-  // log.debugf("root_field len = %v", len(root_field))
+  log.debugf("root_field len = %v", len(root_field))
 
-  // fld.initializeFieldValueArray(&root_field, &file_format.root_metadata_node)
+  fld.initializeFieldValueArray(&root_field, &file_format.root_metadata_node)
 
   // rdr.read("data/855.gif", &file_format, &root_field)
+
+  fld.destroy_field(root_field)
 
   mdat.destroy_file_format(&file_format)
 
