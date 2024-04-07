@@ -53,6 +53,22 @@ get_i64 :: proc(buffer: ^Byte_Buffer) -> i64 {
   return value
 }
 
+read_integer :: proc(buffer: ^Byte_Buffer, data_type: Data_Type) -> (value: int, ok: bool) {
+  ok = true
+  #partial switch data_type {
+  case .Int8: value = int(get_i8(buffer))
+  case .UInt8: value = int(get_u8(buffer))
+  case .Int16: value = int(get_i16(buffer))
+  case .UInt16: value = int(get_u16(buffer))
+  case .Int32: value = int(get_i32(buffer))
+  case .UInt32: value = int(get_u32(buffer))
+  case .Int64: value = int(get_i64(buffer))
+  case:
+    ok = false
+  }
+  return value, ok
+}
+
 read_file_into_buffer :: proc(buffer: ^Byte_Buffer, name: string) {
   buf, ok := os.read_entire_file_from_filename(name)
   if (ok) {

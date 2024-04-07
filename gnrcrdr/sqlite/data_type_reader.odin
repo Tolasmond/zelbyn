@@ -3,11 +3,10 @@ package sqlite
 import "core:log"
 import "core:mem"
 import "core:strings"
-import "../data"
-import "../metadata"
+import dat "../data"
 import sql "../../sqlite3"
 
-read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^data.Data_Type_Record) -> (result: sql.ResultCode) {
+read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^dat.Data_Type_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading DataType table")
 
   stmt: ^sql.Stmt
@@ -20,7 +19,7 @@ read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^data.Data_Type
 
 		if result != .ROW do break;
 
-		record := new(data.Data_Type_Record)
+		record := new(dat.Data_Type_Record)
 
   	record.id = sql.column_int64(stmt, i32(Data_Type_Column.id))
   	record.type = sql.column_int64(stmt, i32(Data_Type_Column.type))

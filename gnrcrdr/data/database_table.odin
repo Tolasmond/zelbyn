@@ -1,6 +1,5 @@
 package data
 
-
 Data_Type_Record :: struct {
 	id: int,
 	type: int,

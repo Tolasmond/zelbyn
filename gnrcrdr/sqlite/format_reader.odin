@@ -1,13 +1,12 @@
 package sqlite
 
 import sql "../../sqlite3"
-import "../data"
-import "../metadata"
+import dat "../data"
 import "core:log"
 import "core:mem"
 import "core:strings"
 
-read_format :: proc(db: ^sql.sqlite3, record: ^data.Format_Record) -> (result: sql.ResultCode) {
+read_format :: proc(db: ^sql.sqlite3, record: ^dat.Format_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading Format table")
 
 	stmt: ^sql.Stmt

@@ -3,11 +3,10 @@ package sqlite
 import "core:log"
 import "core:mem"
 import "core:strings"
-import "../data"
-import "../metadata"
+import dat "../data"
 import sql "../../sqlite3"
 
-read_marker_offset :: proc(db: ^sql.sqlite3, marker_offset_map: ^map[int][dynamic]^data.Marker_Offset_Record) -> (result: sql.ResultCode) {
+read_marker_offset :: proc(db: ^sql.sqlite3, marker_offset_map: ^map[int][dynamic]^dat.Marker_Offset_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading MarkerOffset table")
 
   stmt: ^sql.Stmt
@@ -20,7 +19,7 @@ read_marker_offset :: proc(db: ^sql.sqlite3, marker_offset_map: ^map[int][dynami
 
 		if result != .ROW do break;
 
-		record := new(data.Marker_Offset_Record)
+		record := new(dat.Marker_Offset_Record)
 
   	record.marker_id = sql.column_int64(stmt, i32(Marker_Offset_Column.marker_id))
   	record.byte_offset = sql.column_int64(stmt, i32(Marker_Offset_Column.byte_offset))
@@ -29,7 +28,7 @@ read_marker_offset :: proc(db: ^sql.sqlite3, marker_offset_map: ^map[int][dynami
 
 		key_exists := record.marker_id in marker_offset_map
 
-		if !key_exists do marker_offset_map[record.marker_id] = make([dynamic]^data.Marker_Offset_Record)
+		if !key_exists do marker_offset_map[record.marker_id] = make([dynamic]^dat.Marker_Offset_Record)
 
 		append(&marker_offset_map[record.marker_id], record)
 	}

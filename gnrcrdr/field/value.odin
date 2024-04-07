@@ -1,6 +1,6 @@
-package data
+package field
 
-Field_Value :: union {
+Value :: union {
 	i8,
 	i16,
 	i32,
@@ -12,5 +12,5 @@ Field_Value :: union {
 	f32,
 	f64,
 	string,
-	map[int][dynamic]Field_Value
+	map[int][dynamic]Value
 }
