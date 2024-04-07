@@ -1,8 +1,7 @@
 package sqlite
 
 import sql "../../sqlite3"
-import "../data"
-import "../metadata"
+import dat "../data"
 import "core:log"
 import "core:mem"
 import "core:slice"
@@ -10,7 +9,7 @@ import "core:strings"
 
 read_parent :: proc(
 	db: ^sql.sqlite3,
-	parent_map: ^map[int][dynamic]^data.Parent_Record,
+	parent_map: ^map[int][dynamic]^dat.Parent_Record,
 ) -> (
 	result: sql.ResultCode,
 ) {
@@ -26,7 +25,7 @@ read_parent :: proc(
 
 		if result != .ROW do break
 
-		record := new(data.Parent_Record)
+		record := new(dat.Parent_Record)
 
 		record.format_id = sql.column_int64(stmt, i32(ParentColumn.format_id))
 		record.parent_id = sql.column_int64(stmt, i32(ParentColumn.parent_id))
@@ -35,13 +34,13 @@ read_parent :: proc(
 
 		key_exists := record.parent_id in parent_map
 
-		if !key_exists do parent_map[record.parent_id] = make([dynamic]^data.Parent_Record)
+		if !key_exists do parent_map[record.parent_id] = make([dynamic]^dat.Parent_Record)
 
 		append(&parent_map[record.parent_id], record)
 	}
 
 	for id, parent_records in parent_map {
-		slice.sort_by(parent_records[:], data.sort_parent_records_by_child_index)
+		slice.sort_by(parent_records[:], dat.sort_parent_records_by_child_index)
 	}
 
 	return

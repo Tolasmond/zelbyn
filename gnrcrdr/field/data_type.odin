@@ -1,10 +1,11 @@
-package data
+package field
 
+import dat "../data"
 import "core:fmt"
 
 Field_Data_Type :: struct {
   id: i32,
-  data_type: Data_Type,
+  data_type: dat.Data_Type,
   min_value: Maybe(string),
   max_value: Maybe(string),
   default_value: Maybe(string),

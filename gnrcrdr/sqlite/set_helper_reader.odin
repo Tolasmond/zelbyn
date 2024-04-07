@@ -3,11 +3,10 @@ package sqlite
 import "core:log"
 import "core:mem"
 import "core:strings"
-import "../data"
-import "../metadata"
+import dat "../data"
 import sql "../../sqlite3"
 
-read_set_helper :: proc(db: ^sql.sqlite3, set_helper_map: ^map[int]^data.Set_Helper_Record) -> (result: sql.ResultCode) {
+read_set_helper :: proc(db: ^sql.sqlite3, set_helper_map: ^map[int]^dat.Set_Helper_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading SetHelper table")
 
   stmt: ^sql.Stmt
@@ -20,7 +19,7 @@ read_set_helper :: proc(db: ^sql.sqlite3, set_helper_map: ^map[int]^data.Set_Hel
 
 		if result != .ROW do break;
 
-		record := new(data.Set_Helper_Record)
+		record := new(dat.Set_Helper_Record)
 
   	record.format_id = sql.column_int64(stmt, i32(Set_Helper_Column.format_id))
   	record.field_id = sql.column_int64(stmt, i32(Set_Helper_Column.field_id))

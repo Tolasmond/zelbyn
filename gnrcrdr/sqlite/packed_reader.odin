@@ -3,11 +3,10 @@ package sqlite
 import "core:log"
 import "core:mem"
 import "core:strings"
-import "../data"
-import "../metadata"
+import dat "../data"
 import sql "../../sqlite3"
 
-read_packed :: proc(db: ^sql.sqlite3, packed_records: ^[dynamic]^data.Packed_Record) -> (result: sql.ResultCode) {
+read_packed :: proc(db: ^sql.sqlite3, packed_records: ^[dynamic]^dat.Packed_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading Packed table")
 
   stmt: ^sql.Stmt
@@ -20,7 +19,7 @@ read_packed :: proc(db: ^sql.sqlite3, packed_records: ^[dynamic]^data.Packed_Rec
 
 		if result != .ROW do break;
 
-		record := new(data.Packed_Record)
+		record := new(dat.Packed_Record)
 
   	record.id = sql.column_int64(stmt, i32(PackedColumn.id))
   	record.field_id = sql.column_int64(stmt, i32(PackedColumn.field_id))

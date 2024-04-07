@@ -3,11 +3,10 @@ package sqlite
 import "core:log"
 import "core:mem"
 import "core:strings"
-import "../data"
-import "../metadata"
+import dat "../data"
 import sql "../../sqlite3"
 
-read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^data.Length_Record) -> (result: sql.ResultCode) {
+read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^dat.Length_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading Length table")
 
   stmt: ^sql.Stmt
@@ -20,7 +19,7 @@ read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^data.Length_Reco
 
 		if result != .ROW do break;
 
-		record := new(data.Length_Record)
+		record := new(dat.Length_Record)
 
   	record.id = sql.column_int64(stmt, i32(Length_Column.id))
   	record.data_type_id = sql.column_int64(stmt, i32(Length_Column.data_type_id))
