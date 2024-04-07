@@ -11,7 +11,7 @@ adjust_count :: proc(
   metadata: ^mdat.Field_Metadata_Provider,
   buffer: ^dat.Byte_Buffer, path: ..any) -> int {
   
-  set_helper_rec := metadata.set_helper_map[metadata_node.field_metadata.id]
+  set_helper_rec := metadata.set_helper_map[metadata_node.metadata.id]
 
   marker_id, marker_id_exists := set_helper_rec.marker_id.?
 

@@ -10,8 +10,12 @@ import "core:strings"
 read_file_format :: proc(dbFilePath: string, format_id: int, file_format: ^mdata.File_Format) {
 	log.debugf("Opening database and reading format ID %v", format_id)
 	db: ^sql.sqlite3
-  sql.open(strings.clone_to_cstring(dbFilePath), &db)
-	defer sql.close(db)
+	cpath := strings.clone_to_cstring(dbFilePath)
+  sql.open(cpath, &db)
+	defer {
+		delete(cpath)
+		sql.close(db)
+	}
 
 	result := read_data_type(db, &file_format.metadata.data_type_map)
 
@@ -38,7 +42,7 @@ read_file_format :: proc(dbFilePath: string, format_id: int, file_format: ^mdata
 
 	result = read_parent(db, &file_format.metadata.parent_map)
 
-	file_format.root_metadata_node.field_metadata =
+	file_format.root_metadata_node.metadata =
 		file_format.metadata.field_metadata_map[file_format.metadata.format_record.root_field]
 
 	log.debug("reading children")
@@ -55,19 +59,19 @@ read_children :: proc(
 	parent_map := &metadata.parent_map
 	field_metadata_map := &metadata.field_metadata_map
 
-	key_exists := parent_node.field_metadata.id in parent_map
+	key_exists := parent_node.metadata.id in parent_map
 
-	for childRecord in parent_map[parent_node.field_metadata.id] {
+	for childRecord in parent_map[parent_node.metadata.id] {
 
 		child_tree_node := new(mdata.Field_Metadata_Tree_Node)
 
-		child_tree_node.field_metadata = field_metadata_map[childRecord.child_id]
+		child_tree_node.metadata = field_metadata_map[childRecord.child_id]
 
 		child_tree_node.parent = parent_node
 
 		append(&parent_node.children, child_tree_node)
 
-		if (dat.Data_Type(child_tree_node.field_metadata.data_type.type) == .Set) {
+		if (dat.Data_Type(child_tree_node.metadata.data_type.type) == .Set) {
       read_children(child_tree_node, metadata)
 		}
 	}
