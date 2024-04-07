@@ -32,7 +32,7 @@ read_set_helper :: proc(db: ^sql.sqlite3, set_helper_map: ^map[int]^dat.Set_Help
     	record.marker_id = sql.column_int64(stmt, i32(Set_Helper_Column.marker_id))
   	}
 
-  	set_helper_map[record.format_id] = record
+  	set_helper_map[record.field_id] = record
 	}
 
 	return

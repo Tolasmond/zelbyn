@@ -10,7 +10,7 @@ initializeFieldValueArray :: proc(
   field_value_array: ^[dynamic]fld.Value,
   metadata_node: ^mdat.Field_Metadata_Tree_Node) {
 
-  metadata := metadata_node.field_metadata
+  metadata := metadata_node.metadata
 
   min_length := metadata.data_type.min_array_length.? or_else 1
 
@@ -133,7 +133,7 @@ initialize_set_map :: proc(
   set_map: ^map[int][dynamic]fld.Value,
   metadata_node: ^mdat.Field_Metadata_Tree_Node) {
   for child in metadata_node.children {
-    set_map[child.field_metadata.id] = make([dynamic]fld.Value)
-    initializeFieldValueArray(&set_map[child.field_metadata.id], child)
+    set_map[child.metadata.id] = make([dynamic]fld.Value)
+    initializeFieldValueArray(&set_map[child.metadata.id], child)
   }
 }
