@@ -12,9 +12,9 @@ main :: proc() {
 
   context.logger = log.create_console_logger()  
 
-  // tracking_allocator: mem.Tracking_Allocator
-  // mem.tracking_allocator_init(&tracking_allocator, context.allocator)
-  // context.allocator = mem.tracking_allocator(&tracking_allocator)
+  tracking_allocator: mem.Tracking_Allocator
+  mem.tracking_allocator_init(&tracking_allocator, context.allocator)
+  context.allocator = mem.tracking_allocator(&tracking_allocator)
 
   file_format: mdat.File_Format
   dbFilePath:= "data/GIF89aMetadata.sqlite3"
@@ -35,8 +35,8 @@ main :: proc() {
 
   mdat.destroy_file_format(&file_format)
 
-  // reset_tracking_allocator(&tracking_allocator)
-  // mem.tracking_allocator_destroy(&tracking_allocator)
+  reset_tracking_allocator(&tracking_allocator)
+  mem.tracking_allocator_destroy(&tracking_allocator)
 }
 
 reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> bool {

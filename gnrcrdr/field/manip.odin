@@ -25,7 +25,6 @@ initializeFieldValueArray :: proc(
     switch data_type {
     case .Set:
       append(field_value_array, make(map[int][dynamic]fld.Value))
-      log.debugf("Created %v (%v) map", metadata.name, metadata.id)
       initialize_set_map(&field_value_array[len(field_value_array) - 1].(map[int][dynamic]fld.Value), node)
     case .Int8:
       v, ok := strconv.parse_int(metadata.data_type.default_value.? or_else "0")
@@ -144,12 +143,20 @@ append_set_instance :: proc(node: ^mdat.Field_Metadata_Tree_Node, parent_field: 
 destroy_field :: proc(field: [dynamic]fld.Value) {
   for value in field {
     set_map, is_set_map := value.(map[int][dynamic]fld.Value)
+    blob, is_blob := value.([]byte)
+    str, is_str := value.(string)
 
     if is_set_map {
       for _, fld_value in set_map {
         destroy_field(fld_value)
       }
       delete(set_map)
+    }
+    else if is_blob {
+      delete(blob)
+    }
+    else if is_str {
+      delete(str)
     }
   }
   delete(field)
@@ -163,7 +170,6 @@ set_value :: proc(node: ^mdat.Field_Metadata_Tree_Node, parent_field: ^[dynamic]
 initialize_set_map :: proc(set_map: ^map[int][dynamic]fld.Value, node: ^mdat.Field_Metadata_Tree_Node) {
   for child in node.children {
     set_map[child.metadata.id] = make([dynamic]fld.Value)
-    log.debugf("Created %v (%v) dynamic array", child.metadata.name, child.metadata.id)
     initializeFieldValueArray(&set_map[child.metadata.id], child)
   }
 }
