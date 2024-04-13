@@ -2,7 +2,9 @@ package data
 
 import "core:bytes"
 import "core:encoding/endian"
+import "core:log"
 import "core:os"
+import "core:strings"
 
 Byte_Buffer :: struct {
   data: bytes.Buffer,
@@ -53,7 +55,25 @@ get_i64 :: proc(buffer: ^Byte_Buffer) -> i64 {
   return value
 }
 
-read_integer :: proc(buffer: ^Byte_Buffer, data_type: Data_Type) -> (value: int, ok: bool) {
+get_u64 :: proc(buffer: ^Byte_Buffer) -> u64 {
+  buf := bytes.buffer_next(&buffer.data, 8)
+  value, ok := endian.get_u64(buf, buffer.byteOrder)
+  return value
+}
+
+get_f32 :: proc(buffer: ^Byte_Buffer) -> f32 {
+  buf := bytes.buffer_next(&buffer.data, 4)
+  value, ok := endian.get_f32(buf, buffer.byteOrder)
+  return value
+}
+
+get_f64 :: proc(buffer: ^Byte_Buffer) -> f64 {
+  buf := bytes.buffer_next(&buffer.data, 8)
+  value, ok := endian.get_f64(buf, buffer.byteOrder)
+  return value
+}
+
+get_integer :: proc(buffer: ^Byte_Buffer, data_type: Data_Type) -> (value: int, ok: bool) {
   ok = true
   #partial switch data_type {
   case .Int8: value = int(get_i8(buffer))
@@ -67,6 +87,28 @@ read_integer :: proc(buffer: ^Byte_Buffer, data_type: Data_Type) -> (value: int,
     ok = false
   }
   return value, ok
+}
+
+get_string :: proc(buffer: ^Byte_Buffer, len: int) -> string {
+  builder := strings.builder_make()
+  defer strings.builder_destroy(&builder)
+  for i in 0..<len {
+    b, _ := bytes.buffer_read_byte(&buffer.data)
+    if b != 0 {
+      strings.write_byte(&builder,  b)
+    }
+  }
+
+  value := strings.to_string(builder)
+  log.debugf("Read string from buffer = %v", value)
+  return strings.clone(value)
+}
+
+get_bytes :: proc(buf: ^Byte_Buffer, dest: ^[]byte) {
+  for i in 0..<len(dest) {
+    b, _ := bytes.buffer_read_byte(&buf.data)
+    dest[i] = b
+  }
 }
 
 read_file_into_buffer :: proc(buffer: ^Byte_Buffer, name: string) {

@@ -6,11 +6,26 @@ Field_Metadata_Tree_Node :: struct {
 	parent: ^Field_Metadata_Tree_Node
 }
 
-destroy_metadata_node :: proc(metadata_node: ^Field_Metadata_Tree_Node) {
-	free(metadata_node.metadata)
-	for child_node in metadata_node.children {
+destroy_metadata_node :: proc(node: ^Field_Metadata_Tree_Node) {
+	free(node.metadata)
+	for child_node in node.children {
 		destroy_metadata_node(child_node)
 		free(child_node)
 	}
-	delete(metadata_node.children)
+	delete(node.children)
+}
+
+create_path_name_map :: proc(node: ^Field_Metadata_Tree_Node) -> map[int]string {
+  name_map := make(map[int]string)
+
+  name_map[node.metadata.id] = node.metadata.name
+
+  node := node
+
+  for node.parent != nil {
+    node = node.parent
+    name_map[node.metadata.id] = node.metadata.name
+  }
+
+  return name_map
 }
