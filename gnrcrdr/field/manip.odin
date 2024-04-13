@@ -15,8 +15,6 @@ initializeFieldValueArray :: proc(
 
   min_length := metadata.data_type.min_array_length.? or_else 1
 
-  log.debugf("Initializing %v (%v), length = %v", metadata.name, metadata.id, min_length)
-
   for i in 0 ..< min_length {
     default_value: fld.Value
 
@@ -24,8 +22,10 @@ initializeFieldValueArray :: proc(
 
     switch data_type {
     case .Set:
-      append(field_value_array, make(map[int][dynamic]fld.Value))
-      initialize_set_map(&field_value_array[len(field_value_array) - 1].(map[int][dynamic]fld.Value), node)
+      //new_map := make(map[int][dynamic]fld.Value)
+      new_map : map[int][dynamic]fld.Value
+      initialize_set_map(&new_map, node)
+      append(field_value_array, new_map)
     case .Int8:
       v, ok := strconv.parse_int(metadata.data_type.default_value.? or_else "0")
       if ok do default_value = i8(v)
@@ -74,8 +74,7 @@ initializeFieldValueArray :: proc(
 
     if data_type != .Set {
       len := metadata.data_type.min_array_length.? or_else 1
-      log.debugf("Initializing %v (%v) with default value %v, len = %v", metadata.name, metadata.id, default_value, len)
-      for j in 0 ..<len  do append(field_value_array, default_value)
+      for j in 0 ..<len do append(field_value_array, default_value)
     }
   }
 }
@@ -113,8 +112,6 @@ get_field :: proc(parent_field: ^[dynamic]fld.Value, path_pair: ^Path_Pair) -> ^
 
   field_value_map := &parent_field[0].(map[int][dynamic]fld.Value)
 
-  log.debugf("get_field field_value_map len = %v", len(field_value_map))
-
   field, ok := &field_value_map[path_pair.id]
 
   if !ok {
@@ -129,7 +126,7 @@ get_field :: proc(parent_field: ^[dynamic]fld.Value, path_pair: ^Path_Pair) -> ^
 }
 
 remove_at :: proc(i: int, field: ^[dynamic]fld.Value) {
-  // TODO: need to free memory here
+  destroy_value_in_field(field[i])
   ordered_remove(field, i)
 }
 
@@ -142,24 +139,29 @@ append_set_instance :: proc(node: ^mdat.Field_Metadata_Tree_Node, parent_field: 
 
 destroy_field :: proc(field: [dynamic]fld.Value) {
   for value in field {
-    set_map, is_set_map := value.(map[int][dynamic]fld.Value)
-    blob, is_blob := value.([]byte)
-    str, is_str := value.(string)
-
-    if is_set_map {
-      for _, fld_value in set_map {
-        destroy_field(fld_value)
-      }
-      delete(set_map)
-    }
-    else if is_blob {
-      delete(blob)
-    }
-    else if is_str {
-      delete(str)
-    }
+    destroy_value_in_field(value)
   }
   delete(field)
+}
+
+@(private = "file")
+destroy_value_in_field :: proc(value: fld.Value) {
+  set_map, is_set_map := value.(map[int][dynamic]fld.Value)
+  blob, is_blob := value.([]byte)
+  str, is_str := value.(string)
+
+  if is_set_map {
+    for _, fld_value in set_map {
+      destroy_field(fld_value)
+    }
+    delete(set_map)
+  }
+  else if is_blob {
+    delete(blob)
+  }
+  else if is_str {
+    delete(str)
+  }
 }
 
 set_value :: proc(node: ^mdat.Field_Metadata_Tree_Node, parent_field: ^[dynamic]fld.Value, path_pair: ^Path_Pair, index: int, value: fld.Value) {
@@ -169,8 +171,9 @@ set_value :: proc(node: ^mdat.Field_Metadata_Tree_Node, parent_field: ^[dynamic]
 
 initialize_set_map :: proc(set_map: ^map[int][dynamic]fld.Value, node: ^mdat.Field_Metadata_Tree_Node) {
   for child in node.children {
-    set_map[child.metadata.id] = make([dynamic]fld.Value)
-    initializeFieldValueArray(&set_map[child.metadata.id], child)
+    new_arr: [dynamic]fld.Value
+    initializeFieldValueArray(&new_arr, child)
+    set_map[child.metadata.id] = new_arr
   }
 }
 

@@ -100,7 +100,7 @@ get_string :: proc(buffer: ^Byte_Buffer, len: int) -> string {
   }
 
   value := strings.to_string(builder)
-  log.debugf("Read string from buffer = %v", value)
+  //log.debugf("Read string from buffer = %v", value)
   return strings.clone(value)
 }
 
