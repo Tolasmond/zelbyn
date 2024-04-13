@@ -150,7 +150,7 @@ read_field :: proc(parent_field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadat
       value = fld.Value(dat.get_f64(buf))
     case .String:
       len, _ := node.metadata.data_type.max_buffer_length.?
-      log.debugf("String length = %v", len)
+      //log.debugf("String length = %v", len)
       value = fld.Value(dat.get_string(buf, len))
     case .Blob:
       buffer_length := fld.get_buffer_length(node, metadata, buf)
