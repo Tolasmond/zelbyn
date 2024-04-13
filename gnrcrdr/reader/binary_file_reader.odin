@@ -11,6 +11,7 @@ read :: proc(name: string, file_format: ^mdata.File_Format, root_field_value_arr
   dat.read_file_into_buffer(&buf, name)
   path: fld.Path
   read_set(root_field_value_array, &file_format.root_metadata_node, &file_format.metadata, &buf)
+  delete(buf.data.buf)
 }
 
 @(private = "file")
@@ -154,8 +155,9 @@ read_field :: proc(parent_field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadat
     case .Blob:
       buffer_length := fld.get_buffer_length(node, metadata, buf)
       dest := make([]byte, buffer_length)
+      defer delete(dest)
       dat.get_bytes(buf, &dest)
-      value = fld.Value(&dest)
+      value = fld.Value(dest)
     }
 
     log.debugf("0x%08X Read %v = %v, Field = %v", pos, data_type, value, node.metadata.name)

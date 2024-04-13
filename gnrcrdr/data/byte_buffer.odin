@@ -115,5 +115,6 @@ read_file_into_buffer :: proc(buffer: ^Byte_Buffer, name: string) {
   buf, ok := os.read_entire_file_from_filename(name)
   if (ok) {
     bytes.buffer_init(&buffer.data, buf)
+    delete(buf)
   }
 }
