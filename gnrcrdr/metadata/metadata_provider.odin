@@ -10,7 +10,7 @@ Field_Metadata_Provider :: struct {
   marker_offset_map: map[int][dynamic]^dat.Marker_Offset_Record,
   packed_records: [dynamic]^dat.Packed_Record,
   format_record: dat.Format_Record,
-  parent_map: map[int][dynamic]^dat.Parent_Record
+  parent_map: map[int][dynamic]^dat.Parent_Record,
 }
 
 destroy_metadata_provider :: proc(metadata: ^Field_Metadata_Provider) {

@@ -2,7 +2,6 @@ package sqlite
 
 import "core:log"
 import "core:mem"
-import "core:strings"
 import dat "../data"
 import sql "../../sqlite3"
 
@@ -11,13 +10,13 @@ read_packed :: proc(db: ^sql.sqlite3, packed_records: ^[dynamic]^dat.Packed_Reco
 
   stmt: ^sql.Stmt
   query_text := "SELECT * FROM Packed"
-	query_data := mem.raw_data(query_text);
-  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil);
+	query_data := mem.raw_data(query_text)
+  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
 
 	for {
 		result = sql.step(stmt)
 
-		if result != .ROW do break;
+		if result != .ROW do break
 
 		record := new(dat.Packed_Record)
 
@@ -36,5 +35,5 @@ PackedColumn :: enum i32 {
 	id,
 	field_id,
 	low_bit,
-	high_bit
+	high_bit,
 }

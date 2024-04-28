@@ -13,5 +13,5 @@ Data_Type :: enum {
 	Float32,
 	Float64,
 	String,
-	Blob
+	Blob,
 }

@@ -12,13 +12,13 @@ read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_
 
   stmt: ^sql.Stmt
   query_text := "SELECT * FROM Field"
-	query_data := mem.raw_data(query_text);
-  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil);
+	query_data := mem.raw_data(query_text)
+  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
 
 	for {
 		result = sql.step(stmt)
 
-		if result != .ROW do break;
+		if result != .ROW do break
 
 		record: dat.Field_Record
 
@@ -30,8 +30,8 @@ read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_
   	record.data_type_id = sql.column_int64(stmt, i32(Field_Column.data_type_id))
 
   	field_metadata := new(mdat.Field_Metadata)
-  	field_metadata.id = record.id;
-  	field_metadata.name = record.name;
+  	field_metadata.id = record.id
+  	field_metadata.name = record.name
   	field_metadata.data_type = data_type_map[record.data_type_id]
 
     start_index := -1
@@ -58,5 +58,5 @@ read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_
 Field_Column :: enum i32 {
 	id,
 	name,
-	data_type_id
+	data_type_id,
 }

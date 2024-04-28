@@ -13,5 +13,5 @@ Value :: union {
 	f64,
 	string,
 	[]byte,
-	map[int][dynamic]Value
+	map[int][dynamic]Value,
 }
