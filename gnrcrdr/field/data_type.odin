@@ -16,7 +16,7 @@ Field_Data_Type :: struct {
   max_array_length: Maybe(i32),
   grow_as_needed: Maybe(bool),
   pattern: Maybe(string),
-  comparison_tolerance: Maybe(f64)
+  comparison_tolerance: Maybe(f64),
 }
 
 description :: proc(field_data_type: ^Field_Data_Type) -> string {

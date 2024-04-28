@@ -201,7 +201,6 @@ get_buffer_length :: proc(
         value_rel_pos, value_rel_pos_exists := length_rec.value_relative_offset_from_field.?
         value_mask, value_mask_exists := length_rec.value_mask.?
         value_shift, value_shift_exists := length_rec.value_shift.?
-        value_expr, value_expr_exists := length_rec.value_expression.?
 
         if value_abs_pos_exists {
           pos := buf.data.off

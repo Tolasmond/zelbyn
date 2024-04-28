@@ -5,7 +5,7 @@ import "core:strings"
 
 Path_Pair :: struct {
   id: int,
-  index: int
+  index: int,
 }
 
 Path :: struct {

@@ -16,7 +16,7 @@ read_format :: proc(db: ^sql.sqlite3, record: ^dat.Format_Record) -> (result: sq
 
 	result = sql.step(stmt)
 
-  if result != .ROW do return;
+  if result != .ROW do return
 
 	record.id = sql.column_int64(stmt, i32(Format_Column.id))
 

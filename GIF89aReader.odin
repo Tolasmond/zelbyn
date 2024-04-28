@@ -46,7 +46,7 @@ reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> bool {
     fmt.printfln("%v leaks found!", len(a.allocation_map))
   }
 
-  for key, value in a.allocation_map {
+  for _, value in a.allocation_map {
     fmt.printfln("%v: Leaked %v bytes", value.location, value.size)
     leaks = true
   }

@@ -4,7 +4,6 @@ import sql "../../sqlite3"
 import dat "../data"
 import mdata "../metadata"
 import "core:log"
-import "core:mem"
 import "core:strings"
 
 read_file_format :: proc(dbFilePath: string, format_id: int, file_format: ^mdata.File_Format) {
@@ -58,8 +57,6 @@ read_children :: proc(
 
 	parent_map := &metadata.parent_map
 	field_metadata_map := &metadata.field_metadata_map
-
-	key_exists := parent_node.metadata.id in parent_map
 
 	for childRecord in parent_map[parent_node.metadata.id] {
 

@@ -11,13 +11,13 @@ read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^dat.Length_Recor
 
   stmt: ^sql.Stmt
   query_text := "SELECT * FROM Length"
-	query_data := mem.raw_data(query_text);
-  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil);
+	query_data := mem.raw_data(query_text)
+  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
 
 	for {
 		result = sql.step(stmt)
 
-		if result != .ROW do break;
+		if result != .ROW do break
 
 		record := new(dat.Length_Record)
 
@@ -90,5 +90,5 @@ Length_Column :: enum i32 {
 	value_mask,
 	value_shift,
 	flag_expression,
-	value_expression
+	value_expression,
 }

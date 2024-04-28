@@ -1,7 +1,6 @@
 package sqlite3
 
 import "core:c"
-import "core:os"
 
 foreign import sqlite { "sqlite3.lib" }
 

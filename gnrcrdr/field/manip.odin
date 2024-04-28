@@ -3,7 +3,6 @@ package field
 import dat "../data"
 import fld "../field"
 import mdat "../metadata"
-import "core:fmt"
 import "core:log"
 import "core:strconv"
 
@@ -15,7 +14,7 @@ initializeFieldValueArray :: proc(
 
   min_length := metadata.data_type.min_array_length.? or_else 1
 
-  for i in 0 ..< min_length {
+  for _ in 0 ..< min_length {
     default_value: fld.Value
 
     data_type := dat.Data_Type(metadata.data_type.type)
@@ -74,7 +73,7 @@ initializeFieldValueArray :: proc(
 
     if data_type != .Set {
       len := metadata.data_type.min_array_length.? or_else 1
-      for j in 0 ..<len do append(field_value_array, default_value)
+      for _ in 0 ..<len do append(field_value_array, default_value)
     }
   }
 }

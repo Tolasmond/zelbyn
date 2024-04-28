@@ -2,7 +2,6 @@ package sqlite
 
 import "core:log"
 import "core:mem"
-import "core:strings"
 import dat "../data"
 import sql "../../sqlite3"
 
@@ -11,13 +10,13 @@ read_marker_offset :: proc(db: ^sql.sqlite3, marker_offset_map: ^map[int][dynami
 
   stmt: ^sql.Stmt
   query_text := "SELECT * FROM MarkerOffset"
-	query_data := mem.raw_data(query_text);
-  result = sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil);
+	query_data := mem.raw_data(query_text)
+  result = sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
 
 	for {
 		result = sql.step(stmt)
 
-		if result != .ROW do break;
+		if result != .ROW do break
 
 		record := new(dat.Marker_Offset_Record)
 
@@ -40,5 +39,5 @@ Marker_Offset_Column :: enum i32 {
 	marker_id,
 	byte_offset,
 	data_type_id,
-	marker
+	marker,
 }

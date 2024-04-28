@@ -2,7 +2,6 @@ package sqlite
 
 import "core:log"
 import "core:mem"
-import "core:strings"
 import dat "../data"
 import sql "../../sqlite3"
 
@@ -11,13 +10,13 @@ read_set_helper :: proc(db: ^sql.sqlite3, set_helper_map: ^map[int]^dat.Set_Help
 
   stmt: ^sql.Stmt
   query_text := "SELECT * FROM SetHelper"
-	query_data := mem.raw_data(query_text);
-  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil);
+	query_data := mem.raw_data(query_text)
+  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
 
 	for {
 		result = sql.step(stmt)
 
-		if result != .ROW do break;
+		if result != .ROW do break
 
 		record := new(dat.Set_Helper_Record)
 
@@ -42,5 +41,5 @@ Set_Helper_Column :: enum i32 {
 	format_id,
 	field_id,
 	length_id,
-	marker_id
+	marker_id,
 }

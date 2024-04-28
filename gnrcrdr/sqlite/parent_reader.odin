@@ -5,7 +5,6 @@ import dat "../data"
 import "core:log"
 import "core:mem"
 import "core:slice"
-import "core:strings"
 
 read_parent :: proc(
 	db: ^sql.sqlite3,
@@ -39,7 +38,7 @@ read_parent :: proc(
 		append(&parent_map[record.parent_id], record)
 	}
 
-	for id, parent_records in parent_map {
+	for _, parent_records in parent_map {
 		slice.sort_by(parent_records[:], dat.sort_parent_records_by_child_index)
 	}
 
