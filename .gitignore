@@ -4,3 +4,5 @@ gnrcrdr.raddbgi
 core/
 gnrcrdr.bin
 *.sublime-workspace
+tests.bin
+tests.exe
