@@ -1,12 +1,10 @@
 package sqlite
 
-import "core:log"
 import "core:mem"
 import dat "../data"
 import sql "../../sqlite3"
 
 read_marker_offset :: proc(db: ^sql.sqlite3, marker_offset_map: ^map[int][dynamic]^dat.Marker_Offset_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
-	log.debug("Reading MarkerOffset table")
 	marker_offset_map^ = make(map[int][dynamic]^dat.Marker_Offset_Record, allocator)
 
 	stmt: ^sql.Stmt

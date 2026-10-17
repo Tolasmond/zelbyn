@@ -27,7 +27,7 @@ Dump_Kind :: enum {
 }
 
 main :: proc() {
-	context.logger = log.create_file_logger(os.stderr)
+	context.logger = log.create_file_logger(os.stderr, lowest = .Warning)
 
 	opts, dump, usage_exit, ok := parse_args(os.args)
 	if !ok do os.exit(usage_exit)
@@ -97,8 +97,6 @@ run :: proc(db_path: string, format_id: int, file_path: string, dump: Dump_Kind)
 	file_format: mdat.File_Format
 	defer mdat.destroy_file_format(&file_format)
 
-	log.debugf("reading %v", db_path)
-
 	load_err := sql.read_file_format(db_path, format_id, &file_format)
 	defer sql.destroy_load_error(&load_err)
 
@@ -113,8 +111,6 @@ run :: proc(db_path: string, format_id: int, file_path: string, dump: Dump_Kind)
 			load_err.message)
 		return 1
 	}
-
-	log.debug("populating field value array")
 
 	tree: fld.Value_Tree
 	// the tree may be partially filled after a parse error; free it either way

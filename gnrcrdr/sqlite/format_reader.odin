@@ -2,13 +2,10 @@ package sqlite
 
 import sql "../../sqlite3"
 import dat "../data"
-import "core:log"
 import "core:mem"
 import "core:strings"
 
 read_format :: proc(db: ^sql.sqlite3, format_id: int, record: ^dat.Format_Record, allocator: mem.Allocator) -> (found: bool, result: sql.ResultCode) {
-	log.debug("Reading Format table")
-
 	stmt: ^sql.Stmt
 	rc := prepare(db, "SELECT * FROM Format WHERE Id = ?1", &stmt)
 	if rc != .OK do return false, rc

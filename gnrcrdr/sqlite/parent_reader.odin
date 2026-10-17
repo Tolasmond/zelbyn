@@ -2,7 +2,6 @@ package sqlite
 
 import sql "../../sqlite3"
 import dat "../data"
-import "core:log"
 import "core:mem"
 import "core:slice"
 
@@ -14,7 +13,6 @@ read_parent :: proc(
 ) -> (
 	result: sql.ResultCode,
 ) {
-	log.debug("Reading Parent table")
 	parent_map^ = make(map[int][dynamic]^dat.Parent_Record, allocator)
 
 	stmt: ^sql.Stmt

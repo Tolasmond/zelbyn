@@ -1,13 +1,11 @@
 package sqlite
 
-import "core:log"
 import "core:mem"
 import "core:strings"
 import dat "../data"
 import sql "../../sqlite3"
 
 read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^dat.Data_Type_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
-	log.debug("Reading DataType table")
 	data_type_map^ = make(map[int]^dat.Data_Type_Record, allocator)
 
 	stmt: ^sql.Stmt
