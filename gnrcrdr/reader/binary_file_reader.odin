@@ -4,36 +4,41 @@ import dat "../data"
 import fld "../field"
 import mdata "../metadata"
 import "core:log"
+import "core:mem/virtual"
 import "core:os"
 import "core:slice"
 
-read :: proc(name: string, format: ^mdata.File_Format, root_field: ^[dynamic]fld.Value) -> (consumed: int, err: Parse_Error) {
+read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
 	data, os_err := os.read_entire_file(name, context.allocator)
 	if os_err != nil {
 		return 0, Parse_Error{kind = .File_Read_Failed, os_error = os_err}
 	}
 	defer delete(data)
-	return read_from_bytes(data, format, root_field)
+	return read_from_bytes(data, format, tree)
 }
 
-// Decodes data into root_field. Nothing in the value tree references data
-// afterwards; strings and blobs are copied.
-read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, root_field: ^[dynamic]fld.Value) -> (consumed: int, err: Parse_Error) {
-	d := Decoder{metadata = &format.metadata}
+// Decodes data into tree, which must be zero or destroyed. Strings and blobs are copied into the tree's arena, so the tree references neither data nor the schema.
+read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
+	assert(tree.arena.curr_block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
+	allocator := virtual.arena_allocator(&tree.arena)
+	tree.root = make([dynamic]fld.Value, allocator)
+	fld.initializeFieldValueArray(&tree.root, &format.root_metadata_node, allocator)
+
+	d := Decoder{metadata = &format.metadata, allocator = allocator}
+	d.path = make([dynamic]Path_Segment, allocator)
 	dat.reader_init(&d.r, data, .Little)
 
-	rerr := read_set(&d, root_field, &format.root_metadata_node)
+	rerr := read_set(&d, &tree.root, &format.root_metadata_node)
 	if rerr != .None && d.err.kind == .None {
 		fail(&d, rerr, d.r.pos)
 	}
 
-	delete(d.path)
 	return d.r.pos, d.err
 }
 
 @(private = "file")
 read_set :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
-	count, err := fld.adjust_count(field, node, d.metadata, &d.r)
+	count, err := fld.adjust_count(field, node, d.metadata, &d.r, d.allocator)
 	if err != .None do return fail(d, err, d.r.pos)
 
 	for set_index in 0 ..< count {
@@ -85,9 +90,9 @@ read_growing_set :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mda
 			return fail(d, e, d.r.pos)
 		}
 
-		append(set_field, make(map[int][dynamic]fld.Value))
+		append(set_field, make(map[int][dynamic]fld.Value, d.allocator))
 		set_index := len(set_field) - 1
-		fld.initialize_set_map(&set_field[set_index].(map[int][dynamic]fld.Value), node)
+		fld.initialize_set_map(&set_field[set_index].(map[int][dynamic]fld.Value), node, d.allocator)
 
 		start := d.r.pos
 		append(&d.path, Path_Segment{node.metadata.name, set_index})
@@ -167,7 +172,7 @@ read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Fie
 		case .String:
 			n, ok := node.metadata.data_type.max_buffer_length.?
 			if !ok do return fail(d, .Invalid_Schema, start)
-			value, err = to_value(dat.read_string(&d.r, n))
+			value, err = to_value(dat.read_string(&d.r, n, d.allocator))
 		case .Blob:
 			buffer_length: int
 			buffer_length, err = fld.get_buffer_length(node, d.metadata, &d.r)
@@ -175,7 +180,7 @@ read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Fie
 			src: []byte
 			src, err = dat.read_bytes(&d.r, buffer_length)
 			if err != .None do return fail(d, err, start)
-			value = fld.Value(slice.clone(src))
+			value = fld.Value(slice.clone(src, d.allocator))
 			log.debugf(
 				"0x%08X Read %v = byte[%v], Field = %v",
 				start,

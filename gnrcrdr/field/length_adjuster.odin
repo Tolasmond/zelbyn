@@ -4,12 +4,14 @@ import dat  "../data"
 import eval "../evaluate"
 import fld  "../field"
 import mdat "../metadata"
+import "core:mem"
 
 adjust_count :: proc(
 	field: ^[dynamic]fld.Value,
 	node: ^mdat.Field_Metadata_Tree_Node,
 	metadata: ^mdat.Field_Metadata_Provider,
-	r: ^dat.Reader) -> (count: int, err: dat.Read_Error) {
+	r: ^dat.Reader,
+	allocator: mem.Allocator) -> (count: int, err: dat.Read_Error) {
 
 	set_helper_rec := metadata.set_helper_map[node.metadata.id]
 
@@ -51,16 +53,16 @@ adjust_count :: proc(
 
 		count = marker_found ? 1 : 0
 
-		set_count(count, node, field)
+		set_count(count, node, field, allocator)
 	} else if length_id_exists {
 
-		count = eval_length_rule(metadata.set_length_map[length_id], metadata, r, true) or_return
+		count = eval_length_rule(metadata.set_length_map[length_id], metadata, r, true, allocator) or_return
 
 		if e := check_count(count, node.metadata.data_type.max_array_length); e != .None {
 			return 0, e
 		}
 
-		set_count(count, node, field)
+		set_count(count, node, field, allocator)
 	} else {
 		count = len(field)
 	}
@@ -83,7 +85,9 @@ get_buffer_length :: proc(
 
 		if set_helper_rec != nil {
 			if length_id, length_id_exists := set_helper_rec.length_id.?; length_id_exists {
-				length = eval_length_rule(metadata.set_length_map[length_id], metadata, r, false) or_return
+				// without the expression nothing is allocated; the panic allocator
+				// makes any future allocation here fail loudly
+				length = eval_length_rule(metadata.set_length_map[length_id], metadata, r, false, mem.panic_allocator()) or_return
 			}
 		}
 	}
@@ -121,7 +125,8 @@ eval_length_rule :: proc(
 	length_rec: ^dat.Length_Record,
 	metadata: ^mdat.Field_Metadata_Provider,
 	r: ^dat.Reader,
-	apply_expression: bool) -> (value: int, err: dat.Read_Error) {
+	apply_expression: bool,
+	allocator: mem.Allocator) -> (value: int, err: dat.Read_Error) {
 
 	if length_rec == nil do return 0, .Invalid_Schema
 
@@ -168,7 +173,7 @@ eval_length_rule :: proc(
 
 	if apply_expression {
 		if value_expr, ok := length_rec.value_expression.?; ok {
-			param_map := make(map[string]int)
+			param_map := make(map[string]int, allocator)
 			defer delete(param_map)
 			param_map["x"] = value
 			value = eval.evaluate(value_expr, &param_map)

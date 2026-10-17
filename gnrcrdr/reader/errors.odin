@@ -2,6 +2,7 @@ package reader
 
 import dat "../data"
 import mdata "../metadata"
+import "core:mem"
 import "core:os"
 import "core:strings"
 
@@ -19,10 +20,11 @@ Path_Segment :: struct {
 
 @(private)
 Decoder :: struct {
-	r:        dat.Reader,
-	metadata: ^mdata.Field_Metadata_Provider,
-	path:     [dynamic]Path_Segment,
-	err:      Parse_Error,
+	r:         dat.Reader,
+	metadata:  ^mdata.Field_Metadata_Provider,
+	allocator: mem.Allocator, // the value tree's arena; also holds path
+	path:      [dynamic]Path_Segment,
+	err:       Parse_Error,
 }
 
 // Records the first error with the current path; always returns kind.
