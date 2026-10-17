@@ -15,16 +15,16 @@ destroy_metadata_node :: proc(node: ^Field_Metadata_Tree_Node) {
 }
 
 create_path_name_map :: proc(node: ^Field_Metadata_Tree_Node) -> map[int]string {
-  name_map := make(map[int]string)
+	name_map := make(map[int]string)
 
-  name_map[node.metadata.id] = node.metadata.name
+	name_map[node.metadata.id] = node.metadata.name
 
-  node := node
+	node := node
 
-  for node.parent != nil {
-    node = node.parent
-    name_map[node.metadata.id] = node.metadata.name
-  }
+	for node.parent != nil {
+		node = node.parent
+		name_map[node.metadata.id] = node.metadata.name
+	}
 
-  return name_map
+	return name_map
 }
