@@ -33,7 +33,8 @@ read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, root_field: ^[
 
 @(private = "file")
 read_set :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
-	count := fld.adjust_count(field, node, d.metadata, &d.r)
+	count, err := fld.adjust_count(field, node, d.metadata, &d.r)
+	if err != .None do return fail(d, err, d.r.pos)
 
 	for set_index in 0 ..< count {
 		read_set_instance(d, field, set_index, node) or_return
@@ -174,7 +175,9 @@ read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Fie
 			if !ok do return fail(d, .Invalid_Schema, start)
 			value, err = to_value(dat.read_string(&d.r, n))
 		case .Blob:
-			buffer_length := fld.get_buffer_length(node, d.metadata, &d.r)
+			buffer_length: int
+			buffer_length, err = fld.get_buffer_length(node, d.metadata, &d.r)
+			if err != .None do return fail(d, err, start)
 			src: []byte
 			src, err = dat.read_bytes(&d.r, buffer_length)
 			if err != .None do return fail(d, err, start)
