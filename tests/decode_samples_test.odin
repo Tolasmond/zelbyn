@@ -37,13 +37,14 @@ check_sample :: proc(t: ^testing.T, s: Sample) {
 		testing.expectf(t, int(info.size) == s.file_size, "%s: file size %v, want %v", s.path, info.size, s.file_size)
 	}
 
-	d := decode_file(&ff, s.path)
+	d: Decoded
+	decode_file(&ff, s.path, &d)
 	defer destroy_decoded(&d)
 
 	if !testing.expectf(t, d.err.kind == .None, "%s: %v at 0x%08X in %s", s.path, d.err.kind, d.err.offset, d.err.path) do return
 	testing.expectf(t, d.consumed == s.consumed, "%s: consumed %v, want %v", s.path, d.consumed, s.consumed)
 
-	g := set_of(d.root[0])
+	g := set_of(d.tree.root[0])
 	lsd := set_of(g[5003][0])
 	testing.expectf(t, lsd[5004][0].(u16) == s.width, "%s: width %v, want %v", s.path, lsd[5004][0], s.width)
 	testing.expectf(t, lsd[5005][0].(u16) == s.height, "%s: height %v, want %v", s.path, lsd[5005][0], s.height)
@@ -65,11 +66,12 @@ decode_855 :: proc(t: ^testing.T) {
 	defer mdat.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
-	d := decode_file(&ff, SAMPLE_855.path)
+	d: Decoded
+	decode_file(&ff, SAMPLE_855.path, &d)
 	defer destroy_decoded(&d)
 	if d.err.kind != .None do return
 
-	g := set_of(d.root[0])
+	g := set_of(d.tree.root[0])
 	testing.expect_value(t, g[5001][0].(string), "GIF")
 	testing.expect_value(t, g[5002][0].(string), "89a")
 

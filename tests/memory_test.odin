@@ -1,0 +1,198 @@
+package tests
+
+import dat "../gnrcrdr/data"
+import fld "../gnrcrdr/field"
+import mdat "../gnrcrdr/metadata"
+import "core:log"
+import "core:mem"
+import "core:os"
+import "core:testing"
+import "core:time"
+
+@(test)
+decode_uses_only_arena :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	if !load_gif(t, &ff) do return
+
+	for s in ([]Sample{SAMPLE_855, SAMPLE_CG89A}) {
+		data, read_err := os.read_entire_file(s.path, context.allocator)
+		if !testing.expectf(t, read_err == nil, "reading %s: %v", s.path, read_err) do continue
+		defer delete(data)
+
+		d: Decoded
+		defer destroy_decoded(&d)
+
+		track: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&track, context.allocator)
+		defer mem.tracking_allocator_destroy(&track)
+		{
+			context.allocator = mem.tracking_allocator(&track)
+			context.logger = log.nil_logger()
+			decode_bytes(&ff, data, &d)
+		}
+
+		testing.expectf(t, d.err.kind == .None, "%s: %v at 0x%08X in %s", s.path, d.err.kind, d.err.offset, d.err.path)
+		testing.expectf(t, d.consumed == s.consumed, "%s: consumed %v, want %v", s.path, d.consumed, s.consumed)
+		testing.expectf(t, track.total_allocation_count == 0, "%s: %v heap allocations, want 0", s.path, track.total_allocation_count)
+		testing.expectf(t, d.tree.arena.total_used > 0, "%s: arena unused", s.path)
+	}
+}
+
+@(test)
+read_allocates_only_file_buffer :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	if !load_gif(t, &ff) do return
+
+	d: Decoded
+	defer destroy_decoded(&d)
+
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	{
+		context.allocator = mem.tracking_allocator(&track)
+		context.logger = log.nil_logger()
+		decode_file(&ff, SAMPLE_855.path, &d)
+	}
+
+	testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path)
+	testing.expect_value(t, len(track.allocation_map), 0)
+	testing.expect_value(t, track.current_memory_allocated, 0)
+	testing.expect_value(t, track.total_allocation_count, 1) // the file buffer, already freed
+}
+
+@(test)
+decode_error_allocates_only_path :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	if !load_gif(t, &ff) do return
+
+	text := "hello world, not a gif at all"
+
+	// recorded inside the block, asserted after it: the tracker frees the path
+	kind: dat.Read_Error
+	path_ok: bool
+	live_with_error: int
+	missing_kind: dat.Read_Error
+
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	{
+		context.allocator = mem.tracking_allocator(&track)
+		context.logger = log.nil_logger()
+
+		d: Decoded
+		decode_bytes(&ff, transmute([]byte)text, &d)
+		kind = d.err.kind
+		path_ok = d.err.path == "GIF89a[0].Blocks[0]"
+		live_with_error = len(track.allocation_map)
+		destroy_decoded(&d)
+
+		md: Decoded
+		decode_file(&ff, "data/does_not_exist.gif", &md)
+		missing_kind = md.err.kind
+		destroy_decoded(&md)
+	}
+
+	testing.expect_value(t, kind, .No_Progress)
+	testing.expect(t, path_ok, "path should be \"GIF89a[0].Blocks[0]\"")
+	testing.expect_value(t, live_with_error, 1) // only Parse_Error.path
+	testing.expect_value(t, missing_kind, .File_Read_Failed)
+	testing.expect_value(t, len(track.allocation_map), 0)
+}
+
+@(test)
+value_tree_outlives_schema_and_input :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdat.File_Format
+	if !load_gif(t, &ff) {
+		mdat.destroy_file_format(&ff)
+		return
+	}
+
+	data := with_header({0x21, 0xFE, 0x03, 'a', 'b', 'c', 0x00, 0x3B})
+
+	d: Decoded
+	defer destroy_decoded(&d)
+
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	{
+		context.allocator = mem.tracking_allocator(&track)
+		context.logger = log.nil_logger()
+		decode_bytes(&ff, data[:], &d)
+	}
+
+	// clobber and free the input and the schema before looking at the tree
+	for &b in data do b = 0xAA
+	delete(data)
+	mdat.destroy_file_format(&ff)
+
+	testing.expect_value(t, track.total_allocation_count, 0)
+	if !testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path) do return
+
+	g := set_of(d.tree.root[0])
+	testing.expect_value(t, g[5001][0].(string), "GIF")
+	testing.expect_value(t, g[5002][0].(string), "89a")
+
+	if !testing.expect_value(t, len(g[5017]), 1) do return
+	block := set_of(g[5017][0])
+	extension := set_of(block[5018][0])
+	comment := set_of(extension[5030][0])
+	comment_data := set_of(comment[5032][0])
+	blob := comment_data[5052][0].([]byte)
+	testing.expect_value(t, string(blob), "abc")
+}
+
+@(test)
+value_tree_reuse_after_destroy :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	if !load_gif(t, &ff) do return
+
+	data := with_header({0x3B})
+	defer delete(data)
+
+	d: Decoded
+	defer destroy_decoded(&d)
+
+	first_kind, second_kind: dat.Read_Error
+	reset_ok: bool
+	second_consumed: int
+
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	{
+		context.allocator = mem.tracking_allocator(&track)
+		context.logger = log.nil_logger()
+
+		unused: fld.Value_Tree
+		fld.destroy_value_tree(&unused)
+
+		decode_bytes(&ff, data[:], &d)
+		first_kind = d.err.kind
+
+		fld.destroy_value_tree(&d.tree)
+		fld.destroy_value_tree(&d.tree)
+		reset_ok = d.tree.root == nil && d.tree.arena.curr_block == nil
+
+		decode_bytes(&ff, data[:], &d)
+		second_kind = d.err.kind
+		second_consumed = d.consumed
+	}
+
+	testing.expect_value(t, track.total_allocation_count, 0)
+	testing.expect_value(t, first_kind, .None)
+	testing.expect(t, reset_ok, "destroy_value_tree did not reset the tree")
+	testing.expect_value(t, second_kind, .None)
+	testing.expect_value(t, second_consumed, 14)
+}

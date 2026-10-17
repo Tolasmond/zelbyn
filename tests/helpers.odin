@@ -16,26 +16,23 @@ load_gif :: proc(t: ^testing.T, ff: ^mdat.File_Format) -> bool {
 }
 
 Decoded :: struct {
-	root:     [dynamic]fld.Value,
+	tree:     fld.Value_Tree,
 	consumed: int,
 	err:      rdr.Parse_Error,
 }
 
-decode_bytes :: proc(ff: ^mdat.File_Format, data: []byte) -> (d: Decoded) {
-	fld.initializeFieldValueArray(&d.root, &ff.root_metadata_node)
-	d.consumed, d.err = rdr.read_from_bytes(data, ff, &d.root)
-	return
+// d must be zero or destroyed. Decoded embeds an arena, so it is filled in
+// place and never returned by value (see §3.3).
+decode_bytes :: proc(ff: ^mdat.File_Format, data: []byte, d: ^Decoded) {
+	d.consumed, d.err = rdr.read_from_bytes(data, ff, &d.tree)
 }
 
-decode_file :: proc(ff: ^mdat.File_Format, path: string) -> (d: Decoded) {
-	fld.initializeFieldValueArray(&d.root, &ff.root_metadata_node)
-	d.consumed, d.err = rdr.read(path, ff, &d.root)
-	return
+decode_file :: proc(ff: ^mdat.File_Format, path: string, d: ^Decoded) {
+	d.consumed, d.err = rdr.read(path, ff, &d.tree)
 }
 
 destroy_decoded :: proc(d: ^Decoded) {
-	fld.destroy_field(d.root)
-	d.root = nil
+	fld.destroy_value_tree(&d.tree)
 	rdr.destroy_parse_error(&d.err)
 }
 

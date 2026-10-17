@@ -53,13 +53,11 @@ run :: proc() -> int {
 
 	log.debug("populating field value array")
 
-	root_field := make([dynamic]fld.Value)
-	// the value tree may be partially filled after a parse error; free it either way
-	defer fld.destroy_field(root_field)
+	tree: fld.Value_Tree
+	// the tree may be partially filled after a parse error; free it either way
+	defer fld.destroy_value_tree(&tree)
 
-	fld.initializeFieldValueArray(&root_field, &file_format.root_metadata_node)
-
-	_, parse_err := rdr.read(gifFilePath, &file_format, &root_field)
+	_, parse_err := rdr.read(gifFilePath, &file_format, &tree)
 	defer rdr.destroy_parse_error(&parse_err)
 
 	if parse_err.kind == .File_Read_Failed {

@@ -26,12 +26,13 @@ minimal_valid :: proc(t: ^testing.T) {
 	data := with_header({0x3B})
 	defer delete(data)
 
-	d := decode_bytes(&ff, data[:])
+	d: Decoded
+	decode_bytes(&ff, data[:], &d)
 	defer destroy_decoded(&d)
 
 	if !testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path) do return
 	testing.expect_value(t, d.consumed, 14)
-	g := set_of(d.root[0])
+	g := set_of(d.tree.root[0])
 	testing.expect_value(t, len(g[5017]), 0)
 	testing.expect_value(t, len(g[5013]), 0)
 	testing.expect_value(t, g[5068][0].(u8), 59)
@@ -49,13 +50,14 @@ comment_then_trailer_at_eof :: proc(t: ^testing.T) {
 	data := with_header({0x21, 0xFE, 0x03, 'a', 'b', 'c', 0x00, 0x3B})
 	defer delete(data)
 
-	d := decode_bytes(&ff, data[:])
+	d: Decoded
+	decode_bytes(&ff, data[:], &d)
 	defer destroy_decoded(&d)
 
 	if !testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path) do return
 	testing.expect_value(t, d.consumed, 21)
 
-	g := set_of(d.root[0])
+	g := set_of(d.tree.root[0])
 	if !testing.expect_value(t, len(g[5017]), 1) do return
 
 	block := set_of(g[5017][0])
@@ -73,7 +75,8 @@ empty_file :: proc(t: ^testing.T) {
 	defer mdat.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
-	d := decode_bytes(&ff, {})
+	d: Decoded
+	decode_bytes(&ff, {}, &d)
 	defer destroy_decoded(&d)
 
 	testing.expect_value(t, d.err.kind, .Unexpected_EOF)
@@ -92,7 +95,8 @@ header_only :: proc(t: ^testing.T) {
 	if !testing.expectf(t, read_err == nil, "reading %s: %v", SAMPLE_855.path, read_err) do return
 	defer delete(file)
 
-	d := decode_bytes(&ff, file[:13])
+	d: Decoded
+	decode_bytes(&ff, file[:13], &d)
 	defer destroy_decoded(&d)
 
 	testing.expect_value(t, d.err.kind, .Unexpected_EOF)
@@ -108,7 +112,8 @@ not_a_gif :: proc(t: ^testing.T) {
 	if !load_gif(t, &ff) do return
 
 	text := "hello world, not a gif at all"
-	d := decode_bytes(&ff, transmute([]byte)text)
+	d: Decoded
+	decode_bytes(&ff, transmute([]byte)text, &d)
 	defer destroy_decoded(&d)
 
 	testing.expect_value(t, len(text), 29)
@@ -129,7 +134,8 @@ marker_past_eof_is_absent :: proc(t: ^testing.T) {
 	data := with_header({0x21})
 	defer delete(data)
 
-	d := decode_bytes(&ff, data[:])
+	d: Decoded
+	decode_bytes(&ff, data[:], &d)
 	defer destroy_decoded(&d)
 
 	testing.expect_value(t, d.err.kind, .No_Progress)
@@ -147,7 +153,8 @@ blob_longer_than_file :: proc(t: ^testing.T) {
 	data := with_header({0x21, 0xFE, 0x10, 'a', 'b', 'c'})
 	defer delete(data)
 
-	d := decode_bytes(&ff, data[:])
+	d: Decoded
+	decode_bytes(&ff, data[:], &d)
 	defer destroy_decoded(&d)
 
 	testing.expect_value(t, d.err.kind, .Unexpected_EOF)
@@ -166,7 +173,8 @@ missing_terminator :: proc(t: ^testing.T) {
 	defer mdat.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
-	d := decode_bytes(&ff, HEADER)
+	d: Decoded
+	decode_bytes(&ff, HEADER, &d)
 	defer destroy_decoded(&d)
 
 	// the Blocks terminator peek hits EOF
@@ -182,7 +190,8 @@ missing_file :: proc(t: ^testing.T) {
 	defer mdat.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
-	d := decode_file(&ff, "data/does_not_exist.gif")
+	d: Decoded
+	decode_file(&ff, "data/does_not_exist.gif", &d)
 	defer destroy_decoded(&d)
 
 	testing.expect_value(t, d.err.kind, .File_Read_Failed)
@@ -199,7 +208,8 @@ sweep :: proc(t: ^testing.T, ff: ^mdat.File_Format, s: Sample, lengths: []int) {
 	defer delete(file)
 
 	for n in lengths {
-		d := decode_bytes(ff, file[:n])
+		d: Decoded
+		decode_bytes(ff, file[:n], &d)
 		if n < s.consumed {
 			testing.expectf(t, d.err.kind != .None, "%s[:%v]: decoded without error, consumed %v", s.path, n, d.consumed)
 		} else {
