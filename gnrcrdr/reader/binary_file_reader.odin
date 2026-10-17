@@ -150,25 +150,25 @@ read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Fie
 
 		switch data_type {
 		case .Int8:
-			value, err = to_value(dat.read_i8(&d.r))
+			value, err = to_value(dat.read(&d.r, i8))
 		case .UInt8:
-			value, err = to_value(dat.read_u8(&d.r))
+			value, err = to_value(dat.read(&d.r, u8))
 		case .Int16:
-			value, err = to_value(dat.read_i16(&d.r))
+			value, err = to_value(dat.read(&d.r, i16))
 		case .UInt16:
-			value, err = to_value(dat.read_u16(&d.r))
+			value, err = to_value(dat.read(&d.r, u16))
 		case .Int32:
-			value, err = to_value(dat.read_i32(&d.r))
+			value, err = to_value(dat.read(&d.r, i32))
 		case .UInt32:
-			value, err = to_value(dat.read_u32(&d.r))
+			value, err = to_value(dat.read(&d.r, u32))
 		case .Int64:
-			value, err = to_value(dat.read_i64(&d.r))
+			value, err = to_value(dat.read(&d.r, i64))
 		case .UInt64:
-			value, err = to_value(dat.read_u64(&d.r))
+			value, err = to_value(dat.read(&d.r, u64))
 		case .Float32:
-			value, err = to_value(dat.read_f32(&d.r))
+			value, err = to_value(dat.read(&d.r, f32))
 		case .Float64:
-			value, err = to_value(dat.read_f64(&d.r))
+			value, err = to_value(dat.read(&d.r, f64))
 		case .String:
 			n, ok := node.metadata.data_type.max_buffer_length.?
 			if !ok do return fail(d, .Invalid_Schema, start)
