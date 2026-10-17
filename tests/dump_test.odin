@@ -10,7 +10,6 @@ import "core:time"
 
 // Decodes path and dumps it into b as JSON (as_json) or text. Fails the
 // test and returns false on any error.
-@(private = "file")
 dump_sample :: proc(t: ^testing.T, path: string, as_json: bool, b: ^strings.Builder) -> bool {
 	ff: mdat.File_Format
 	defer mdat.destroy_file_format(&ff)
