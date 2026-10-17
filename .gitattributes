@@ -1,5 +1,6 @@
 # Normalise text files to LF in the repository and in checkouts.
 * text=auto eol=lf
 
-# Sample inputs and reference material are kept byte-for-byte.
+# Sample inputs, reference material and golden dumps are kept byte-for-byte.
 data/** -text
+tests/golden/** -text

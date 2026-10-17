@@ -75,3 +75,12 @@ odin test tests -o:speed -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_
 ```
 
 Debug builds (`odin build . -debug`) run under a tracking allocator and exit 1 if anything leaks or is freed twice.
+
+### Golden dumps
+
+`tests/golden/` holds the `--dump tree` and `--dump json` output of every sample in `data/`, and the tests compare each dump with it byte for byte. When a change to the decoder or the dump is meant to change the output, re-record the files and review the diff before committing it:
+
+```
+odin test tests -define:GOLDEN_RECORD=true
+git diff --stat tests/golden
+```
