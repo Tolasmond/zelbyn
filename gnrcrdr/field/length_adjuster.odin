@@ -9,7 +9,7 @@ adjust_count :: proc(
   field: ^[dynamic]fld.Value,
   node: ^mdat.Field_Metadata_Tree_Node,
   metadata: ^mdat.Field_Metadata_Provider,
-  buf: ^dat.Byte_Buffer) -> int {
+  r: ^dat.Reader) -> int {
   
   set_helper_rec := metadata.set_helper_map[node.metadata.id]
 
@@ -33,11 +33,8 @@ adjust_count :: proc(
 
     // peek ahead to see if marker(s) exist
     for marker_off_rec in marker_off_recs {
-      pos := buf.data.off
-      buf.data.off = buf.data.off + marker_off_rec.byte_offset
       marker_data_type_rec := metadata.data_type_map[marker_off_rec.data_type_id]
-      marker, _ := dat.get_integer(buf, dat.Data_Type(marker_data_type_rec.type))
-      buf.data.off = pos
+      marker, _ := dat.peek_integer_at(r, r.pos + marker_off_rec.byte_offset, dat.Data_Type(marker_data_type_rec.type))
       if marker == marker_off_rec.marker {
         continue
       }
@@ -62,16 +59,10 @@ adjust_count :: proc(
     flag_rel_pos, flag_rel_pos_exists := length_rec.flag_relative_offset_from_field.?
 
     if flag_abs_pos_exists {
-      pos := buf.data.off
-      buf.data.off = flag_abs_pos
-      flag_value, _ = dat.get_integer(buf, dat.Data_Type(length_data_type_rec.type))
-      buf.data.off = pos
+      flag_value, _ = dat.peek_integer_at(r, flag_abs_pos, dat.Data_Type(length_data_type_rec.type))
     }
     else if flag_rel_pos_exists {
-      pos := buf.data.off
-      buf.data.off = buf.data.off + flag_rel_pos
-      flag_value, _ = dat.get_integer(buf, dat.Data_Type(length_data_type_rec.type))
-      buf.data.off = pos
+      flag_value, _ = dat.peek_integer_at(r, r.pos + flag_rel_pos, dat.Data_Type(length_data_type_rec.type))
     }
 
     if flag_abs_pos_exists || flag_rel_pos_exists {
@@ -98,17 +89,11 @@ adjust_count :: proc(
       value_expr, value_expr_exists := length_rec.value_expression.?
 
       if value_abs_pos_exists {
-        pos := buf.data.off
-        buf.data.off = value_abs_pos
-        count, _ = dat.get_integer(buf, dat.Data_Type(length_data_type_rec.type))
-        buf.data.off = pos
+        count, _ = dat.peek_integer_at(r, value_abs_pos, dat.Data_Type(length_data_type_rec.type))
       }
 
       if value_rel_pos_exists {
-        pos := buf.data.off
-        buf.data.off = buf.data.off + value_rel_pos
-        count, _ = dat.get_integer(buf, dat.Data_Type(length_data_type_rec.type))
-        buf.data.off = pos
+        count, _ = dat.peek_integer_at(r, r.pos + value_rel_pos, dat.Data_Type(length_data_type_rec.type))
       }
 
       if value_mask_exists {
@@ -139,7 +124,7 @@ adjust_count :: proc(
 get_buffer_length :: proc(
   node: ^mdat.Field_Metadata_Tree_Node,
   metadata: ^mdat.Field_Metadata_Provider,
-  buf: ^dat.Byte_Buffer) -> int {
+  r: ^dat.Reader) -> int {
 
   data_type_rec := node.metadata.data_type
 
@@ -168,16 +153,10 @@ get_buffer_length :: proc(
         flag_rel_pos, flag_rel_pos_exists := length_rec.flag_relative_offset_from_field.?
 
         if flag_abs_pos_exists {
-          pos := buf.data.off
-          buf.data.off = flag_abs_pos
-          flag_value, _ = dat.get_integer(buf, dat.Data_Type(length_data_type_rec.type))
-          buf.data.off = pos
+          flag_value, _ = dat.peek_integer_at(r, flag_abs_pos, dat.Data_Type(length_data_type_rec.type))
         }
         else if flag_rel_pos_exists {
-          pos := buf.data.off
-          buf.data.off = buf.data.off + flag_rel_pos
-          flag_value, _ = dat.get_integer(buf, dat.Data_Type(length_data_type_rec.type))
-          buf.data.off = pos
+          flag_value, _ = dat.peek_integer_at(r, r.pos + flag_rel_pos, dat.Data_Type(length_data_type_rec.type))
         }
 
         if flag_abs_pos_exists || flag_rel_pos_exists {
@@ -203,17 +182,11 @@ get_buffer_length :: proc(
         value_shift, value_shift_exists := length_rec.value_shift.?
 
         if value_abs_pos_exists {
-          pos := buf.data.off
-          buf.data.off = value_abs_pos
-          buffer_length, _ = dat.get_integer(buf, dat.Data_Type(length_data_type_rec.type))
-          buf.data.off = pos
+          buffer_length, _ = dat.peek_integer_at(r, value_abs_pos, dat.Data_Type(length_data_type_rec.type))
         }
 
         if value_rel_pos_exists {
-          pos := buf.data.off
-          buf.data.off = buf.data.off + value_rel_pos
-          buffer_length, _ = dat.get_integer(buf, dat.Data_Type(length_data_type_rec.type))
-          buf.data.off = pos
+          buffer_length, _ = dat.peek_integer_at(r, r.pos + value_rel_pos, dat.Data_Type(length_data_type_rec.type))
         }
 
         if value_mask_exists {
