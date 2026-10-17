@@ -37,73 +37,66 @@ read_set :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Field_Met
 	if err != .None do return fail(d, err, d.r.pos)
 
 	for set_index in 0 ..< count {
+		// on error the segment is left pushed; fail has already copied the path
+		append(&d.path, Path_Segment{node.metadata.name, set_index})
 		read_set_instance(d, field, set_index, node) or_return
+		pop(&d.path)
 	}
 
 	return .None
 }
 
+// Reads instances of a grow-as-needed set until its continuator is absent or
+// its terminator is found. The terminator is required, the repeat count is
+// limited by MaxArrayLength, and every instance must consume input.
 @(private = "file")
 read_growing_set :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
 	metadata := d.metadata
 
-	set_helper_rec, set_helper_exists := metadata.set_helper_map[node.metadata.id]
+	set_helper_rec := metadata.set_helper_map[node.metadata.id]
+	if set_helper_rec == nil do return fail(d, .Invalid_Schema, d.r.pos)
 
-	if set_helper_exists {
-		length_id, length_id_exists := set_helper_rec.length_id.?
+	length_id, length_id_exists := set_helper_rec.length_id.?
+	if !length_id_exists do return fail(d, .Invalid_Schema, d.r.pos)
 
-		if length_id_exists {
-			length_rec, length_exists := metadata.set_length_map[length_id]
+	length_rec := metadata.set_length_map[length_id]
+	if length_rec == nil do return fail(d, .Invalid_Schema, d.r.pos)
 
-			if length_exists {
-				continuator, continuator_exists := length_rec.continuator.?
+	data_type_rec := metadata.data_type_map[length_rec.data_type_id]
+	if data_type_rec == nil do return fail(d, .Invalid_Schema, d.r.pos)
 
-				if continuator_exists {
-					set_index := 0
-					for {
-						continuator_data_type_rec := metadata.data_type_map[length_rec.data_type_id]
-						value, _ := dat.peek_integer_at(&d.r, d.r.pos, dat.Data_Type(continuator_data_type_rec.type))
-						if continuator != value {
-							return .None
-						}
+	data_type := dat.Data_Type(data_type_rec.type)
 
-						append(set_field, make(map[int][dynamic]fld.Value))
-						fld.initialize_set_map(
-							&set_field[len(set_field) - 1].(map[int][dynamic]fld.Value),
-							node,
-						)
+	continuator, continuator_exists := length_rec.continuator.?
+	terminator, terminator_exists := length_rec.terminator.?
+	if !continuator_exists && !terminator_exists do return fail(d, .Invalid_Schema, d.r.pos)
 
-						read_set_instance(d, set_field, set_index, node) or_return
-						set_index += 1
-					}
-				}
+	for {
+		value, peek_err := dat.peek_integer_at(&d.r, d.r.pos, data_type)
 
-				terminator, terminator_exists := length_rec.terminator.?
-
-				if terminator_exists {
-					set_index := 0
-					for {
-						terminator_data_type_rec := metadata.data_type_map[length_rec.data_type_id]
-						value, _ := dat.peek_integer_at(&d.r, d.r.pos, dat.Data_Type(terminator_data_type_rec.type))
-						if terminator == value {
-							return .None
-						}
-
-						append(set_field, make(map[int][dynamic]fld.Value))
-						fld.initialize_set_map(
-							&set_field[len(set_field) - 1].(map[int][dynamic]fld.Value),
-							node,
-						)
-
-						read_set_instance(d, set_field, set_index, node) or_return
-						set_index += 1
-					}
-				}
-			}
+		if continuator_exists {
+			if peek_err != .None || value != continuator do return .None
+		} else {
+			if peek_err != .None do return fail(d, .Unexpected_EOF, d.r.pos)
+			if value == terminator do return .None
 		}
-	}
 
-	return .None
+		if e := fld.check_count(len(set_field) + 1, node.metadata.data_type.max_array_length); e != .None {
+			return fail(d, e, d.r.pos)
+		}
+
+		append(set_field, make(map[int][dynamic]fld.Value))
+		set_index := len(set_field) - 1
+		fld.initialize_set_map(&set_field[set_index].(map[int][dynamic]fld.Value), node)
+
+		start := d.r.pos
+		append(&d.path, Path_Segment{node.metadata.name, set_index})
+		read_set_instance(d, set_field, set_index, node) or_return
+
+		if d.r.pos == start do return fail(d, .No_Progress, start)
+
+		pop(&d.path)
+	}
 }
 
 @(private = "file")
@@ -117,8 +110,7 @@ read_set_instance :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, set_index
 		len(set_field),
 	)
 
-	parent := set_field[set_index]
-	parent_map := parent.(map[int][dynamic]fld.Value)
+	parent_map := &set_field[set_index].(map[int][dynamic]fld.Value)
 
 	for child_node in node.children {
 		child_metadata := child_node.metadata
@@ -131,7 +123,7 @@ read_set_instance :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, set_index
 			}
 
 		} else {
-			read_field(d, &parent_map[child_metadata.id], child_node, nil) or_return
+			read_field(d, &parent_map[child_metadata.id], child_node) or_return
 		}
 	}
 
@@ -139,10 +131,12 @@ read_set_instance :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, set_index
 }
 
 @(private = "file")
-read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadata_Tree_Node, path_pair: ^fld.Path_Pair) -> dat.Read_Error {
-	count := fld.get_count(set_field, path_pair)
+read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
+	count := fld.get_count(set_field, nil)
 
 	for i in 0 ..< count {
+		append(&d.path, Path_Segment{node.metadata.name, i})
+
 		start := d.r.pos
 		value: fld.Value
 		err: dat.Read_Error
@@ -205,7 +199,9 @@ read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Fie
 			)
 		}
 
-		fld.set_value(node, set_field, path_pair, i, value)
+		fld.set_value(node, set_field, nil, i, value)
+
+		pop(&d.path)
 	}
 
 	return .None
