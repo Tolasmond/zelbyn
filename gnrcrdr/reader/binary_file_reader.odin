@@ -8,6 +8,7 @@ import "core:mem/virtual"
 import "core:os"
 import "core:slice"
 
+@(require_results)
 read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
 	data, os_err := os.read_entire_file(name, context.allocator)
 	if os_err != nil {
@@ -18,6 +19,7 @@ read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree) ->
 }
 
 // Decodes data into tree, which must be zero or destroyed. Strings and blobs are copied into the tree's arena, so the tree references neither data nor the schema.
+@(require_results)
 read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.curr_block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
 	allocator := virtual.arena_allocator(&tree.arena)
@@ -36,7 +38,7 @@ read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Val
 	return d.r.pos, d.err
 }
 
-@(private = "file")
+@(private = "file", require_results)
 read_set :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
 	count, err := fld.adjust_count(field, node, d.metadata, &d.r, d.allocator)
 	if err != .None do return fail(d, err, d.r.pos)
@@ -54,7 +56,7 @@ read_set :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Field_Met
 // Reads instances of a grow-as-needed set until its continuator is absent or
 // its terminator is found. The terminator is required, the repeat count is
 // limited by MaxArrayLength, and every instance must consume input.
-@(private = "file")
+@(private = "file", require_results)
 read_growing_set :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
 	metadata := d.metadata
 
@@ -104,7 +106,7 @@ read_growing_set :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mda
 	}
 }
 
-@(private = "file")
+@(private = "file", require_results)
 read_set_instance :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, set_index: int, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
 	log.debugf(
 		"0x%08X Set: %v (%v), set_index = %v, set_field len = %v",
@@ -135,7 +137,7 @@ read_set_instance :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, set_index
 	return .None
 }
 
-@(private = "file")
+@(private = "file", require_results)
 read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
 	count := fld.get_count(set_field, nil)
 
@@ -212,7 +214,7 @@ read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Fie
 	return .None
 }
 
-@(private = "file")
+@(private = "file", require_results)
 to_value :: proc(v: $T, err: dat.Read_Error) -> (fld.Value, dat.Read_Error) {
 	return fld.Value(v), err
 }
