@@ -32,7 +32,7 @@ remaining :: proc(r: ^Reader) -> int {
 }
 
 // Advances past n bytes and returns them. Leaves r unchanged on error.
-@(private)
+@(private, require_results)
 take :: proc(r: ^Reader, n: int) -> (b: []byte, err: Read_Error) {
 	if n < 0 do return nil, .Invalid_Length
 	if n > len(r.data) - r.pos do return nil, .Unexpected_EOF
@@ -55,6 +55,7 @@ read :: proc(r: ^Reader, $T: typeid) -> (value: T, err: Read_Error)
 
 // Reads an integer-typed value as int. Non-integer types return
 // .Unsupported_Type without consuming anything.
+@(require_results)
 read_integer :: proc(r: ^Reader, data_type: Data_Type) -> (value: int, err: Read_Error) {
 	switch data_type {
 	case .Int8:
@@ -86,12 +87,14 @@ read_integer :: proc(r: ^Reader, data_type: Data_Type) -> (value: int, err: Read
 
 // Returns a view of the next n bytes; nothing is allocated. Clone the result
 // to keep it beyond the lifetime of r.data.
+@(require_results)
 read_bytes :: proc(r: ^Reader, n: int) -> ([]byte, Read_Error) {
 	return take(r, n)
 }
 
 // Reads n bytes as a string, dropping every 0x00 byte. The result is owned
 // and allocated with allocator.
+@(require_results)
 read_string :: proc(r: ^Reader, n: int, allocator := context.allocator) -> (value: string, err: Read_Error) {
 	b := take(r, n) or_return
 
@@ -115,6 +118,7 @@ read_string :: proc(r: ^Reader, n: int, allocator := context.allocator) -> (valu
 }
 
 // Reads an integer at absolute position pos without changing r.
+@(require_results)
 peek_integer_at :: proc(r: ^Reader, pos: int, data_type: Data_Type) -> (int, Read_Error) {
 	if pos < 0 || pos >= len(r.data) do return 0, .Offset_Out_Of_Range
 	tmp := r^

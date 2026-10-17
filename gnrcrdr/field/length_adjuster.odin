@@ -5,6 +5,7 @@ import eval "../evaluate"
 import mdat "../metadata"
 import "core:mem"
 
+@(require_results)
 adjust_count :: proc(
 	field: ^[dynamic]Value,
 	node: ^mdat.Field_Metadata_Tree_Node,
@@ -61,6 +62,7 @@ adjust_count :: proc(
 	return
 }
 
+@(require_results)
 get_buffer_length :: proc(
 	node: ^mdat.Field_Metadata_Tree_Node,
 	metadata: ^mdat.Field_Metadata_Provider,
@@ -98,6 +100,7 @@ get_buffer_length :: proc(
 
 // Validates a set count: negative counts are invalid, and counts above the
 // set's MaxArrayLength (when present) exceed the repeat limit.
+@(require_results)
 check_count :: proc(count: int, max_array_length: Maybe(int)) -> dat.Read_Error {
 	if count < 0 do return .Invalid_Length
 
@@ -111,7 +114,7 @@ check_count :: proc(count: int, max_array_length: Maybe(int)) -> dat.Read_Error 
 // Evaluates a Length rule at the reader's current position: an optional flag
 // (zero means length 0), then the value with its mask, shift and, when
 // apply_expression is set, its expression. Peeks never move the reader.
-@(private = "file")
+@(private = "file", require_results)
 eval_length_rule :: proc(
 	length_rec: ^dat.Length_Record,
 	metadata: ^mdat.Field_Metadata_Provider,
