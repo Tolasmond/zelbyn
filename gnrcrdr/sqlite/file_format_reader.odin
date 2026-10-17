@@ -5,6 +5,8 @@ import dat "../data"
 import mdata "../metadata"
 import "core:fmt"
 import "core:log"
+import "core:mem"
+import "core:mem/virtual"
 import "core:strings"
 
 Load_Error_Kind :: enum {
@@ -34,8 +36,8 @@ destroy_load_error :: proc(err: ^Load_Error) {
 read_file_format :: proc(db_path: string, format_id: int, file_format: ^mdata.File_Format) -> (err: Load_Error) {
 	log.debugf("Opening database and reading format ID %v", format_id)
 	db: ^sql.sqlite3
-	cpath := strings.clone_to_cstring(db_path)
-	defer delete(cpath)
+	allocator := virtual.arena_allocator(&file_format.arena)
+	cpath := strings.clone_to_cstring(db_path, allocator)
 
 	rc := sql.open_v2(cpath, &db, sql.OPEN_READONLY, nil)
 	if rc != .OK {
@@ -44,7 +46,7 @@ read_file_format :: proc(db_path: string, format_id: int, file_format: ^mdata.Fi
 		return
 	}
 
-	err = load(db, format_id, file_format)
+	err = load(db, format_id, file_format, allocator)
 
 	log.debug("closing database connection")
 	rc = sql.close(db)
@@ -56,34 +58,34 @@ read_file_format :: proc(db_path: string, format_id: int, file_format: ^mdata.Fi
 }
 
 @(private = "file")
-load :: proc(db: ^sql.sqlite3, format_id: int, file_format: ^mdata.File_Format) -> Load_Error {
+load :: proc(db: ^sql.sqlite3, format_id: int, file_format: ^mdata.File_Format, allocator: mem.Allocator) -> Load_Error {
 	metadata := &file_format.metadata
 
-	if rc := read_data_type(db, &metadata.data_type_map); rc != .OK {
+	if rc := read_data_type(db, &metadata.data_type_map, allocator); rc != .OK {
 		return query_error(db, rc, "DataType")
 	}
 
-	if rc := read_length(db, &metadata.set_length_map); rc != .OK {
+	if rc := read_length(db, &metadata.set_length_map, allocator); rc != .OK {
 		return query_error(db, rc, "Length")
 	}
 
-	if rc := read_marker_offset(db, &metadata.marker_offset_map); rc != .OK {
+	if rc := read_marker_offset(db, &metadata.marker_offset_map, allocator); rc != .OK {
 		return query_error(db, rc, "MarkerOffset")
 	}
 
-	if rc := read_set_helper(db, format_id, &metadata.set_helper_map); rc != .OK {
+	if rc := read_set_helper(db, format_id, &metadata.set_helper_map, allocator); rc != .OK {
 		return query_error(db, rc, "SetHelper")
 	}
 
-	if rc := read_packed(db, &metadata.packed_records); rc != .OK {
+	if rc := read_packed(db, &metadata.packed_records, allocator); rc != .OK {
 		return query_error(db, rc, "Packed")
 	}
 
-	if rc := read_field(db, metadata.packed_records[:], &metadata.data_type_map, &metadata.field_metadata_map); rc != .OK {
+	if rc := read_field(db, metadata.packed_records[:], &metadata.data_type_map, &metadata.field_metadata_map, allocator); rc != .OK {
 		return query_error(db, rc, "Field")
 	}
 
-	found, format_rc := read_format(db, format_id, &metadata.format_record)
+	found, format_rc := read_format(db, format_id, &metadata.format_record, allocator)
 	if format_rc != .OK {
 		return query_error(db, format_rc, "Format")
 	}
@@ -91,7 +93,7 @@ load :: proc(db: ^sql.sqlite3, format_id: int, file_format: ^mdata.File_Format) 
 		return Load_Error{kind = .Format_Not_Found, table = "Format", message = strings.clone("format id not found")}
 	}
 
-	if rc := read_parent(db, format_id, &metadata.parent_map); rc != .OK {
+	if rc := read_parent(db, format_id, &metadata.parent_map, allocator); rc != .OK {
 		return query_error(db, rc, "Parent")
 	}
 
@@ -108,7 +110,7 @@ load :: proc(db: ^sql.sqlite3, format_id: int, file_format: ^mdata.File_Format) 
 
 	log.debug("reading children")
 
-	return read_children(&file_format.root_metadata_node, metadata)
+	return read_children(&file_format.root_metadata_node, metadata, allocator)
 }
 
 @(private = "file")
@@ -118,14 +120,16 @@ query_error :: proc(db: ^sql.sqlite3, rc: sql.ResultCode, table: string) -> Load
 
 @(private = "file")
 read_children :: proc(
-	parent_node: ^mdata.Field_Metadata_Tree_Node, metadata: ^mdata.Field_Metadata_Provider) -> Load_Error {
+	parent_node: ^mdata.Field_Metadata_Tree_Node, metadata: ^mdata.Field_Metadata_Provider, allocator: mem.Allocator) -> Load_Error {
+
+	parent_node.children = make([dynamic]^mdata.Field_Metadata_Tree_Node, allocator)
 
 	parent_map := &metadata.parent_map
 	field_metadata_map := &metadata.field_metadata_map
 
 	for childRecord in parent_map[parent_node.metadata.id] {
 
-		child_tree_node := new(mdata.Field_Metadata_Tree_Node)
+		child_tree_node := new(mdata.Field_Metadata_Tree_Node, allocator)
 
 		child_tree_node.metadata = field_metadata_map[childRecord.child_id]
 
@@ -143,7 +147,7 @@ read_children :: proc(
 		}
 
 		if (dat.Data_Type(child_tree_node.metadata.data_type.type) == .Set) {
-			if err := read_children(child_tree_node, metadata); err.kind != .None do return err
+			if err := read_children(child_tree_node, metadata, allocator); err.kind != .None do return err
 		}
 	}
 
