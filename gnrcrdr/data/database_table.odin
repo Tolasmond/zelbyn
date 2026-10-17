@@ -16,36 +16,6 @@ Data_Type_Record :: struct {
 	max_buffer_length: Maybe(int),
 }
 
-destroy_data_type_record :: proc(record: ^Data_Type_Record) {
-	min_value, min_value_exists := record.min_value.?
-	max_value, max_value_exists := record.max_value.?
-	def_value, def_value_exists := record.default_value.?
-	units, units_exists := record.units.?
-	pattern, pattern_exists := record.pattern.?
-
-	if min_value_exists {
-		delete(min_value)
-	}
-
-	if max_value_exists {
-		delete(max_value)
-	}
-
-	if def_value_exists {
-		delete(def_value)
-	}
-
-	if units_exists {
-		delete(units)
-	}
-
-	if pattern_exists {
-		delete(pattern)
-	}
-
-	free(record)
-}
-
 Field_Record :: struct {
 	id: int,
 	name: string,
@@ -58,10 +28,6 @@ Set_Helper_Record :: struct {
 	length_id: Maybe(int),
 	marker_id: Maybe(int),
 }
-
-// destroy_set_helper_record :: proc(record: ^Set_Helper_Record) {
-// 	free(record)
-// }
 
 Length_Record :: struct {
 	id: int,
@@ -78,21 +44,6 @@ Length_Record :: struct {
 	value_shift: Maybe(int),
 	flag_expression: Maybe(string),
 	value_expression: Maybe(string),
-}
-
-destroy_length_record :: proc(record: ^Length_Record) {
-	flag_expr, flag_expr_exists := record.flag_expression.?
-	value_expr, value_expr_exists := record.value_expression.?
-
-	if flag_expr_exists {
-		delete(flag_expr)
-	}
-
-	if value_expr_exists {
-		delete(value_expr)
-	}
-
-	free(record)
 }
 
 Marker_Offset_Record :: struct {

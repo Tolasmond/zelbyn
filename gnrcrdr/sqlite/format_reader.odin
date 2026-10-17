@@ -3,9 +3,10 @@ package sqlite
 import sql "../../sqlite3"
 import dat "../data"
 import "core:log"
+import "core:mem"
 import "core:strings"
 
-read_format :: proc(db: ^sql.sqlite3, format_id: int, record: ^dat.Format_Record) -> (found: bool, result: sql.ResultCode) {
+read_format :: proc(db: ^sql.sqlite3, format_id: int, record: ^dat.Format_Record, allocator: mem.Allocator) -> (found: bool, result: sql.ResultCode) {
 	log.debug("Reading Format table")
 
 	stmt: ^sql.Stmt
@@ -23,7 +24,7 @@ read_format :: proc(db: ^sql.sqlite3, format_id: int, record: ^dat.Format_Record
 
 	if (sql.column_type(stmt, i32(Format_Column.name)) != sql.SqliteColumnType.NULL) {
 		name: cstring = sql.column_text(stmt, i32(Format_Column.name))
-		record.name = strings.clone(string(name))
+		record.name = strings.clone(string(name), allocator)
 	}
 
 	record.root_field = sql.column_int64(stmt, i32(Format_Column.root_field))

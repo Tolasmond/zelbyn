@@ -1,13 +1,15 @@
 package sqlite
 
 import "core:log"
+import "core:mem"
 import "core:strings"
 import dat "../data"
 import mdat "../metadata"
 import sql "../../sqlite3"
 
-read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_type_map: ^map[int]^dat.Data_Type_Record, field_metadata_map: ^map[int]^mdat.Field_Metadata) -> (result: sql.ResultCode) {
+read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_type_map: ^map[int]^dat.Data_Type_Record, field_metadata_map: ^map[int]^mdat.Field_Metadata, allocator: mem.Allocator) -> (result: sql.ResultCode) {
 	log.debug("Reading Field table")
+	field_metadata_map^ = make(map[int]^mdat.Field_Metadata, allocator)
 
 	stmt: ^sql.Stmt
 	rc := prepare(db, "SELECT * FROM Field", &stmt)
@@ -25,11 +27,11 @@ read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_
 		record.id = sql.column_int64(stmt, i32(Field_Column.id))
 
 		name : cstring = sql.column_text(stmt, i32(Field_Column.name))
-		record.name = strings.clone(string(name))
+		record.name = strings.clone(string(name), allocator)
 
 		record.data_type_id = sql.column_int64(stmt, i32(Field_Column.data_type_id))
 
-		field_metadata := new(mdat.Field_Metadata)
+		field_metadata := new(mdat.Field_Metadata, allocator)
 		field_metadata.id = record.id
 		field_metadata.name = record.name
 		field_metadata.data_type = data_type_map[record.data_type_id]

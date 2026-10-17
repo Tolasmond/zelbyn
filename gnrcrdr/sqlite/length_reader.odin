@@ -1,12 +1,14 @@
 package sqlite
 
 import "core:log"
+import "core:mem"
 import "core:strings"
 import dat "../data"
 import sql "../../sqlite3"
 
-read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^dat.Length_Record) -> (result: sql.ResultCode) {
+read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^dat.Length_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
 	log.debug("Reading Length table")
+	set_length_map^ = make(map[int]^dat.Length_Record, allocator)
 
 	stmt: ^sql.Stmt
 	rc := prepare(db, "SELECT * FROM Length", &stmt)
@@ -19,7 +21,7 @@ read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^dat.Length_Recor
 
 		if !has_row do break
 
-		record := new(dat.Length_Record)
+		record := new(dat.Length_Record, allocator)
 
 		record.id = sql.column_int64(stmt, i32(Length_Column.id))
 		record.data_type_id = sql.column_int64(stmt, i32(Length_Column.data_type_id))
@@ -66,12 +68,12 @@ read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^dat.Length_Recor
 
 		if (sql.column_type(stmt, i32(Length_Column.flag_expression)) != sql.SqliteColumnType.NULL) {
 			flag_expression : cstring = sql.column_text(stmt, i32(Length_Column.flag_expression))
-			record.flag_expression = strings.clone(string(flag_expression))
+			record.flag_expression = strings.clone(string(flag_expression), allocator)
 		}
 
 		if (sql.column_type(stmt, i32(Length_Column.value_expression)) != sql.SqliteColumnType.NULL) {
 			value_expression : cstring = sql.column_text(stmt, i32(Length_Column.value_expression))
-			record.value_expression = strings.clone(string(value_expression))
+			record.value_expression = strings.clone(string(value_expression), allocator)
 		}
 
 		set_length_map[record.id] = record

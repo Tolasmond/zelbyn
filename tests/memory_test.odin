@@ -3,6 +3,7 @@ package tests
 import dat "../gnrcrdr/data"
 import fld "../gnrcrdr/field"
 import mdat "../gnrcrdr/metadata"
+import sql "../gnrcrdr/sqlite"
 import "core:log"
 import "core:mem"
 import "core:os"
@@ -195,4 +196,102 @@ value_tree_reuse_after_destroy :: proc(t: ^testing.T) {
 	testing.expect(t, reset_ok, "destroy_value_tree did not reset the tree")
 	testing.expect_value(t, second_kind, .None)
 	testing.expect_value(t, second_consumed, 14)
+}
+
+@(test)
+schema_load_uses_only_arena :: proc(t: ^testing.T) {
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+
+	err: sql.Load_Error
+	defer sql.destroy_load_error(&err)
+
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	{
+		context.allocator = mem.tracking_allocator(&track)
+		context.logger = log.nil_logger()
+		err = sql.read_file_format(DB_PATH, 1, &ff)
+	}
+
+	testing.expectf(t, err.kind == .None, "%v (%v, table %s): %s", err.kind, err.code, err.table, err.message)
+	testing.expect_value(t, track.total_allocation_count, 0)
+	testing.expect(t, ff.arena.total_used > 0, "arena unused")
+}
+
+@(test)
+schema_error_allocates_only_message :: proc(t: ^testing.T) {
+	Case :: struct {
+		db_path:   string,
+		format_id: int,
+		kind:      sql.Load_Error_Kind,
+	}
+
+	for c in ([]Case{{DB_PATH, 999, .Format_Not_Found}, {"data/does_not_exist.sqlite3", 1, .Open_Failed}}) {
+		ff: mdat.File_Format
+
+		// recorded inside the block, asserted after it: the message is freed inside
+		kind: sql.Load_Error_Kind
+		live_with_error, live_after: int
+
+		track: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&track, context.allocator)
+		defer mem.tracking_allocator_destroy(&track)
+		// collect bad frees instead of panicking, so the check below can see them
+		track.bad_free_callback = mem.tracking_allocator_bad_free_callback_add_to_array
+		{
+			context.allocator = mem.tracking_allocator(&track)
+			context.logger = log.nil_logger()
+
+			err := sql.read_file_format(c.db_path, c.format_id, &ff)
+			kind = err.kind
+			live_with_error = len(track.allocation_map)
+			sql.destroy_load_error(&err)
+			mdat.destroy_file_format(&ff)
+			live_after = len(track.allocation_map)
+		}
+
+		testing.expectf(t, kind == c.kind, "%s, format %v: %v, want %v", c.db_path, c.format_id, kind, c.kind)
+		testing.expectf(t, live_with_error == 1, "%s, format %v: %v live allocations with the error, want 1 (the message)", c.db_path, c.format_id, live_with_error)
+		testing.expectf(t, live_after == 0, "%s, format %v: %v live allocations after cleanup, want 0", c.db_path, c.format_id, live_after)
+		testing.expectf(t, len(track.bad_free_array) == 0, "%s, format %v: %v bad frees", c.db_path, c.format_id, len(track.bad_free_array))
+	}
+}
+
+@(test)
+destroy_file_format_resets :: proc(t: ^testing.T) {
+	ff: mdat.File_Format
+
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	{
+		context.allocator = mem.tracking_allocator(&track)
+		context.logger = log.nil_logger()
+		mdat.destroy_file_format(&ff) // never loaded
+	}
+
+	if !load_gif(t, &ff) {
+		mdat.destroy_file_format(&ff)
+		return
+	}
+
+	arena_reset, map_reset, root_reset: bool
+	{
+		context.allocator = mem.tracking_allocator(&track)
+		context.logger = log.nil_logger()
+
+		mdat.destroy_file_format(&ff)
+		arena_reset = ff.arena.curr_block == nil
+		map_reset = ff.metadata.data_type_map == nil
+		root_reset = ff.root_metadata_node.metadata == nil
+
+		mdat.destroy_file_format(&ff) // already destroyed: must not crash
+	}
+
+	testing.expect_value(t, track.total_allocation_count, 0)
+	testing.expect(t, arena_reset, "ff.arena.curr_block should be nil")
+	testing.expect(t, map_reset, "ff.metadata.data_type_map should be nil")
+	testing.expect(t, root_reset, "ff.root_metadata_node.metadata should be nil")
 }

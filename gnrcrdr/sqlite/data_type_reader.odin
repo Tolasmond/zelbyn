@@ -1,12 +1,14 @@
 package sqlite
 
 import "core:log"
+import "core:mem"
 import "core:strings"
 import dat "../data"
 import sql "../../sqlite3"
 
-read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^dat.Data_Type_Record) -> (result: sql.ResultCode) {
+read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^dat.Data_Type_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
 	log.debug("Reading DataType table")
+	data_type_map^ = make(map[int]^dat.Data_Type_Record, allocator)
 
 	stmt: ^sql.Stmt
 	rc := prepare(db, "SELECT * FROM DataType", &stmt)
@@ -19,29 +21,29 @@ read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^dat.Data_Type_
 
 		if !has_row do break
 
-		record := new(dat.Data_Type_Record)
+		record := new(dat.Data_Type_Record, allocator)
 
 		record.id = sql.column_int64(stmt, i32(Data_Type_Column.id))
 		record.type = sql.column_int64(stmt, i32(Data_Type_Column.type))
 
 		if (sql.column_type(stmt, i32(Data_Type_Column.min_value)) != sql.SqliteColumnType.NULL) {
 			min_value : cstring = sql.column_text(stmt, i32(Data_Type_Column.min_value))
-			record.min_value = strings.clone(string(min_value))
+			record.min_value = strings.clone(string(min_value), allocator)
 		}
 
 		if (sql.column_type(stmt, i32(Data_Type_Column.max_value)) != sql.SqliteColumnType.NULL) {
 			max_value : cstring = sql.column_text(stmt, i32(Data_Type_Column.max_value))
-			record.max_value = strings.clone(string(max_value))
+			record.max_value = strings.clone(string(max_value), allocator)
 		}
 
 		if (sql.column_type(stmt, i32(Data_Type_Column.default_value)) != sql.SqliteColumnType.NULL) {
 			default_value : cstring = sql.column_text(stmt, i32(Data_Type_Column.default_value))
-			record.default_value = strings.clone(string(default_value))
+			record.default_value = strings.clone(string(default_value), allocator)
 		}
 
 		if (sql.column_type(stmt, i32(Data_Type_Column.units)) != sql.SqliteColumnType.NULL) {
 			units : cstring = sql.column_text(stmt, i32(Data_Type_Column.units))
-			record.units = strings.clone(string(units))
+			record.units = strings.clone(string(units), allocator)
 		}
 
 		if (sql.column_type(stmt, i32(Data_Type_Column.min_array_length)) != sql.SqliteColumnType.NULL) {
@@ -58,7 +60,7 @@ read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^dat.Data_Type_
 
 		if (sql.column_type(stmt, i32(Data_Type_Column.pattern)) != sql.SqliteColumnType.NULL) {
 			pattern : cstring = sql.column_text(stmt, i32(Data_Type_Column.pattern))
-			record.pattern = strings.clone(string(pattern))
+			record.pattern = strings.clone(string(pattern), allocator)
 		}
 
 		if (sql.column_type(stmt, i32(Data_Type_Column.comparison_tolerance)) != sql.SqliteColumnType.NULL) {
