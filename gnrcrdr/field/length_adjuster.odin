@@ -2,12 +2,11 @@ package field
 
 import dat  "../data"
 import eval "../evaluate"
-import fld  "../field"
 import mdat "../metadata"
 import "core:mem"
 
 adjust_count :: proc(
-	field: ^[dynamic]fld.Value,
+	field: ^[dynamic]Value,
 	node: ^mdat.Field_Metadata_Tree_Node,
 	metadata: ^mdat.Field_Metadata_Provider,
 	r: ^dat.Reader,
