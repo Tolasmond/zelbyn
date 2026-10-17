@@ -1,15 +1,14 @@
 package field
 
 import dat "../data"
-import fld "../field"
 import mdat "../metadata"
 import "core:log"
 import "core:mem"
 import "core:strconv"
 import "core:strings"
 
-initializeFieldValueArray :: proc(
-	field_value_array: ^[dynamic]fld.Value,
+init_field_value_array :: proc(
+	field_value_array: ^[dynamic]Value,
 	node: ^mdat.Field_Metadata_Tree_Node,
 	allocator: mem.Allocator) {
 
@@ -19,15 +18,15 @@ initializeFieldValueArray :: proc(
 
 	min_length := metadata.data_type.min_array_length.? or_else 1
 
-	default_value: fld.Value
+	default_value: Value
 
 	data_type := dat.Data_Type(metadata.data_type.type)
 
 	switch data_type {
 	case .Set:
 		for _ in 0 ..< min_length {
-			//new_map := make(map[int][dynamic]fld.Value)
-			new_map := make(map[int][dynamic]fld.Value, allocator)
+			//new_map := make(map[int][dynamic]Value)
+			new_map := make(map[int][dynamic]Value, allocator)
 			initialize_set_map(&new_map, node, allocator)
 			append(field_value_array, new_map)
 		}
@@ -75,7 +74,7 @@ initializeFieldValueArray :: proc(
 	case .String:
 		// each element owns its own copy; the metadata keeps the original
 		for _ in 0 ..< min_length {
-			append(field_value_array, fld.Value(strings.clone(metadata.data_type.default_value.? or_else "", allocator)))
+			append(field_value_array, Value(strings.clone(metadata.data_type.default_value.? or_else "", allocator)))
 		}
 		return
 	case .Blob:
@@ -95,12 +94,12 @@ Returns the length of the array for the given field path.
 **Returns**  
 - Length of array referenced by given field path.
 */
-get_count :: proc(parent_field: ^[dynamic]fld.Value, path_pair: ^Path_Pair) -> int {
+get_count :: proc(parent_field: ^[dynamic]Value, path_pair: ^Path_Pair) -> int {
 	field_value_array := get_field(parent_field, path_pair)
 	return len(field_value_array)
 }
 
-set_count :: proc(count: int, node: ^mdat.Field_Metadata_Tree_Node, field: ^[dynamic]fld.Value, allocator: mem.Allocator) {
+set_count :: proc(count: int, node: ^mdat.Field_Metadata_Tree_Node, field: ^[dynamic]Value, allocator: mem.Allocator) {
 	for count > len(field) {
 		append_set_instance(node, field, allocator)
 	}
@@ -110,13 +109,13 @@ set_count :: proc(count: int, node: ^mdat.Field_Metadata_Tree_Node, field: ^[dyn
 	}
 }
 
-get_field :: proc(parent_field: ^[dynamic]fld.Value, path_pair: ^Path_Pair) -> ^[dynamic]fld.Value {
+get_field :: proc(parent_field: ^[dynamic]Value, path_pair: ^Path_Pair) -> ^[dynamic]Value {
 
 	if path_pair == nil {
 		return parent_field
 	}
 
-	field_value_map := &parent_field[0].(map[int][dynamic]fld.Value)
+	field_value_map := &parent_field[0].(map[int][dynamic]Value)
 
 	field, ok := &field_value_map[path_pair.id]
 
@@ -131,27 +130,27 @@ get_field :: proc(parent_field: ^[dynamic]fld.Value, path_pair: ^Path_Pair) -> ^
 	return field
 }
 
-remove_at :: proc(i: int, field: ^[dynamic]fld.Value) {
+remove_at :: proc(i: int, field: ^[dynamic]Value) {
 	ordered_remove(field, i)
 }
 
-append_set_instance :: proc(node: ^mdat.Field_Metadata_Tree_Node, parent_field: ^[dynamic]fld.Value, allocator: mem.Allocator) {
-	append(parent_field, make(map[int][dynamic]fld.Value, allocator))
+append_set_instance :: proc(node: ^mdat.Field_Metadata_Tree_Node, parent_field: ^[dynamic]Value, allocator: mem.Allocator) {
+	append(parent_field, make(map[int][dynamic]Value, allocator))
 	initialize_set_map(
-		&parent_field[len(parent_field) - 1].(map[int][dynamic]fld.Value),
+		&parent_field[len(parent_field) - 1].(map[int][dynamic]Value),
 		node,
 		allocator)
 }
 
-set_value :: proc(node: ^mdat.Field_Metadata_Tree_Node, parent_field: ^[dynamic]fld.Value, path_pair: ^Path_Pair, index: int, value: fld.Value) {
+set_value :: proc(node: ^mdat.Field_Metadata_Tree_Node, parent_field: ^[dynamic]Value, path_pair: ^Path_Pair, index: int, value: Value) {
 	field := get_field(parent_field, path_pair)
 	field[index] = value
 }
 
-initialize_set_map :: proc(set_map: ^map[int][dynamic]fld.Value, node: ^mdat.Field_Metadata_Tree_Node, allocator: mem.Allocator) {
+initialize_set_map :: proc(set_map: ^map[int][dynamic]Value, node: ^mdat.Field_Metadata_Tree_Node, allocator: mem.Allocator) {
 	for child in node.children {
-		new_arr := make([dynamic]fld.Value, allocator)
-		initializeFieldValueArray(&new_arr, child, allocator)
+		new_arr := make([dynamic]Value, allocator)
+		init_field_value_array(&new_arr, child, allocator)
 		set_map[child.metadata.id] = new_arr
 	}
 }

@@ -22,7 +22,7 @@ read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Val
 	assert(tree.arena.curr_block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
 	allocator := virtual.arena_allocator(&tree.arena)
 	tree.root = make([dynamic]fld.Value, allocator)
-	fld.initializeFieldValueArray(&tree.root, &format.root_metadata_node, allocator)
+	fld.init_field_value_array(&tree.root, &format.root_metadata_node, allocator)
 
 	d := Decoder{metadata = &format.metadata, allocator = allocator}
 	d.path = make([dynamic]Path_Segment, allocator)

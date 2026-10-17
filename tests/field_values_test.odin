@@ -41,7 +41,7 @@ string_default_cloned :: proc(t: ^testing.T) {
 	{
 		context.allocator = mem.tracking_allocator(&track)
 		context.logger = log.nil_logger()
-		fld.initializeFieldValueArray(&arr, node, va)
+		fld.init_field_value_array(&arr, node, va)
 	}
 	testing.expect_value(t, track.total_allocation_count, 0)
 	testing.expect(t, arr.allocator.data == rawptr(&values), "the zero-value array did not adopt the arena")
@@ -77,7 +77,7 @@ set_value_overwrites :: proc(t: ^testing.T) {
 	{
 		context.allocator = mem.tracking_allocator(&track)
 		context.logger = log.nil_logger()
-		fld.initializeFieldValueArray(&arr, node, va)
+		fld.init_field_value_array(&arr, node, va)
 		fld.set_value(node, &arr, nil, 0, fld.Value(strings.clone("xyz", va)))
 	}
 	testing.expect_value(t, track.total_allocation_count, 0)
@@ -105,7 +105,7 @@ numeric_min_array_length :: proc(t: ^testing.T) {
 	{
 		context.allocator = mem.tracking_allocator(&track)
 		context.logger = log.nil_logger()
-		fld.initializeFieldValueArray(&arr, node, va)
+		fld.init_field_value_array(&arr, node, va)
 	}
 	testing.expect_value(t, track.total_allocation_count, 0)
 
@@ -137,7 +137,7 @@ set_count_uses_allocator :: proc(t: ^testing.T) {
 	{
 		context.allocator = mem.tracking_allocator(&track)
 		context.logger = log.nil_logger()
-		fld.initializeFieldValueArray(&arr, set, va)
+		fld.init_field_value_array(&arr, set, va)
 		fld.set_count(3, set, &arr, va)
 		fld.set_count(1, set, &arr, va)
 	}
