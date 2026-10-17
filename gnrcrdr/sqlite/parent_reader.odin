@@ -3,11 +3,11 @@ package sqlite
 import sql "../../sqlite3"
 import dat "../data"
 import "core:log"
-import "core:mem"
 import "core:slice"
 
 read_parent :: proc(
 	db: ^sql.sqlite3,
+	format_id: int,
 	parent_map: ^map[int][dynamic]^dat.Parent_Record,
 ) -> (
 	result: sql.ResultCode,
@@ -15,14 +15,17 @@ read_parent :: proc(
 	log.debug("Reading Parent table")
 
 	stmt: ^sql.Stmt
-	query_text := "SELECT * FROM Parent"
-	query_data := mem.raw_data(query_text)
-	sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
+	rc := prepare(db, "SELECT * FROM Parent WHERE FormatId = ?1", &stmt)
+	if rc != .OK do return rc
+	defer sql.finalize(stmt)
+	rc = sql.bind_int64(stmt, 1, i64(format_id))
+	if rc != .OK do return rc
 
 	for {
-		result = sql.step(stmt)
+		has_row: bool
+		has_row, result = step(stmt)
 
-		if result != .ROW do break
+		if !has_row do break
 
 		record := new(dat.Parent_Record)
 
@@ -37,6 +40,8 @@ read_parent :: proc(
 
 		append(&parent_map[record.parent_id], record)
 	}
+
+	if result != .OK do return
 
 	for _, parent_records in parent_map {
 		slice.sort_by(parent_records[:], dat.sort_parent_records_by_child_index)

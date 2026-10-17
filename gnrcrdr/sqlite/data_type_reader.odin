@@ -1,7 +1,6 @@
 package sqlite
 
 import "core:log"
-import "core:mem"
 import "core:strings"
 import dat "../data"
 import sql "../../sqlite3"
@@ -10,14 +9,15 @@ read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^dat.Data_Type_
 	log.debug("Reading DataType table")
 
   stmt: ^sql.Stmt
-  query_text := "SELECT * FROM DataType"
-	query_data := mem.raw_data(query_text)
-  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
+  rc := prepare(db, "SELECT * FROM DataType", &stmt)
+  if rc != .OK do return rc
+  defer sql.finalize(stmt)
 
 	for {
-		result = sql.step(stmt)
+		has_row: bool
+		has_row, result = step(stmt)
 
-		if result != .ROW do break
+		if !has_row do break
 
 		record := new(dat.Data_Type_Record)
 

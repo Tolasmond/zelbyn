@@ -13,6 +13,7 @@ callback :: proc"c"(data: rawptr, a: c.int, b: [^]cstring, c: [^]cstring) -> Res
 @(default_calling_convention="c", link_prefix="sqlite3_")
 foreign sqlite {
 	open :: proc(filename: cstring, ppDb: ^^sqlite3) -> ResultCode ---
+	open_v2 :: proc(filename: cstring, ppDb: ^^sqlite3, flags: c.int, zVfs: cstring) -> ResultCode ---
 	close :: proc(db: ^sqlite3) -> ResultCode ---
 	
 	prepare_v2 :: proc(db: ^sqlite3, zSql: ^c.char, nByte: c.int, ppStmt: ^^Stmt, pzTail: ^cstring) -> ResultCode ---
@@ -72,6 +73,8 @@ foreign sqlite {
 	sql :: proc(stmt: ^Stmt) -> cstring ---
 	expanded_sql :: proc(stmt: ^Stmt) -> cstring ---
 }
+
+OPEN_READONLY :: c.int(0x00000001)
 
 STATIC :: uintptr(0)
 TRANSIENT :: ~uintptr(0)
