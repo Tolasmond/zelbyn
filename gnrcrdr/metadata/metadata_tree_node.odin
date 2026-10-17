@@ -7,7 +7,6 @@ Field_Metadata_Tree_Node :: struct {
 }
 
 destroy_metadata_node :: proc(node: ^Field_Metadata_Tree_Node) {
-	free(node.metadata)
 	for child_node in node.children {
 		destroy_metadata_node(child_node)
 		free(child_node)

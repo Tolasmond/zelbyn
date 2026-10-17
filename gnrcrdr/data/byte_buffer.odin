@@ -111,8 +111,8 @@ get_bytes :: proc(buf: ^Byte_Buffer, dest: ^[]byte) {
 }
 
 read_file_into_buffer :: proc(buffer: ^Byte_Buffer, name: string) {
-  buf, ok := os.read_entire_file_from_filename(name)
-  if (ok) {
+  buf, err := os.read_entire_file(name, context.allocator)
+  if (err == nil) {
     bytes.buffer_init(&buffer.data, buf)
     delete(buf)
   }

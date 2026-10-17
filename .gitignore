@@ -2,3 +2,5 @@ gnrcrdr.exe
 gnrcrdr.pdb
 gnrcrdr.raddbgi
 core/
+gnrcrdr.bin
+*.sublime-workspace
