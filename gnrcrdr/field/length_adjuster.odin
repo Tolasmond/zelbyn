@@ -12,19 +12,11 @@ adjust_count :: proc(
 	r: ^dat.Reader,
 	allocator: mem.Allocator) -> (count: int, err: dat.Read_Error) {
 
-	set_helper_rec := metadata.set_helper_map[node.metadata.id]
+	// without a SetHelper row the set keeps its current count
+	helper: dat.Set_Helper_Record
+	if rec := metadata.set_helper_map[node.metadata.id]; rec != nil do helper = rec^
 
-	marker_id := 0
-	length_id := 0
-	marker_id_exists := false
-	length_id_exists := false
-
-	if set_helper_rec != nil {
-		marker_id, marker_id_exists = set_helper_rec.marker_id.?
-		length_id, length_id_exists = set_helper_rec.length_id.?
-	}
-
-	if marker_id_exists {
+	if marker_id, has_marker := helper.marker_id.?; has_marker {
 
 		marker_off_recs := metadata.marker_offset_map[marker_id]
 
@@ -53,7 +45,7 @@ adjust_count :: proc(
 		count = marker_found ? 1 : 0
 
 		set_count(count, node, field, allocator)
-	} else if length_id_exists {
+	} else if length_id, has_length := helper.length_id.?; has_length {
 
 		count = eval_length_rule(metadata.set_length_map[length_id], metadata, r, true, allocator) or_return
 
@@ -76,7 +68,7 @@ get_buffer_length :: proc(
 
 	data_type_rec := node.metadata.data_type
 
-	length, _ = data_type_rec.max_buffer_length.?
+	length = data_type_rec.max_buffer_length.? or_else 0
 
 	if data_type_rec.min_buffer_length != data_type_rec.max_buffer_length {
 
