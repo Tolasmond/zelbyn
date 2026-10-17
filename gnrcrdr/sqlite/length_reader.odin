@@ -8,10 +8,10 @@ import sql "../../sqlite3"
 read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^dat.Length_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading Length table")
 
-  stmt: ^sql.Stmt
-  rc := prepare(db, "SELECT * FROM Length", &stmt)
-  if rc != .OK do return rc
-  defer sql.finalize(stmt)
+	stmt: ^sql.Stmt
+	rc := prepare(db, "SELECT * FROM Length", &stmt)
+	if rc != .OK do return rc
+	defer sql.finalize(stmt)
 
 	for {
 		has_row: bool
@@ -21,60 +21,60 @@ read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^dat.Length_Recor
 
 		record := new(dat.Length_Record)
 
-  	record.id = sql.column_int64(stmt, i32(Length_Column.id))
-  	record.data_type_id = sql.column_int64(stmt, i32(Length_Column.data_type_id))
+		record.id = sql.column_int64(stmt, i32(Length_Column.id))
+		record.data_type_id = sql.column_int64(stmt, i32(Length_Column.data_type_id))
 
-  	if (sql.column_type(stmt, i32(Length_Column.flag_absoute_offset_from_beginning)) != sql.SqliteColumnType.NULL) {
-    	record.flag_absoute_offset_from_beginning = sql.column_int64(stmt, i32(Length_Column.flag_absoute_offset_from_beginning))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.flag_absoute_offset_from_beginning)) != sql.SqliteColumnType.NULL) {
+			record.flag_absoute_offset_from_beginning = sql.column_int64(stmt, i32(Length_Column.flag_absoute_offset_from_beginning))
+		}
 
-  	if (sql.column_type(stmt, i32(Length_Column.flag_relative_offset_from_field)) != sql.SqliteColumnType.NULL) {
-    	record.flag_relative_offset_from_field = sql.column_int64(stmt, i32(Length_Column.flag_relative_offset_from_field))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.flag_relative_offset_from_field)) != sql.SqliteColumnType.NULL) {
+			record.flag_relative_offset_from_field = sql.column_int64(stmt, i32(Length_Column.flag_relative_offset_from_field))
+		}
 
-  	if (sql.column_type(stmt, i32(Length_Column.value_absolute_offset_from_beginning)) != sql.SqliteColumnType.NULL) {
-    	record.value_absolute_offset_from_beginning = sql.column_int64(stmt, i32(Length_Column.value_absolute_offset_from_beginning))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.value_absolute_offset_from_beginning)) != sql.SqliteColumnType.NULL) {
+			record.value_absolute_offset_from_beginning = sql.column_int64(stmt, i32(Length_Column.value_absolute_offset_from_beginning))
+		}
 
-  	if (sql.column_type(stmt, i32(Length_Column.value_relative_offset_from_field)) != sql.SqliteColumnType.NULL) {
-    	record.value_relative_offset_from_field = sql.column_int64(stmt, i32(Length_Column.value_relative_offset_from_field))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.value_relative_offset_from_field)) != sql.SqliteColumnType.NULL) {
+			record.value_relative_offset_from_field = sql.column_int64(stmt, i32(Length_Column.value_relative_offset_from_field))
+		}
 
-  	if (sql.column_type(stmt, i32(Length_Column.continuator)) != sql.SqliteColumnType.NULL) {
-    	record.continuator = sql.column_int64(stmt, i32(Length_Column.continuator))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.continuator)) != sql.SqliteColumnType.NULL) {
+			record.continuator = sql.column_int64(stmt, i32(Length_Column.continuator))
+		}
 
-  	if (sql.column_type(stmt, i32(Length_Column.terminator)) != sql.SqliteColumnType.NULL) {
-    	record.terminator = sql.column_int64(stmt, i32(Length_Column.terminator))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.terminator)) != sql.SqliteColumnType.NULL) {
+			record.terminator = sql.column_int64(stmt, i32(Length_Column.terminator))
+		}
 
-  	if (sql.column_type(stmt, i32(Length_Column.flag_mask)) != sql.SqliteColumnType.NULL) {
-    	record.flag_mask = sql.column_int64(stmt, i32(Length_Column.flag_mask))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.flag_mask)) != sql.SqliteColumnType.NULL) {
+			record.flag_mask = sql.column_int64(stmt, i32(Length_Column.flag_mask))
+		}
 
-  	if (sql.column_type(stmt, i32(Length_Column.flag_shift)) != sql.SqliteColumnType.NULL) {
-    	record.flag_shift = sql.column_int64(stmt, i32(Length_Column.flag_shift))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.flag_shift)) != sql.SqliteColumnType.NULL) {
+			record.flag_shift = sql.column_int64(stmt, i32(Length_Column.flag_shift))
+		}
 
-  	if (sql.column_type(stmt, i32(Length_Column.value_mask)) != sql.SqliteColumnType.NULL) {
-    	record.value_mask = sql.column_int64(stmt, i32(Length_Column.value_mask))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.value_mask)) != sql.SqliteColumnType.NULL) {
+			record.value_mask = sql.column_int64(stmt, i32(Length_Column.value_mask))
+		}
 
-  	if (sql.column_type(stmt, i32(Length_Column.value_shift)) != sql.SqliteColumnType.NULL) {
-    	record.value_shift = sql.column_int64(stmt, i32(Length_Column.value_shift))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.value_shift)) != sql.SqliteColumnType.NULL) {
+			record.value_shift = sql.column_int64(stmt, i32(Length_Column.value_shift))
+		}
 
-  	if (sql.column_type(stmt, i32(Length_Column.flag_expression)) != sql.SqliteColumnType.NULL) {
-  		flag_expression : cstring = sql.column_text(stmt, i32(Length_Column.flag_expression))
-  		record.flag_expression = strings.clone(string(flag_expression))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.flag_expression)) != sql.SqliteColumnType.NULL) {
+			flag_expression : cstring = sql.column_text(stmt, i32(Length_Column.flag_expression))
+			record.flag_expression = strings.clone(string(flag_expression))
+		}
 
-  	if (sql.column_type(stmt, i32(Length_Column.value_expression)) != sql.SqliteColumnType.NULL) {
-  		value_expression : cstring = sql.column_text(stmt, i32(Length_Column.value_expression))
-  		record.value_expression = strings.clone(string(value_expression))
-  	}
+		if (sql.column_type(stmt, i32(Length_Column.value_expression)) != sql.SqliteColumnType.NULL) {
+			value_expression : cstring = sql.column_text(stmt, i32(Length_Column.value_expression))
+			record.value_expression = strings.clone(string(value_expression))
+		}
 
-  	set_length_map[record.id] = record
+		set_length_map[record.id] = record
 	}
 
 	return

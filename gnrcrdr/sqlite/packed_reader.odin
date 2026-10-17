@@ -7,10 +7,10 @@ import sql "../../sqlite3"
 read_packed :: proc(db: ^sql.sqlite3, packed_records: ^[dynamic]^dat.Packed_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading Packed table")
 
-  stmt: ^sql.Stmt
-  rc := prepare(db, "SELECT * FROM Packed ORDER BY Id, LowBit", &stmt)
-  if rc != .OK do return rc
-  defer sql.finalize(stmt)
+	stmt: ^sql.Stmt
+	rc := prepare(db, "SELECT * FROM Packed ORDER BY Id, LowBit", &stmt)
+	if rc != .OK do return rc
+	defer sql.finalize(stmt)
 
 	for {
 		has_row: bool
@@ -20,12 +20,12 @@ read_packed :: proc(db: ^sql.sqlite3, packed_records: ^[dynamic]^dat.Packed_Reco
 
 		record := new(dat.Packed_Record)
 
-  	record.id = sql.column_int64(stmt, i32(PackedColumn.id))
-  	record.field_id = sql.column_int64(stmt, i32(PackedColumn.field_id))
-  	record.low_bit = sql.column_int64(stmt, i32(PackedColumn.low_bit))
-  	record.high_bit = sql.column_int64(stmt, i32(PackedColumn.high_bit))
+		record.id = sql.column_int64(stmt, i32(PackedColumn.id))
+		record.field_id = sql.column_int64(stmt, i32(PackedColumn.field_id))
+		record.low_bit = sql.column_int64(stmt, i32(PackedColumn.low_bit))
+		record.high_bit = sql.column_int64(stmt, i32(PackedColumn.high_bit))
 
-    append(packed_records, record)
+		append(packed_records, record)
 	}
 
 	return

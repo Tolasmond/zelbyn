@@ -15,24 +15,24 @@ foreign sqlite {
 	open :: proc(filename: cstring, ppDb: ^^sqlite3) -> ResultCode ---
 	open_v2 :: proc(filename: cstring, ppDb: ^^sqlite3, flags: c.int, zVfs: cstring) -> ResultCode ---
 	close :: proc(db: ^sqlite3) -> ResultCode ---
-	
+
 	prepare_v2 :: proc(db: ^sqlite3, zSql: ^c.char, nByte: c.int, ppStmt: ^^Stmt, pzTail: ^cstring) -> ResultCode ---
-	
+
 	step :: proc(stmt: ^Stmt) -> ResultCode ---
 	finalize :: proc(stmt: ^Stmt) -> ResultCode ---
 
 	last_insert_rowid :: proc(db: ^sqlite3) -> i64 ---
-	
+
 	column_name :: proc(stmt: ^Stmt, i_col: c.int) -> cstring ---
 	column_blob :: proc(stmt: ^Stmt, i_col: c.int) -> ^byte ---
 	column_text :: proc(stmt: ^Stmt, i_col: c.int) -> cstring ---
 	column_bytes :: proc(stmt: ^Stmt, i_col: c.int) -> c.int ---
-	
+
 	column_int :: proc(stmt: ^Stmt, i_col: c.int) -> c.int ---
 	column_int64 :: proc(stmt: ^Stmt, i_col: c.int) -> int ---
 	column_double :: proc(stmt: ^Stmt, i_col: c.int) -> c.double ---
 	column_type :: proc(stmt: ^Stmt, i_col: c.int) -> SqliteColumnType ---
-	
+
 	errcode :: proc(db: ^sqlite3) -> c.int ---
 	extended_errcode :: proc(db: ^sqlite3) -> c.int ---
 	errmsg :: proc(db: ^sqlite3) -> cstring ---
@@ -105,85 +105,85 @@ LIMIT_WORKER_THREADS :: 11
 N_LIMIT :: LIMIT_WORKER_THREADS + 1
 
 Vfs :: struct {
-	
+
 }
 
 Vdbe :: struct {
-	
+
 }
 
 CollSeq :: struct {
-	
+
 }
 
 Mutex :: struct {
-	
+
 }
 
 Db :: struct {
-	
+
 }
 
 sqlite3 :: struct {
 	pVfs: ^Vfs,            /* OS Interface */
-  pVdbe: ^Vdbe,           /* List of active virtual machines */
-  pDfltColl: ^CollSeq,           /* BINARY collseq for the database encoding */
-  mutex: ^Mutex,         /* Connection mutex */
-  aDb: ^Db,                      /* All backends */
-  nDb: c.int,                      /* Number of backends currently in use */
-  mDbFlags: u32,                 /* flags recording c.internal state */
-  flags: u64,                    /* flags settable by pragmas. See below */
-  lastRowid: i64,                /* ROWID of most recent insert (see above) */
-  szMmap: i64,                   /* Default mmap_size setting */
-  nSchemaLock: u32,              /* Do not reset the schema when non-zero */
-  openFlags: c.uint,       /* Flags passed to sqlite3_vfs.xOpen() */
-  errCode: c.int,                  /* Most recent error code (SQLITE_*) */
-  errMask: c.int,                  /* & result codes with this before returning */
-  iSysErrno: c.int,                /* Errno value from last system error */
-  dbOptFlags: u32,               /* Flags to enable/disable optimizations */
-  enc: u8,                       /* Text encoding */
-  autoCommit: u8,                /* The auto-commit flag. */
-  temp_store: u8,                /* 1: file 2: memory 0: default */
-  mallocFailed: u8,              /* True if we have seen a malloc failure */
-  bBenignMalloc: u8,             /* Do not require OOMs if true */
-  dfltLockMode: u8,              /* Default locking-mode for attached dbs */
-  nextAutovac: c.char,      /* Autovac setting after VACUUM if >=0 */
-  suppressErr: u8,               /* Do not issue error messages if true */
-  vtabOnConflict: u8,            /* Value to return for s3_vtab_on_conflict() */
-  isTransactionSavepoint: u8,    /* True if the outermost savepoc.int is a TS */
-  mTrace: u8,                    /* zero or more SQLITE_TRACE flags */
-  noSharedCache: u8,             /* True if no shared-cache backends */
-  nSqlExec: u8,                  /* Number of pending OP_SqlExec opcodes */
-  nextPagesize: c.int,             /* Pagesize after VACUUM if >0 */
-  magic: u32,                    /* Magic number for detect library misuse */
-  nChange: c.int,                  /* Value returned by sqlite3_changes() */
-  nTotalChange: c.int,             /* Value returned by sqlite3_total_changes() */
-  aLimit: [N_LIMIT]c.int,   /* Limits */
-  nMaxSorterMmap: c.int,           /* Maximum size of regions mapped by sorter */
-  init: struct {      /* Information used during initialization */
-    newTnum: Pgno,               /* Rootpage of table being initialized */
-    iDb: u8,                     /* Which db file is being initialized */
-    busy: u8,                    /* TRUE if currently initializing */
-    orphanTrigger: u8, /* Last statement is orphaned TEMP trigger */
-    imposterTable: u8, /* Building an imposter table */
-    reopenMemdb: u8,   /* ATTACH is really a reopen using MemDB */
-    azInit: ^^u8,              /* "type", "name", and "tbl_name" columns */
-  },
-  nVdbeActive: c.int,              /* Number of VDBEs currently running */
-  nVdbeRead: c.int,                /* Number of active VDBEs that read or write */
-  nVdbeWrite: c.int,               /* Number of active VDBEs that read and write */
-  nVdbeExec: c.int,                /* Number of nested calls to VdbeExec() */
-  nVDestroy: c.int,                /* Number of active OP_VDestroy operations */
-  nExtension: c.int,               /* Number of loaded extensions */
-  aExtension: ^^rawptr,            /* Array of shared library handles */
-  //union {
+	pVdbe: ^Vdbe,           /* List of active virtual machines */
+	pDfltColl: ^CollSeq,           /* BINARY collseq for the database encoding */
+	mutex: ^Mutex,         /* Connection mutex */
+	aDb: ^Db,                      /* All backends */
+	nDb: c.int,                      /* Number of backends currently in use */
+	mDbFlags: u32,                 /* flags recording c.internal state */
+	flags: u64,                    /* flags settable by pragmas. See below */
+	lastRowid: i64,                /* ROWID of most recent insert (see above) */
+	szMmap: i64,                   /* Default mmap_size setting */
+	nSchemaLock: u32,              /* Do not reset the schema when non-zero */
+	openFlags: c.uint,       /* Flags passed to sqlite3_vfs.xOpen() */
+	errCode: c.int,                  /* Most recent error code (SQLITE_*) */
+	errMask: c.int,                  /* & result codes with this before returning */
+	iSysErrno: c.int,                /* Errno value from last system error */
+	dbOptFlags: u32,               /* Flags to enable/disable optimizations */
+	enc: u8,                       /* Text encoding */
+	autoCommit: u8,                /* The auto-commit flag. */
+	temp_store: u8,                /* 1: file 2: memory 0: default */
+	mallocFailed: u8,              /* True if we have seen a malloc failure */
+	bBenignMalloc: u8,             /* Do not require OOMs if true */
+	dfltLockMode: u8,              /* Default locking-mode for attached dbs */
+	nextAutovac: c.char,      /* Autovac setting after VACUUM if >=0 */
+	suppressErr: u8,               /* Do not issue error messages if true */
+	vtabOnConflict: u8,            /* Value to return for s3_vtab_on_conflict() */
+	isTransactionSavepoint: u8,    /* True if the outermost savepoc.int is a TS */
+	mTrace: u8,                    /* zero or more SQLITE_TRACE flags */
+	noSharedCache: u8,             /* True if no shared-cache backends */
+	nSqlExec: u8,                  /* Number of pending OP_SqlExec opcodes */
+	nextPagesize: c.int,             /* Pagesize after VACUUM if >0 */
+	magic: u32,                    /* Magic number for detect library misuse */
+	nChange: c.int,                  /* Value returned by sqlite3_changes() */
+	nTotalChange: c.int,             /* Value returned by sqlite3_total_changes() */
+	aLimit: [N_LIMIT]c.int,   /* Limits */
+	nMaxSorterMmap: c.int,           /* Maximum size of regions mapped by sorter */
+	init: struct {      /* Information used during initialization */
+		newTnum: Pgno,               /* Rootpage of table being initialized */
+		iDb: u8,                     /* Which db file is being initialized */
+		busy: u8,                    /* TRUE if currently initializing */
+		orphanTrigger: u8, /* Last statement is orphaned TEMP trigger */
+		imposterTable: u8, /* Building an imposter table */
+		reopenMemdb: u8,   /* ATTACH is really a reopen using MemDB */
+		azInit: ^^u8,              /* "type", "name", and "tbl_name" columns */
+	},
+	nVdbeActive: c.int,              /* Number of VDBEs currently running */
+	nVdbeRead: c.int,                /* Number of active VDBEs that read or write */
+	nVdbeWrite: c.int,               /* Number of active VDBEs that read and write */
+	nVdbeExec: c.int,                /* Number of nested calls to VdbeExec() */
+	nVDestroy: c.int,                /* Number of active OP_VDestroy operations */
+	nExtension: c.int,               /* Number of loaded extensions */
+	aExtension: ^^rawptr,            /* Array of shared library handles */
+	//union {
 	//void (*xLegacy)(void*,const char*),     /* Legacy trace function */
 	//c.int (*xV2)(u32,void*,void*,void*),      /* V2 Trace function */
-  //} trace,
+	//} trace,
 }
 
 Pgno :: struct {
-	
+
 }
 
 ResultCode :: enum c.int {
