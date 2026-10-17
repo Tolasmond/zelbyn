@@ -12,6 +12,56 @@ odin build .
 - **Windows:** links the bundled `sqlite3/sqlite3.lib` and produces `gnrcrdr.exe`.
 - **Linux:** links the system SQLite (`libsqlite3`; on Arch the `sqlite` package, on Debian/Ubuntu `libsqlite3-dev`) and produces `gnrcrdr.bin`.
 
+## Usage
+
+```
+gnrcrdr <schema.db> <file> [--format N] [--dump tree|json]
+```
+
+Decodes `<file>` with format `N` (default `1`) from the schema database and writes the decoded tree to stdout. For example:
+
+```
+./gnrcrdr.bin data/Gif89aMetadata.sqlite3 data/855.gif
+./gnrcrdr.bin data/Gif89aMetadata.sqlite3 data/855.gif --dump json
+```
+
+Options may also be written `--format=N` and `--dump=json`. `--help` (or `-h`) prints usage.
+
+### Output
+
+`--dump tree` (the default) writes one line per decoded value: its path, ` = `, then the value. Fields are listed in schema order, and `[i]` is the index within each array. A set (such as `Logical Screen Descriptor`) gets no line of its own.
+
+```
+GIF89a[0].Signature[0] = "GIF"
+GIF89a[0].Logical Screen Descriptor[0].Logical Screen Width[0] = 500
+GIF89a[0].Global Color Table[0].Red[0] = 252
+GIF89a[0].Blocks[0].Image[0].Table Based Image Data[0].Image Data[0].Data Sub-Block Values[0] = <254 bytes> 80 42 29 83 84 83 56 3c 83 7e 29 8a 8c 8b 8e 8d ...
+```
+
+Integers are decimal and strings are quoted. A blob shows its length and its first 16 bytes in hex, followed by `...` if it is longer.
+
+`--dump json` writes the same tree as compact JSON on one line. Each set instance is an object whose keys are its field names in schema order, and every field is an array:
+
+```
+{"GIF89a":[{"Signature":["GIF"],"Version":["89a"],"Logical Screen Descriptor":[{"Logical Screen Width":[500],...
+```
+
+Blobs are written in full as lowercase hex strings. NaN and infinite floats are written as `null`.
+
+Because the path is on every line, the text dump works well with `grep`, for example `... data/BOB_89A.GIF | grep 'Comment'`.
+
+### Errors and exit codes
+
+Stdout carries only the decoded tree. Errors and usage messages go to stderr, and nothing is written to stdout if loading or decoding fails.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Success, including `--help` |
+| 1 | The format could not be loaded, the file could not be read or decoded, or the output could not be written |
+| 2 | Usage error: a missing or extra argument, an unknown flag, or a bad `--format` or `--dump` value |
+
+`--dump` values are case-sensitive.
+
 ## Checks and tests
 
 Run from the repository root. All of these must pass before committing:
