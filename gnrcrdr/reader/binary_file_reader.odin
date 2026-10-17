@@ -4,12 +4,15 @@ import dat "../data"
 import fld "../field"
 import mdata "../metadata"
 import "core:log"
+import "core:os"
+import "core:slice"
 
 read :: proc(name: string, format: ^mdata.File_Format, root_field: ^[dynamic]fld.Value) {
-	buf: dat.Byte_Buffer
-	dat.read_file_into_buffer(&buf, name)
-	read_set(root_field, &format.root_metadata_node, &format.metadata, &buf)
-	delete(buf.data.buf)
+	data, _ := os.read_entire_file(name, context.allocator)
+	defer delete(data)
+	r: dat.Reader
+	dat.reader_init(&r, data, .Little)
+	read_set(root_field, &format.root_metadata_node, &format.metadata, &r)
 }
 
 @(private = "file")
@@ -17,12 +20,12 @@ read_set :: proc(
 	field: ^[dynamic]fld.Value,
 	node: ^mdata.Field_Metadata_Tree_Node,
 	metadata: ^mdata.Field_Metadata_Provider,
-	buf: ^dat.Byte_Buffer) {
+	r: ^dat.Reader) {
 
-	count := fld.adjust_count(field, node, metadata, buf)
+	count := fld.adjust_count(field, node, metadata, r)
 
 	for set_index in 0 ..< count {
-		read_set_instance(field, set_index, node, metadata, buf)
+		read_set_instance(field, set_index, node, metadata, r)
 	}
 }
 
@@ -31,7 +34,7 @@ read_growing_set :: proc(
 	set_field: ^[dynamic]fld.Value,
 	node: ^mdata.Field_Metadata_Tree_Node,
 	metadata: ^mdata.Field_Metadata_Provider,
-	buf: ^dat.Byte_Buffer) {
+	r: ^dat.Reader) {
 
 	set_helper_rec, set_helper_exists := metadata.set_helper_map[node.metadata.id]
 
@@ -47,14 +50,8 @@ read_growing_set :: proc(
 				if continuator_exists {
 					set_index := 0
 					for {
-						pos := buf.data.off
-						continuator_data_type_rec :=
-							metadata.data_type_map[length_rec.data_type_id]
-						value, _ := dat.get_integer(
-							buf,
-							dat.Data_Type(continuator_data_type_rec.type),
-						)
-						buf.data.off = pos
+						continuator_data_type_rec := metadata.data_type_map[length_rec.data_type_id]
+						value, _ := dat.peek_integer_at(r, r.pos, dat.Data_Type(continuator_data_type_rec.type))
 						if continuator != value {
 							return
 						}
@@ -65,7 +62,7 @@ read_growing_set :: proc(
 							node,
 						)
 
-						read_set_instance(set_field, set_index, node, metadata, buf)
+						read_set_instance(set_field, set_index, node, metadata, r)
 						set_index += 1
 					}
 				}
@@ -75,13 +72,8 @@ read_growing_set :: proc(
 				if terminator_exists {
 					set_index := 0
 					for {
-						pos := buf.data.off
 						terminator_data_type_rec := metadata.data_type_map[length_rec.data_type_id]
-						value, _ := dat.get_integer(
-							buf,
-							dat.Data_Type(terminator_data_type_rec.type),
-						)
-						buf.data.off = pos
+						value, _ := dat.peek_integer_at(r, r.pos, dat.Data_Type(terminator_data_type_rec.type))
 						if terminator == value {
 							return
 						}
@@ -92,7 +84,7 @@ read_growing_set :: proc(
 							node,
 						)
 
-						read_set_instance(set_field, set_index, node, metadata, buf)
+						read_set_instance(set_field, set_index, node, metadata, r)
 						set_index += 1
 					}
 				}
@@ -107,11 +99,11 @@ read_set_instance :: proc(
 	set_index: int,
 	node: ^mdata.Field_Metadata_Tree_Node,
 	metadata: ^mdata.Field_Metadata_Provider,
-	buf: ^dat.Byte_Buffer) {
+	r: ^dat.Reader) {
 
 	log.debugf(
 		"0x%08X Set: %v (%v), set_index = %v, set_field len = %v",
-		buf.data.off,
+		r.pos,
 		node.metadata.name,
 		node.metadata.id,
 		set_index,
@@ -126,13 +118,13 @@ read_set_instance :: proc(
 
 		if dat.Data_Type(child_metadata.data_type.type) == .Set {
 			if child_metadata.data_type.is_grow_as_needed == 1 {
-				read_growing_set(&parent_map[child_metadata.id], child_node, metadata, buf)
+				read_growing_set(&parent_map[child_metadata.id], child_node, metadata, r)
 			} else {
-				read_set(&parent_map[child_metadata.id], child_node, metadata, buf)
+				read_set(&parent_map[child_metadata.id], child_node, metadata, r)
 			}
 
 		} else {
-			read_field(&parent_map[child_metadata.id], child_node, metadata, buf, nil)
+			read_field(&parent_map[child_metadata.id], child_node, metadata, r, nil)
 		}
 	}
 }
@@ -142,46 +134,46 @@ read_field :: proc(
 	set_field: ^[dynamic]fld.Value,
 	node: ^mdata.Field_Metadata_Tree_Node,
 	metadata: ^mdata.Field_Metadata_Provider,
-	buf: ^dat.Byte_Buffer,
+	r: ^dat.Reader,
 	path_pair: ^fld.Path_Pair) {
 
 	count := fld.get_count(set_field, path_pair)
 
 	for i in 0 ..< count {
-		pos := buf.data.off
+		pos := r.pos
 		value: fld.Value
 
 		data_type := dat.Data_Type(node.metadata.data_type.type)
 
 		#partial switch data_type {
 		case .Int8:
-			value = fld.Value(dat.get_i8(buf))
+			value = fld.Value(dat.read_i8(r) or_else 0)
 		case .UInt8:
-			value = fld.Value(dat.get_u8(buf))
+			value = fld.Value(dat.read_u8(r) or_else 0)
 		case .Int16:
-			value = fld.Value(dat.get_i16(buf))
+			value = fld.Value(dat.read_i16(r) or_else 0)
 		case .UInt16:
-			value = fld.Value(dat.get_u16(buf))
+			value = fld.Value(dat.read_u16(r) or_else 0)
 		case .Int32:
-			value = fld.Value(dat.get_i32(buf))
+			value = fld.Value(dat.read_i32(r) or_else 0)
 		case .UInt32:
-			value = fld.Value(dat.get_u32(buf))
+			value = fld.Value(dat.read_u32(r) or_else 0)
 		case .Int64:
-			value = fld.Value(dat.get_i64(buf))
+			value = fld.Value(dat.read_i64(r) or_else 0)
 		case .UInt64:
-			value = fld.Value(dat.get_u64(buf))
+			value = fld.Value(dat.read_u64(r) or_else 0)
 		case .Float32:
-			value = fld.Value(dat.get_f32(buf))
+			value = fld.Value(dat.read_f32(r) or_else 0)
 		case .Float64:
-			value = fld.Value(dat.get_f64(buf))
+			value = fld.Value(dat.read_f64(r) or_else 0)
 		case .String:
 			len, _ := node.metadata.data_type.max_buffer_length.?
 			//log.debugf("String length = %v", len)
-			value = fld.Value(dat.get_string(buf, len))
+			value = fld.Value(dat.read_string(r, len) or_else "")
 		case .Blob:
-			buffer_length := fld.get_buffer_length(node, metadata, buf)
-			dest := make([]byte, buffer_length)
-			dat.get_bytes(buf, &dest)
+			buffer_length := fld.get_buffer_length(node, metadata, r)
+			src, _ := dat.read_bytes(r, buffer_length)
+			dest := slice.clone(src)
 			value = fld.Value(dest)
 			log.debugf(
 				"0x%08X Read %v = byte[%v], Field = %v",
