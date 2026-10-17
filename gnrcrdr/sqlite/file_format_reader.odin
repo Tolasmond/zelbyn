@@ -83,9 +83,9 @@ load :: proc(db: ^sql.sqlite3, format_id: int, file_format: ^mdata.File_Format) 
 		return query_error(db, rc, "Field")
 	}
 
-	found, rc := read_format(db, format_id, &metadata.format_record)
-	if rc != .OK {
-		return query_error(db, rc, "Format")
+	found, format_rc := read_format(db, format_id, &metadata.format_record)
+	if format_rc != .OK {
+		return query_error(db, format_rc, "Format")
 	}
 	if !found {
 		return Load_Error{kind = .Format_Not_Found, table = "Format", message = strings.clone("format id not found")}
