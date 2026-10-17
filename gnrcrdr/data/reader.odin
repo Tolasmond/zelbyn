@@ -1,5 +1,6 @@
 package data
 
+import "base:intrinsics"
 import "core:encoding/endian"
 
 Read_Error :: enum {
@@ -40,61 +41,15 @@ take :: proc(r: ^Reader, n: int) -> (b: []byte, err: Read_Error) {
 	return
 }
 
-read_i8 :: proc(r: ^Reader) -> (value: i8, err: Read_Error) {
-	b := take(r, 1) or_return
-	return i8(b[0]), .None
-}
-
-read_u8 :: proc(r: ^Reader) -> (value: u8, err: Read_Error) {
-	b := take(r, 1) or_return
-	return b[0], .None
-}
-
-read_i16 :: proc(r: ^Reader) -> (value: i16, err: Read_Error) {
-	b := take(r, 2) or_return
-	value, _ = endian.get_i16(b, r.order)
-	return
-}
-
-read_u16 :: proc(r: ^Reader) -> (value: u16, err: Read_Error) {
-	b := take(r, 2) or_return
-	value, _ = endian.get_u16(b, r.order)
-	return
-}
-
-read_i32 :: proc(r: ^Reader) -> (value: i32, err: Read_Error) {
-	b := take(r, 4) or_return
-	value, _ = endian.get_i32(b, r.order)
-	return
-}
-
-read_u32 :: proc(r: ^Reader) -> (value: u32, err: Read_Error) {
-	b := take(r, 4) or_return
-	value, _ = endian.get_u32(b, r.order)
-	return
-}
-
-read_i64 :: proc(r: ^Reader) -> (value: i64, err: Read_Error) {
-	b := take(r, 8) or_return
-	value, _ = endian.get_i64(b, r.order)
-	return
-}
-
-read_u64 :: proc(r: ^Reader) -> (value: u64, err: Read_Error) {
-	b := take(r, 8) or_return
-	value, _ = endian.get_u64(b, r.order)
-	return
-}
-
-read_f32 :: proc(r: ^Reader) -> (value: f32, err: Read_Error) {
-	b := take(r, 4) or_return
-	value, _ = endian.get_f32(b, r.order)
-	return
-}
-
-read_f64 :: proc(r: ^Reader) -> (value: f64, err: Read_Error) {
-	b := take(r, 8) or_return
-	value, _ = endian.get_f64(b, r.order)
+// Reads a value of type T in r.order. Leaves r unchanged on error.
+@(require_results)
+read :: proc(r: ^Reader, $T: typeid) -> (value: T, err: Read_Error)
+	where intrinsics.type_is_integer(T) || intrinsics.type_is_float(T), intrinsics.type_is_endian_platform(T) {
+	b := take(r, size_of(T)) or_return
+	value = intrinsics.unaligned_load((^T)(raw_data(b)))
+	when size_of(T) > 1 {
+		if r.order != endian.PLATFORM_BYTE_ORDER do value = intrinsics.byte_swap(value)
+	}
 	return
 }
 
@@ -103,25 +58,25 @@ read_f64 :: proc(r: ^Reader) -> (value: f64, err: Read_Error) {
 read_integer :: proc(r: ^Reader, data_type: Data_Type) -> (value: int, err: Read_Error) {
 	switch data_type {
 	case .Int8:
-		v := read_i8(r) or_return
+		v := read(r, i8) or_return
 		value = int(v)
 	case .UInt8:
-		v := read_u8(r) or_return
+		v := read(r, u8) or_return
 		value = int(v)
 	case .Int16:
-		v := read_i16(r) or_return
+		v := read(r, i16) or_return
 		value = int(v)
 	case .UInt16:
-		v := read_u16(r) or_return
+		v := read(r, u16) or_return
 		value = int(v)
 	case .Int32:
-		v := read_i32(r) or_return
+		v := read(r, i32) or_return
 		value = int(v)
 	case .UInt32:
-		v := read_u32(r) or_return
+		v := read(r, u32) or_return
 		value = int(v)
 	case .Int64:
-		v := read_i64(r) or_return
+		v := read(r, i64) or_return
 		value = int(v)
 	case .Set, .UInt64, .Float32, .Float64, .String, .Blob:
 		err = .Unsupported_Type
