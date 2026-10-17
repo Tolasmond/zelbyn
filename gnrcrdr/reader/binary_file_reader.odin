@@ -124,10 +124,6 @@ read_set_instance :: proc(
 	for child_node in node.children {
 		child_metadata := child_node.metadata
 
-		child_path_pair := fld.Path_Pair {
-			id = child_metadata.id,
-		}
-
 		if dat.Data_Type(child_metadata.data_type.type) == .Set {
 			if child_metadata.data_type.is_grow_as_needed == 1 {
 				read_growing_set(&parent_map[child_metadata.id], child_node, metadata, buf)
@@ -136,7 +132,7 @@ read_set_instance :: proc(
 			}
 
 		} else {
-			read_field(set_field, child_node, metadata, buf, &child_path_pair)
+			read_field(&parent_map[child_metadata.id], child_node, metadata, buf, nil)
 		}
 	}
 }
@@ -185,7 +181,6 @@ read_field :: proc(
 		case .Blob:
 			buffer_length := fld.get_buffer_length(node, metadata, buf)
 			dest := make([]byte, buffer_length)
-			defer delete(dest)
 			dat.get_bytes(buf, &dest)
 			value = fld.Value(dest)
 			log.debugf(

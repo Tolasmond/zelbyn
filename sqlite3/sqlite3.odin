@@ -2,7 +2,11 @@ package sqlite3
 
 import "core:c"
 
-foreign import sqlite { "sqlite3.lib" }
+when ODIN_OS == .Windows {
+	foreign import sqlite { "sqlite3.lib" }
+} else {
+	foreign import sqlite { "system:sqlite3" }
+}
 
 callback :: proc"c"(data: rawptr, a: c.int, b: [^]cstring, c: [^]cstring) -> ResultCode
 

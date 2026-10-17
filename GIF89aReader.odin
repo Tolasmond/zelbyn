@@ -17,7 +17,7 @@ main :: proc() {
   context.allocator = mem.tracking_allocator(&tracking_allocator)
 
   file_format: mdat.File_Format
-  dbFilePath:= "data/GIF89aMetadata.sqlite3"
+  dbFilePath:= "data/Gif89aMetadata.sqlite3"
 
   log.debugf("reading %v", dbFilePath)
 
