@@ -1,7 +1,6 @@
 package sqlite
 
 import "core:log"
-import "core:mem"
 import dat "../data"
 import sql "../../sqlite3"
 
@@ -9,14 +8,15 @@ read_packed :: proc(db: ^sql.sqlite3, packed_records: ^[dynamic]^dat.Packed_Reco
 	log.debug("Reading Packed table")
 
   stmt: ^sql.Stmt
-  query_text := "SELECT * FROM Packed"
-	query_data := mem.raw_data(query_text)
-  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
+  rc := prepare(db, "SELECT * FROM Packed ORDER BY Id, LowBit", &stmt)
+  if rc != .OK do return rc
+  defer sql.finalize(stmt)
 
 	for {
-		result = sql.step(stmt)
+		has_row: bool
+		has_row, result = step(stmt)
 
-		if result != .ROW do break
+		if !has_row do break
 
 		record := new(dat.Packed_Record)
 

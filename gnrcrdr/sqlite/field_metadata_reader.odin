@@ -1,7 +1,6 @@
 package sqlite
 
 import "core:log"
-import "core:mem"
 import "core:strings"
 import dat "../data"
 import mdat "../metadata"
@@ -11,14 +10,15 @@ read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_
 	log.debug("Reading Field table")
 
   stmt: ^sql.Stmt
-  query_text := "SELECT * FROM Field"
-	query_data := mem.raw_data(query_text)
-  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
+  rc := prepare(db, "SELECT * FROM Field", &stmt)
+  if rc != .OK do return rc
+  defer sql.finalize(stmt)
 
 	for {
-		result = sql.step(stmt)
+		has_row: bool
+		has_row, result = step(stmt)
 
-		if result != .ROW do break
+		if !has_row do break
 
 		record: dat.Field_Record
 
@@ -34,20 +34,21 @@ read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_
   	field_metadata.name = record.name
   	field_metadata.data_type = data_type_map[record.data_type_id]
 
-    start_index := -1
-    end_index := -1
-
-    for packedRecord, index in packed_records {
-			if packedRecord.id == record.id {
-			  if start_index < 0 {
-				  start_index = index
-			  } else {
-			  	end_index = index
-			  }
+		// packed_records is ordered by Id, so a field's records are contiguous
+		start := -1
+		for p, i in packed_records {
+			if p.id == record.id {
+				start = i
+				break
 			}
 		}
-
-    if start_index >= 0 do field_metadata.packed_fields = packed_records[start_index:end_index]
+		if start >= 0 {
+			end := start
+			for end < len(packed_records) && packed_records[end].id == record.id {
+				end += 1
+			}
+			field_metadata.packed_fields = packed_records[start:end]
+		}
 
   	field_metadata_map[record.id] = field_metadata
 	}

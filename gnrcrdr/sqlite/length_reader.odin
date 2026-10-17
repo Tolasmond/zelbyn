@@ -1,7 +1,6 @@
 package sqlite
 
 import "core:log"
-import "core:mem"
 import "core:strings"
 import dat "../data"
 import sql "../../sqlite3"
@@ -10,14 +9,15 @@ read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^dat.Length_Recor
 	log.debug("Reading Length table")
 
   stmt: ^sql.Stmt
-  query_text := "SELECT * FROM Length"
-	query_data := mem.raw_data(query_text)
-  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
+  rc := prepare(db, "SELECT * FROM Length", &stmt)
+  if rc != .OK do return rc
+  defer sql.finalize(stmt)
 
 	for {
-		result = sql.step(stmt)
+		has_row: bool
+		has_row, result = step(stmt)
 
-		if result != .ROW do break
+		if !has_row do break
 
 		record := new(dat.Length_Record)
 
@@ -50,6 +50,10 @@ read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^dat.Length_Recor
 
   	if (sql.column_type(stmt, i32(Length_Column.flag_mask)) != sql.SqliteColumnType.NULL) {
     	record.flag_mask = sql.column_int64(stmt, i32(Length_Column.flag_mask))
+  	}
+
+  	if (sql.column_type(stmt, i32(Length_Column.flag_shift)) != sql.SqliteColumnType.NULL) {
+    	record.flag_shift = sql.column_int64(stmt, i32(Length_Column.flag_shift))
   	}
 
   	if (sql.column_type(stmt, i32(Length_Column.value_mask)) != sql.SqliteColumnType.NULL) {

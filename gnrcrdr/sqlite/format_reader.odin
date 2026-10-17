@@ -3,20 +3,21 @@ package sqlite
 import sql "../../sqlite3"
 import dat "../data"
 import "core:log"
-import "core:mem"
 import "core:strings"
 
-read_format :: proc(db: ^sql.sqlite3, record: ^dat.Format_Record) -> (result: sql.ResultCode) {
+read_format :: proc(db: ^sql.sqlite3, format_id: int, record: ^dat.Format_Record) -> (found: bool, result: sql.ResultCode) {
 	log.debug("Reading Format table")
 
 	stmt: ^sql.Stmt
-	query_text := "SELECT * FROM Format"
-	data := mem.raw_data(query_text)
-	sql.prepare_v2(db, data, i32(len(query_text)), &stmt, nil)
+	rc := prepare(db, "SELECT * FROM Format WHERE Id = ?1", &stmt)
+	if rc != .OK do return false, rc
+	defer sql.finalize(stmt)
+	rc = sql.bind_int64(stmt, 1, i64(format_id))
+	if rc != .OK do return false, rc
 
-	result = sql.step(stmt)
+	found, result = step(stmt)
 
-  if result != .ROW do return
+	if !found do return
 
 	record.id = sql.column_int64(stmt, i32(Format_Column.id))
 

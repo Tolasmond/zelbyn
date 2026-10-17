@@ -1,22 +1,24 @@
 package sqlite
 
 import "core:log"
-import "core:mem"
 import dat "../data"
 import sql "../../sqlite3"
 
-read_set_helper :: proc(db: ^sql.sqlite3, set_helper_map: ^map[int]^dat.Set_Helper_Record) -> (result: sql.ResultCode) {
+read_set_helper :: proc(db: ^sql.sqlite3, format_id: int, set_helper_map: ^map[int]^dat.Set_Helper_Record) -> (result: sql.ResultCode) {
 	log.debug("Reading SetHelper table")
 
   stmt: ^sql.Stmt
-  query_text := "SELECT * FROM SetHelper"
-	query_data := mem.raw_data(query_text)
-  sql.prepare_v2(db, query_data, i32(len(query_text)), &stmt, nil)
+  rc := prepare(db, "SELECT * FROM SetHelper WHERE FormatId = ?1", &stmt)
+  if rc != .OK do return rc
+  defer sql.finalize(stmt)
+  rc = sql.bind_int64(stmt, 1, i64(format_id))
+  if rc != .OK do return rc
 
 	for {
-		result = sql.step(stmt)
+		has_row: bool
+		has_row, result = step(stmt)
 
-		if result != .ROW do break
+		if !has_row do break
 
 		record := new(dat.Set_Helper_Record)
 
