@@ -1,6 +1,6 @@
 package field
 
-import dat  "../data"
+import dat "../data"
 import eval "../evaluate"
 import mdat "../metadata"
 import "core:mem"
