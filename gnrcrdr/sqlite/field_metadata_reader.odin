@@ -1,6 +1,5 @@
 package sqlite
 
-import "core:log"
 import "core:mem"
 import "core:strings"
 import dat "../data"
@@ -8,7 +7,6 @@ import mdat "../metadata"
 import sql "../../sqlite3"
 
 read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_type_map: ^map[int]^dat.Data_Type_Record, field_metadata_map: ^map[int]^mdat.Field_Metadata, allocator: mem.Allocator) -> (result: sql.ResultCode) {
-	log.debug("Reading Field table")
 	field_metadata_map^ = make(map[int]^mdat.Field_Metadata, allocator)
 
 	stmt: ^sql.Stmt

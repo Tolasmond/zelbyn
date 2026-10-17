@@ -3,7 +3,6 @@ package reader
 import dat "../data"
 import fld "../field"
 import mdata "../metadata"
-import "core:log"
 import "core:mem/virtual"
 import "core:os"
 import "core:slice"
@@ -108,15 +107,6 @@ read_growing_set :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mda
 
 @(private = "file", require_results)
 read_set_instance :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, set_index: int, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
-	log.debugf(
-		"0x%08X Set: %v (%v), set_index = %v, set_field len = %v",
-		d.r.pos,
-		node.metadata.name,
-		node.metadata.id,
-		set_index,
-		len(set_field),
-	)
-
 	parent_map := &set_field[set_index].(map[int][dynamic]fld.Value)
 
 	for child_node in node.children {
@@ -183,28 +173,11 @@ read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Fie
 			src, err = dat.read_bytes(&d.r, buffer_length)
 			if err != .None do return fail(d, err, start)
 			value = fld.Value(slice.clone(src, d.allocator))
-			log.debugf(
-				"0x%08X Read %v = byte[%v], Field = %v",
-				start,
-				data_type,
-				buffer_length,
-				node.metadata.name,
-			)
 		case .Set:
 			return fail(d, .Invalid_Schema, start)
 		}
 
 		if err != .None do return fail(d, err, start)
-
-		if data_type != .Blob {
-			log.debugf(
-				"0x%08X Read %v = %v, Field = %v",
-				start,
-				data_type,
-				value,
-				node.metadata.name,
-			)
-		}
 
 		fld.set_value(node, set_field, nil, i, value)
 

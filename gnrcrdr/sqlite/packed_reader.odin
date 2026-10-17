@@ -1,12 +1,10 @@
 package sqlite
 
-import "core:log"
 import "core:mem"
 import dat "../data"
 import sql "../../sqlite3"
 
 read_packed :: proc(db: ^sql.sqlite3, packed_records: ^[dynamic]^dat.Packed_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
-	log.debug("Reading Packed table")
 	packed_records^ = make([dynamic]^dat.Packed_Record, allocator)
 
 	stmt: ^sql.Stmt

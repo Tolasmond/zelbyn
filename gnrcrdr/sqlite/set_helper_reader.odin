@@ -1,12 +1,10 @@
 package sqlite
 
-import "core:log"
 import "core:mem"
 import dat "../data"
 import sql "../../sqlite3"
 
 read_set_helper :: proc(db: ^sql.sqlite3, format_id: int, set_helper_map: ^map[int]^dat.Set_Helper_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
-	log.debug("Reading SetHelper table")
 	set_helper_map^ = make(map[int]^dat.Set_Helper_Record, allocator)
 
 	stmt: ^sql.Stmt

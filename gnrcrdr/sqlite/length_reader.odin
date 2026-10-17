@@ -1,13 +1,11 @@
 package sqlite
 
-import "core:log"
 import "core:mem"
 import "core:strings"
 import dat "../data"
 import sql "../../sqlite3"
 
 read_length :: proc(db: ^sql.sqlite3, set_length_map: ^map[int]^dat.Length_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
-	log.debug("Reading Length table")
 	set_length_map^ = make(map[int]^dat.Length_Record, allocator)
 
 	stmt: ^sql.Stmt

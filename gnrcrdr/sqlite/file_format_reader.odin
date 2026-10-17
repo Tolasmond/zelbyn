@@ -4,7 +4,6 @@ import sql "../../sqlite3"
 import dat "../data"
 import mdata "../metadata"
 import "core:fmt"
-import "core:log"
 import "core:mem"
 import "core:mem/virtual"
 import "core:strings"
@@ -34,7 +33,6 @@ destroy_load_error :: proc(err: ^Load_Error) {
 // read-only. After an error, mdata.destroy_file_format frees whatever was
 // loaded so far.
 read_file_format :: proc(db_path: string, format_id: int, file_format: ^mdata.File_Format) -> (err: Load_Error) {
-	log.debugf("Opening database and reading format ID %v", format_id)
 	db: ^sql.sqlite3
 	allocator := virtual.arena_allocator(&file_format.arena)
 	cpath := strings.clone_to_cstring(db_path, allocator)
@@ -48,7 +46,6 @@ read_file_format :: proc(db_path: string, format_id: int, file_format: ^mdata.Fi
 
 	err = load(db, format_id, file_format, allocator)
 
-	log.debug("closing database connection")
 	rc = sql.close(db)
 	if rc != .OK && err.kind == .None {
 		err = Load_Error{kind = .Close_Failed, code = rc, message = strings.clone(string(sql.errmsg(db)))}
@@ -107,8 +104,6 @@ load :: proc(db: ^sql.sqlite3, format_id: int, file_format: ^mdata.File_Format, 
 	}
 
 	file_format.root_metadata_node.metadata = root
-
-	log.debug("reading children")
 
 	return read_children(&file_format.root_metadata_node, metadata, allocator)
 }

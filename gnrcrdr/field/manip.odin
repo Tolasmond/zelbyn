@@ -2,7 +2,6 @@ package field
 
 import dat "../data"
 import mdat "../metadata"
-import "core:log"
 import "core:mem"
 import "core:strconv"
 import "core:strings"
@@ -117,15 +116,7 @@ get_field :: proc(parent_field: ^[dynamic]Value, path_pair: ^Path_Pair) -> ^[dyn
 
 	field_value_map := &parent_field[0].(map[int][dynamic]Value)
 
-	field, ok := &field_value_map[path_pair.id]
-
-	if !ok {
-		log.debugf("field_value_map does not have key %v", path_pair.id)
-
-		for key, _ in field_value_map {
-			log.debugf("key = %v", key)
-		}
-	}
+	field, _ := &field_value_map[path_pair.id]
 
 	return field
 }
