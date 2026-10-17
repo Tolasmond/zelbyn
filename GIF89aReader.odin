@@ -10,18 +10,32 @@ import rdr "gnrcrdr/reader"
 import sql "gnrcrdr/sqlite"
 
 main :: proc() {
+	context.logger = log.create_console_logger()
 
-	context.logger = log.create_console_logger()  
+	exit_code := run_tracked()
 
-	tracking_allocator: mem.Tracking_Allocator
-	mem.tracking_allocator_init(&tracking_allocator, context.allocator)
-	context.allocator = mem.tracking_allocator(&tracking_allocator)
+	os.exit(exit_code) // os.exit skips defers: run_tracked has already cleaned up
+}
 
-	exit_code := run()
+// Calls run. In debug builds (-debug) it runs under a tracking allocator and
+// reports leaks and bad frees, either of which turns exit code 0 into 1.
+run_tracked :: proc() -> int {
+	when ODIN_DEBUG {
+		tracking_allocator: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&tracking_allocator, context.allocator)
+		tracking_allocator.bad_free_callback = mem.tracking_allocator_bad_free_callback_add_to_array
+		context.allocator = mem.tracking_allocator(&tracking_allocator)
 
-	reset_tracking_allocator(&tracking_allocator)
-	mem.tracking_allocator_destroy(&tracking_allocator)
-	os.exit(exit_code) // os.exit skips defers: everything must be cleaned up above this line
+		exit_code := run()
+
+		if reset_tracking_allocator(&tracking_allocator) && exit_code == 0 {
+			exit_code = 1
+		}
+		mem.tracking_allocator_destroy(&tracking_allocator)
+		return exit_code
+	} else {
+		return run()
+	}
 }
 
 // Loads the GIF89a format and decodes the sample file. Errors are reported
@@ -80,6 +94,15 @@ reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> bool {
 
 	for _, value in a.allocation_map {
 		fmt.printfln("%v: Leaked %v bytes", value.location, value.size)
+		leaks = true
+	}
+
+	if len(a.bad_free_array) != 0 {
+		fmt.printfln("%v bad frees found!", len(a.bad_free_array))
+	}
+
+	for entry in a.bad_free_array {
+		fmt.printfln("%v: Bad free of %p", entry.location, entry.memory)
 		leaks = true
 	}
 
