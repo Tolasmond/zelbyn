@@ -45,9 +45,9 @@ Fixed_Count :: struct {
 	n: int,
 }
 
-// The value of rule at the reader's position, at most max.
+// The value of expr, an Int expression, at most max.
 Rule_Count :: struct {
-	rule: Length_Rule,
+	expr: ^Expr,
 	max:  Maybe(int),
 }
 
@@ -75,25 +75,6 @@ Marker :: struct {
 	value:  int,
 }
 
-// A length or count computed from integers peeked at the reader's position.
-// When flag is present and reads as zero, the result is 0. Otherwise it is
-// value (0 when absent), with expression applied when present.
-Length_Rule :: struct {
-	type:       dat.Data_Type, // integer type of both peeks
-	flag:       Maybe(Peek),
-	value:      Maybe(Peek),
-	expression: Maybe(string),
-}
-
-// An integer read at offset, from the start of the input when absolute, else
-// from the reader's position, then masked and shifted right.
-Peek :: struct {
-	offset:   int,
-	absolute: bool,
-	mask:     Maybe(int),
-	shift:    uint,
-}
-
 // The byte length of each String or Blob element.
 Length :: union {
 	Fixed_Length,
@@ -104,10 +85,10 @@ Fixed_Length :: struct {
 	n: int,
 }
 
-// The value of rule at the reader's position, which must lie within
-// [min, max] (either bound may be absent).
+// The value of expr, an Int expression evaluated for each element, which
+// must lie within [min, max] (either bound may be absent).
 Rule_Length :: struct {
-	rule:     Length_Rule,
+	expr:     ^Expr,
 	min, max: Maybe(int),
 }
 

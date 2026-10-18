@@ -26,6 +26,7 @@ read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Val
 
 	d := Decoder{allocator = allocator}
 	d.path = make([dynamic]Path_Segment, allocator)
+	d.frames = make([dynamic]^map[int][dynamic]fld.Value, allocator)
 	dat.reader_init(&d.r, data, .Little)
 
 	rerr := read_set(&d, &tree.root, format.root)
@@ -44,7 +45,7 @@ read_set :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Node) -> 
 	case mdata.Fixed_Count:
 		count = c.n
 	case mdata.Rule_Count:
-		n, err := eval_rule(&d.r, c.rule, d.allocator)
+		n, err := eval_int(d, c.expr)
 		if err == .None do err = check_count(n, c.max)
 		if err != .None do return fail(d, err, d.r.pos)
 		count = n
@@ -99,6 +100,9 @@ read_set_instance :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.
 	append(field, make(map[int][dynamic]fld.Value, len(node.children), d.allocator))
 	instance := &field[len(field) - 1].(map[int][dynamic]fld.Value)
 
+	// on error the frame is left pushed, like the path segment
+	append(&d.frames, instance)
+
 	for child in node.children {
 		values := map_insert(instance, child.id, make([dynamic]fld.Value, d.allocator))
 
@@ -109,6 +113,7 @@ read_set_instance :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.
 		}
 	}
 
+	pop(&d.frames)
 	return .None
 }
 
@@ -148,12 +153,12 @@ read_field :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, node: ^mdata.Node) 
 			value, err = to_value(dat.read(&d.r, f64))
 		case .String:
 			n: int
-			n, err = byte_length(&d.r, node.length, d.allocator)
+			n, err = byte_length(d, node.length, i)
 			if err != .None do return fail(d, err, start)
 			value, err = to_value(dat.read_string(&d.r, n, d.allocator))
 		case .Blob:
 			n: int
-			n, err = byte_length(&d.r, node.length, d.allocator)
+			n, err = byte_length(d, node.length, i)
 			if err != .None do return fail(d, err, start)
 			src: []byte
 			src, err = dat.read_bytes(&d.r, n)
