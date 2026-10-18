@@ -21,7 +21,7 @@ check_count :: proc(count: int, max: Maybe(int)) -> dat.Read_Error {
 @(private)
 markers_match :: proc(r: ^dat.Reader, markers: []mdata.Marker) -> bool {
 	for m in markers {
-		value, err := dat.peek_integer_at(r, r.pos + m.offset, m.type)
+		value, err := dat.peek_integer_at(r, r.pos + m.offset, m.type, m.order)
 		if err != .None || value != m.value do return false
 	}
 	return true

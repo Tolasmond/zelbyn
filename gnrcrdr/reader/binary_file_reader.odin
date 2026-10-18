@@ -27,7 +27,7 @@ read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Val
 	d := Decoder{allocator = allocator}
 	d.path = make([dynamic]Path_Segment, allocator)
 	d.frames = make([dynamic]^map[int][dynamic]fld.Value, allocator)
-	dat.reader_init(&d.r, data, .Little)
+	dat.reader_init(&d.r, data)
 
 	rerr := read_set(&d, &tree.root, format.root)
 	if rerr != .None && d.err.kind == .None {
@@ -71,7 +71,7 @@ read_set :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Node) -> 
 @(private = "file", require_results)
 read_repeat :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Node, repeat: mdata.Repeat_Count) -> dat.Read_Error {
 	for {
-		value, peek_err := dat.peek_integer_at(&d.r, d.r.pos, repeat.type)
+		value, peek_err := dat.peek_integer_at(&d.r, d.r.pos, repeat.type, repeat.order)
 
 		if repeat.until {
 			if peek_err != .None do return fail(d, .Unexpected_EOF, d.r.pos)
@@ -104,12 +104,11 @@ read_set_instance :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.
 	append(&d.frames, instance)
 
 	for child in node.children {
-		values := map_insert(instance, child.id, make([dynamic]fld.Value, d.allocator))
-
 		if child.type == .Set {
+			values := map_insert(instance, child.id, make([dynamic]fld.Value, d.allocator))
 			read_set(d, values, child) or_return
 		} else {
-			read_field(d, values, child) or_return
+			read_field(d, instance, child) or_return
 		}
 	}
 
@@ -117,9 +116,17 @@ read_set_instance :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.
 	return .None
 }
 
-// Appends every element of a field that is not a set to values.
+// Appends every element of node, a field that is not a set, to its values
+// in instance, and the bit fields of each element to theirs.
 @(private = "file", require_results)
-read_field :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, node: ^mdata.Node) -> dat.Read_Error {
+read_field :: proc(d: ^Decoder, instance: ^map[int][dynamic]fld.Value, node: ^mdata.Node) -> dat.Read_Error {
+	// every key is inserted before any pointer into instance is taken
+	instance[node.id] = make([dynamic]fld.Value, d.allocator)
+	for bit in node.bits {
+		instance[bit.id] = make([dynamic]fld.Value, d.allocator)
+	}
+	values := &instance[node.id]
+
 	// the plan gives every field that is not a set a fixed count
 	count := node.count.(mdata.Fixed_Count).n
 
@@ -132,25 +139,25 @@ read_field :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, node: ^mdata.Node) 
 
 		switch node.type {
 		case .Int8:
-			value, err = to_value(dat.read(&d.r, i8))
+			value, err = to_value(dat.read(&d.r, i8, node.order))
 		case .UInt8:
-			value, err = to_value(dat.read(&d.r, u8))
+			value, err = to_value(dat.read(&d.r, u8, node.order))
 		case .Int16:
-			value, err = to_value(dat.read(&d.r, i16))
+			value, err = to_value(dat.read(&d.r, i16, node.order))
 		case .UInt16:
-			value, err = to_value(dat.read(&d.r, u16))
+			value, err = to_value(dat.read(&d.r, u16, node.order))
 		case .Int32:
-			value, err = to_value(dat.read(&d.r, i32))
+			value, err = to_value(dat.read(&d.r, i32, node.order))
 		case .UInt32:
-			value, err = to_value(dat.read(&d.r, u32))
+			value, err = to_value(dat.read(&d.r, u32, node.order))
 		case .Int64:
-			value, err = to_value(dat.read(&d.r, i64))
+			value, err = to_value(dat.read(&d.r, i64, node.order))
 		case .UInt64:
-			value, err = to_value(dat.read(&d.r, u64))
+			value, err = to_value(dat.read(&d.r, u64, node.order))
 		case .Float32:
-			value, err = to_value(dat.read(&d.r, f32))
+			value, err = to_value(dat.read(&d.r, f32, node.order))
 		case .Float64:
-			value, err = to_value(dat.read(&d.r, f64))
+			value, err = to_value(dat.read(&d.r, f64, node.order))
 		case .String:
 			n: int
 			n, err = byte_length(d, node.length, i)
@@ -168,11 +175,22 @@ read_field :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, node: ^mdata.Node) 
 			panic("read_field: called for a set")
 		}
 
+		if err == .None do err = check_valid(value, node.valid)
 		if err != .None do return fail(d, err, start)
 
 		append(values, value)
 
 		pop(&d.path)
+
+		for bit in node.bits {
+			bit_value := bit_field_value(value, bit)
+			append(&instance[bit.id], bit_value)
+
+			if e := check_valid(bit_value, bit.valid); e != .None {
+				append(&d.path, Path_Segment{bit.name, i})
+				return fail(d, e, start)
+			}
+		}
 	}
 
 	return .None

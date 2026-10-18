@@ -2,6 +2,7 @@ package expression
 
 import dat "../data"
 import mdata "../metadata"
+import "core:encoding/endian"
 import "core:fmt"
 import "core:mem"
 
@@ -297,9 +298,9 @@ io_pos :: proc(allocator: mem.Allocator) -> ^mdata.Expr {
 
 // type must be an integer type the reader can peek (not UInt64), and pos an
 // Int.
-peek :: proc(type: dat.Data_Type, pos: ^mdata.Expr, allocator: mem.Allocator) -> ^mdata.Expr {
+peek :: proc(type: dat.Data_Type, order: endian.Byte_Order, pos: ^mdata.Expr, allocator: mem.Allocator) -> ^mdata.Expr {
 	assert(type in bit_set[dat.Data_Type]{.Int8, .UInt8, .Int16, .UInt16, .Int32, .UInt32, .Int64} && pos.type == .Int)
-	return built(.Int, mdata.Peek{type, pos}, allocator)
+	return built(.Int, mdata.Peek{type, order, pos}, allocator)
 }
 
 @(private = "file")

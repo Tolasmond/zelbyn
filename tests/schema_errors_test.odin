@@ -84,8 +84,14 @@ SCHEMA_ERROR_CASES := [?]Schema_Error_Case {
 	{"packed bits too wide", proc(r: ^sql.Records, a: mem.Allocator) {r.packed_records[0].high_bit = 8}, "Packed", "not within 0 to 7"},
 	{"packed field without a data type", proc(r: ^sql.Records, a: mem.Allocator) {r.field_map[5009].data_type_id = 999}, "Field", "Field row 5009: data type 999 not found"},
 	{"packed field not an integer", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[6].type = 11}, "Packed", "packed field 5009 is a String, not an integer"},
+	{"packed field too narrow", proc(r: ^sql.Records, a: mem.Allocator) {
+			r.data_type_map[6].type = 1 // Int8
+			r.packed_records[0].high_bit = 7
+		}, "Packed", "packed field 5009 has 8 bits, too many for a Int8"},
+	{"packed field with a sibling's id", proc(r: ^sql.Records, a: mem.Allocator) {r.packed_records[0].field_id = 5004}, "Packed", "field 5003 (Logical Screen Descriptor): packed field 5004 has the id of another field of the set"},
+	{"packed field twice", proc(r: ^sql.Records, a: mem.Allocator) {r.packed_records[1].field_id = 5009}, "Packed", "packed field 5009 has the id of another field of the set"},
 
-	// DefaultValue
+	// DefaultValue, MinValue, MaxValue, Pattern and the unchecked columns
 	{"default on a set", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[1].default_value = "0"}, "DataType", "data type 1: a Set cannot have a DefaultValue"},
 	{"default on a blob", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[22].default_value = "00"}, "DataType", "data type 22: a Blob cannot have a DefaultValue"},
 	{"default not a number", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[13].default_value = "0x21"}, "DataType", `data type 13: DefaultValue "0x21" is not a UInt8`},
@@ -112,6 +118,21 @@ SCHEMA_ERROR_CASES := [?]Schema_Error_Case {
 			r.data_type_map[19].default_value = "1e39"
 			r.data_type_map[19].max_value = nil
 		}, "DataType", `DefaultValue "1e39" is not a Float32`},
+	{"MinValue not a number without a default", proc(r: ^sql.Records, a: mem.Allocator) {
+			r.data_type_map[19].default_value = nil
+			r.data_type_map[19].min_value = "low"
+		}, "DataType", `data type 19: MinValue "low" is not a UInt16`},
+	{"MinValue above MaxValue", proc(r: ^sql.Records, a: mem.Allocator) {
+			r.data_type_map[19].default_value = nil
+			r.data_type_map[19].min_value = "10"
+			r.data_type_map[19].max_value = "5"
+		}, "DataType", "data type 19: MinValue 10 is above MaxValue 5"},
+	{"MinValue on a String", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[10000].min_value = "A"}, "DataType", "data type 10000: a String cannot have a MinValue or MaxValue"},
+	{"Pattern on a number", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[7].pattern = "^1$"}, "DataType", "data type 7: a UInt8 cannot have a Pattern"},
+	{"Pattern with syntax", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[10000].pattern = "^GI.$"}, "DataType", `data type 10000: Pattern "^GI.$" is not supported`},
+	{"Pattern without anchors", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[10000].pattern = "GIF"}, "DataType", `data type 10000: Pattern "GIF" is not supported`},
+	{"Units", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[19].units = "px"}, "DataType", "data type 19: Units is not supported"},
+	{"ComparisonTolerance", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[19].comparison_tolerance = 0.5}, "DataType", "data type 19: ComparisonTolerance is not supported"},
 	{"String default too long", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[10000].default_value = "GIF8"}, "DataType", `data type 10000: DefaultValue "GIF8" is longer than MaxBufferLength 3`},
 }
 

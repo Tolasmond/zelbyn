@@ -15,19 +15,23 @@ Read_Error :: enum {
 	Integer_Overflow,      // an expression's result, or an integer field it reads, does not fit in an int
 	Invalid_Shift,         // an expression shifts by a negative amount or by 64 or more
 	Absent_Field,          // an expression refers to a field that has no value (not read yet, or absent)
+	Not_Equal,             // a value is not the one its field requires (Kaitai's contents, valid: eq)
+	Less_Than_Min,         // a value is below its field's minimum (valid: min)
+	Greater_Than_Max,      // a value is above its field's maximum (valid: max)
+	Not_Any_Of,            // a value is none of those its field allows (valid: any-of)
 	File_Read_Failed,      // the input file could not be read
 }
 
 // Bounds-checked cursor over a byte slice. Every read either succeeds and
-// advances pos, or fails and leaves the reader unchanged.
+// advances pos, or fails and leaves the reader unchanged. Each read of a
+// number names its byte order.
 Reader :: struct {
-	data:  []byte,
-	pos:   int,
-	order: endian.Byte_Order,
+	data: []byte,
+	pos:  int,
 }
 
-reader_init :: proc(r: ^Reader, data: []byte, order := endian.Byte_Order.Little) {
-	r^ = Reader{data = data, order = order}
+reader_init :: proc(r: ^Reader, data: []byte) {
+	r^ = Reader{data = data}
 }
 
 remaining :: proc(r: ^Reader) -> int {
@@ -44,43 +48,43 @@ take :: proc(r: ^Reader, n: int) -> (b: []byte, err: Read_Error) {
 	return
 }
 
-// Reads a value of type T in r.order. Leaves r unchanged on error.
+// Reads a value of type T in byte order order. Leaves r unchanged on error.
 @(require_results)
-read :: proc(r: ^Reader, $T: typeid) -> (value: T, err: Read_Error)
+read :: proc(r: ^Reader, $T: typeid, order: endian.Byte_Order) -> (value: T, err: Read_Error)
 	where intrinsics.type_is_integer(T) || intrinsics.type_is_float(T), intrinsics.type_is_endian_platform(T) {
 	b := take(r, size_of(T)) or_return
 	value = intrinsics.unaligned_load((^T)(raw_data(b)))
 	when size_of(T) > 1 {
-		if r.order != endian.PLATFORM_BYTE_ORDER do value = intrinsics.byte_swap(value)
+		if order != endian.PLATFORM_BYTE_ORDER do value = intrinsics.byte_swap(value)
 	}
 	return
 }
 
-// Reads an integer-typed value as int. Non-integer types return
-// .Unsupported_Type without consuming anything.
+// Reads an integer-typed value in byte order order as int. Non-integer
+// types return .Unsupported_Type without consuming anything.
 @(require_results)
-read_integer :: proc(r: ^Reader, data_type: Data_Type) -> (value: int, err: Read_Error) {
+read_integer :: proc(r: ^Reader, data_type: Data_Type, order: endian.Byte_Order) -> (value: int, err: Read_Error) {
 	switch data_type {
 	case .Int8:
-		v := read(r, i8) or_return
+		v := read(r, i8, order) or_return
 		value = int(v)
 	case .UInt8:
-		v := read(r, u8) or_return
+		v := read(r, u8, order) or_return
 		value = int(v)
 	case .Int16:
-		v := read(r, i16) or_return
+		v := read(r, i16, order) or_return
 		value = int(v)
 	case .UInt16:
-		v := read(r, u16) or_return
+		v := read(r, u16, order) or_return
 		value = int(v)
 	case .Int32:
-		v := read(r, i32) or_return
+		v := read(r, i32, order) or_return
 		value = int(v)
 	case .UInt32:
-		v := read(r, u32) or_return
+		v := read(r, u32, order) or_return
 		value = int(v)
 	case .Int64:
-		v := read(r, i64) or_return
+		v := read(r, i64, order) or_return
 		value = int(v)
 	case .Set, .UInt64, .Float32, .Float64, .String, .Blob:
 		err = .Unsupported_Type
@@ -122,9 +126,9 @@ read_string :: proc(r: ^Reader, n: int, allocator := context.allocator) -> (valu
 
 // Reads an integer at absolute position pos without changing r.
 @(require_results)
-peek_integer_at :: proc(r: ^Reader, pos: int, data_type: Data_Type) -> (int, Read_Error) {
+peek_integer_at :: proc(r: ^Reader, pos: int, data_type: Data_Type, order: endian.Byte_Order) -> (int, Read_Error) {
 	if pos < 0 || pos >= len(r.data) do return 0, .Offset_Out_Of_Range
 	tmp := r^
 	tmp.pos = pos
-	return read_integer(&tmp, data_type)
+	return read_integer(&tmp, data_type, order)
 }

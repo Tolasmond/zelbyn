@@ -1,6 +1,7 @@
 package metadata
 
 import dat "../data"
+import "core:encoding/endian"
 
 // A node of a parsed expression (§6.3). The parser (package expression)
 // gives every node a syntax variant; resolving the expression replaces the
@@ -140,11 +141,13 @@ Io_Eof :: struct {}
 // _index: the index of the element being read.
 Repeat_Index :: struct {}
 
-// The integer of type at position pos (from the start of the input), read
-// without moving the reader. No .ksy syntax yet: front ends build it.
+// The integer of type, in order, at position pos (from the start of the
+// input), read without moving the reader. No .ksy syntax yet: front ends
+// build it.
 Peek :: struct {
-	type: dat.Data_Type,
-	pos:  ^Expr,
+	type:  dat.Data_Type,
+	order: endian.Byte_Order,
+	pos:   ^Expr,
 }
 
 // True when the field is read once in each instance of its parent, so that

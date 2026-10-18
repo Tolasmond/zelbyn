@@ -4,6 +4,7 @@ import dat "../data"
 import expr "../expression"
 import mdata "../metadata"
 import "base:intrinsics"
+import "core:encoding/endian"
 import "core:fmt"
 import "core:math"
 import "core:mem"
@@ -11,9 +12,16 @@ import "core:mem/virtual"
 import "core:strconv"
 import "core:strings"
 
+// The Format table has no byte order column; GIF is little-endian.
+@(private = "file")
+ORDER :: endian.Byte_Order.Little
+
 // Integer types the decoder can peek (dat.read_integer).
 @(private = "file")
 PEEKABLE :: bit_set[dat.Data_Type]{.Int8, .UInt8, .Int16, .UInt16, .Int32, .UInt32, .Int64}
+
+@(private = "file")
+SIGNED :: bit_set[dat.Data_Type]{.Int8, .Int16, .Int32, .Int64}
 
 @(private = "file")
 TYPE_SIZE :: #partial [dat.Data_Type]int {
@@ -57,11 +65,17 @@ Compiler :: struct {
 //   - a String without MaxBufferLength, a blob whose fixed length is below
 //     its MinBufferLength, and MinBufferLength > MaxBufferLength
 //   - packed fields on a non-integer field, or with bits outside its width,
-//     or whose own data type is missing or not an integer
+//     or whose own data type is missing, not an integer, or too narrow for
+//     the bits; and a packed field with the id of another child or packed
+//     field of the same set (their values are kept side by side)
 //   - a DefaultValue on a Set or Blob, one that is not a number of the
 //     field's type (integers in decimal) or lies outside MinValue and
-//     MaxValue (when a default is present, those must be numbers of the type
-//     too), and a String default longer than MaxBufferLength
+//     MaxValue, and a String default longer than MaxBufferLength
+//   - a MinValue or MaxValue that is not a number of the field's type, or
+//     on a Set, String or Blob, and a MinValue above the MaxValue
+//   - a Pattern on a field that is not a String, and any Pattern other than
+//     a literal (^text$, with no other regular expression syntax)
+//   - Units and ComparisonTolerance, which nothing would check
 compile :: proc(records: ^Records, file_format: ^mdata.File_Format) -> Load_Error {
 	scratch: virtual.Arena
 	defer virtual.arena_destroy(&scratch)
@@ -100,7 +114,7 @@ compile_node :: proc(c: ^Compiler, id: int, table: string) -> (node: ^mdata.Node
 	c.nodes[id] = nil // in progress: meeting id again below it is a cycle
 
 	node = new(mdata.Node, c.allocator)
-	node^ = {id = id, name = strings.clone(field.name, c.allocator), type = dat.Data_Type(dt.type)}
+	node^ = {id = id, name = strings.clone(field.name, c.allocator), type = dat.Data_Type(dt.type), order = ORDER}
 
 	grow := false
 	if g, has_grow := dt.is_grow_as_needed.?; has_grow {
@@ -136,6 +150,7 @@ compile_node :: proc(c: ^Compiler, id: int, table: string) -> (node: ^mdata.Node
 	max_bytes := 0
 	if l, fixed := node.length.(mdata.Fixed_Length); fixed do max_bytes = l.n
 	node.default_value = compile_default(c, dt, node.type, max_bytes) or_return
+	node.valid = compile_valid(c, dt, node.type) or_return
 	node.bits = compile_bits(c, node) or_return
 
 	c.nodes[id] = node
@@ -184,6 +199,21 @@ compile_children :: proc(c: ^Compiler, node: ^mdata.Node, rows: []^Parent_Record
 			}
 		}
 		children[i] = compile_node(c, row.child_id, "Parent") or_return
+	}
+
+	for child, i in children {
+		for bit, k in child.bits {
+			clash := false
+			for other, j in children {
+				if other.id == bit.id do clash = true
+				if j < i {
+					for b in other.bits do clash ||= b.id == bit.id
+				}
+			}
+			for b in child.bits[:k] do clash ||= b.id == bit.id
+
+			if clash do return fail(c, "Packed", "field %v (%s): packed field %v has the id of another field of the set", node.id, node.name, bit.id)
+		}
 	}
 
 	node.children = children
@@ -235,7 +265,7 @@ marker_count :: proc(c: ^Compiler, node: ^mdata.Node, marker_id: int) -> (count:
 
 	markers := make([]mdata.Marker, len(rows), c.allocator)
 	for row, i in rows {
-		markers[i] = {offset = row.byte_offset, type = peek_type(c, row.data_type_id, "MarkerOffset", marker_id) or_return, value = row.marker}
+		markers[i] = {offset = row.byte_offset, type = peek_type(c, row.data_type_id, "MarkerOffset", marker_id) or_return, value = row.marker, order = ORDER}
 	}
 	return mdata.Marker_Count{markers}, true
 }
@@ -269,6 +299,7 @@ repeat_count :: proc(c: ^Compiler, node: ^mdata.Node, length_id: int) -> (repeat
 	repeat.type = peek_type(c, rec.data_type_id, "Length", rec.id) or_return
 	repeat.value = has_continuator ? continuator : terminator
 	repeat.until = has_terminator
+	repeat.order = ORDER
 	return repeat, true
 }
 
@@ -351,7 +382,7 @@ peek :: proc(
 	case:
 		pos = expr.io_pos(c.allocator)
 	}
-	e = expr.peek(type, pos, c.allocator)
+	e = expr.peek(type, ORDER, pos, c.allocator)
 
 	if m, has_mask := mask.?; has_mask {
 		e = expr.binary(.And, e, expr.int_literal(m, c.allocator), c.allocator)
@@ -423,12 +454,21 @@ compile_bits :: proc(c: ^Compiler, node: ^mdata.Node) -> (bits: []mdata.Bit_Fiel
 			return nil, fail(c, "Packed", "field %v (%s): packed field %v has bits %v to %v, not within 0 to %v", node.id, node.name, p.field_id, p.low_bit, p.high_bit, width - 1)
 		}
 
+		// the bits are an unsigned number, which a signed type holds in one bit fewer
+		value_bits := 8 * sizes[type]
+		if type in SIGNED do value_bits -= 1
+		if bit_count := p.high_bit - p.low_bit + 1; bit_count > value_bits {
+			return nil, fail(c, "Packed", "field %v (%s): packed field %v has %v bits, too many for a %v", node.id, node.name, p.field_id, bit_count, type)
+		}
+
 		bits[i] = {
 			id            = p.field_id,
 			name          = strings.clone(field.name, c.allocator),
+			type          = type,
 			low           = p.low_bit,
 			high          = p.high_bit,
 			default_value = compile_default(c, dt, type, 0) or_return,
+			valid         = compile_valid(c, dt, type) or_return,
 		}
 		i += 1
 	}
@@ -478,17 +518,102 @@ compile_default :: proc(c: ^Compiler, dt: ^Data_Type_Record, type: dat.Data_Type
 @(private = "file")
 default_number :: proc(c: ^Compiler, dt: ^Data_Type_Record, text: string, type: dat.Data_Type, $T: typeid) -> (value: mdata.Scalar, ok: bool) {
 	n := parse_number(c, dt, "DefaultValue", text, type, T) or_return
+	lo, hi := value_range(c, dt, type, T) or_return
 
-	if lo_text, has_min := dt.min_value.?; has_min {
-		lo := parse_number(c, dt, "MinValue", lo_text, type, T) or_return
-		if !(lo <= n) do return nil, fail(c, "DataType", "data type %v: DefaultValue %v is below MinValue %v", dt.id, text, lo_text)
+	if lo, has_min := lo.?; has_min && !(lo <= n) {
+		return nil, fail(c, "DataType", "data type %v: DefaultValue %v is below MinValue %v", dt.id, text, dt.min_value.? or_else "")
 	}
-	if hi_text, has_max := dt.max_value.?; has_max {
-		hi := parse_number(c, dt, "MaxValue", hi_text, type, T) or_return
-		if !(n <= hi) do return nil, fail(c, "DataType", "data type %v: DefaultValue %v is above MaxValue %v", dt.id, text, hi_text)
+	if hi, has_max := hi.?; has_max && !(n <= hi) {
+		return nil, fail(c, "DataType", "data type %v: DefaultValue %v is above MaxValue %v", dt.id, text, dt.max_value.? or_else "")
 	}
 
 	return n, true
+}
+
+// dt's MinValue and MaxValue as T; nil when absent.
+@(private = "file")
+value_range :: proc(c: ^Compiler, dt: ^Data_Type_Record, type: dat.Data_Type, $T: typeid) -> (lo, hi: Maybe(T), ok: bool) {
+	if text, has_min := dt.min_value.?; has_min do lo = parse_number(c, dt, "MinValue", text, type, T) or_return
+	if text, has_max := dt.max_value.?; has_max do hi = parse_number(c, dt, "MaxValue", text, type, T) or_return
+	return lo, hi, true
+}
+
+// dt's MinValue, MaxValue and Pattern as a check on values of type, or nil
+// when none of them is set. Equal bounds and a Pattern both compile to
+// Valid_Eq.
+@(private = "file")
+compile_valid :: proc(c: ^Compiler, dt: ^Data_Type_Record, type: dat.Data_Type) -> (valid: mdata.Valid, ok: bool) {
+	if dt.units != nil do return nil, fail(c, "DataType", "data type %v: Units is not supported", dt.id)
+	if dt.comparison_tolerance != nil do return nil, fail(c, "DataType", "data type %v: ComparisonTolerance is not supported", dt.id)
+
+	has_range := dt.min_value != nil || dt.max_value != nil
+	if has_range && (type == .Set || type == .String || type == .Blob) {
+		return nil, fail(c, "DataType", "data type %v: a %v cannot have a MinValue or MaxValue", dt.id, type)
+	}
+
+	if pattern, has_pattern := dt.pattern.?; has_pattern {
+		if type != .String do return nil, fail(c, "DataType", "data type %v: a %v cannot have a Pattern", dt.id, type)
+		text, is_literal := pattern_literal(pattern)
+		if !is_literal do return nil, fail(c, "DataType", "data type %v: Pattern %q is not supported; the only patterns are literals, ^text$", dt.id, pattern)
+		return mdata.Valid_Eq{strings.clone(text, c.allocator)}, true
+	}
+
+	if !has_range do return nil, true
+
+	switch type {
+	case .Set, .String, .Blob:
+		unreachable()
+	case .Int8:
+		return valid_range(c, dt, type, i8)
+	case .UInt8:
+		return valid_range(c, dt, type, u8)
+	case .Int16:
+		return valid_range(c, dt, type, i16)
+	case .UInt16:
+		return valid_range(c, dt, type, u16)
+	case .Int32:
+		return valid_range(c, dt, type, i32)
+	case .UInt32:
+		return valid_range(c, dt, type, u32)
+	case .Int64:
+		return valid_range(c, dt, type, i64)
+	case .UInt64:
+		return valid_range(c, dt, type, u64)
+	case .Float32:
+		return valid_range(c, dt, type, f32)
+	case .Float64:
+		return valid_range(c, dt, type, f64)
+	}
+	unreachable()
+}
+
+@(private = "file")
+valid_range :: proc(c: ^Compiler, dt: ^Data_Type_Record, type: dat.Data_Type, $T: typeid) -> (valid: mdata.Valid, ok: bool) {
+	lo, hi := value_range(c, dt, type, T) or_return
+	lo_value, has_min := lo.?
+	hi_value, has_max := hi.?
+
+	if has_min && has_max {
+		if !(lo_value <= hi_value) {
+			return nil, fail(c, "DataType", "data type %v: MinValue %v is above MaxValue %v", dt.id, dt.min_value.? or_else "", dt.max_value.? or_else "")
+		}
+		if lo_value == hi_value do return mdata.Valid_Eq{lo_value}, true
+	}
+
+	r: mdata.Valid_Range
+	if has_min do r.min = lo_value
+	if has_max do r.max = hi_value
+	return r, true
+}
+
+// The text a pattern matches when it is ^text$ and text has no other
+// regular expression syntax.
+@(private = "file")
+pattern_literal :: proc(pattern: string) -> (text: string, ok: bool) {
+	if len(pattern) < 2 || pattern[0] != '^' || pattern[len(pattern) - 1] != '$' do return "", false
+	text = pattern[1:len(pattern) - 1]
+	if strings.contains_any(text, `\.^$|?*+()[]{}`) do return "", false
+	return text, true
 }
 
 // text as a T: a float, or a decimal integer within T's range. column names
