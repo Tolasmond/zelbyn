@@ -7,12 +7,14 @@ import "core:encoding/endian"
 // the format is loaded, so decoding needs no lookups. A field contained in
 // several sets has one node, shared by all of them; the plan has no cycles.
 Node :: struct {
-	id:            int, // the field's id: the key of its values in a decoded set instance
-	name:          string,
+	id:            int,    // the field's id: the key of its values in a decoded set instance
+	name:          string, // shown in the dump and in error paths
+	ref_name:      string, // what expressions call it: the .ksy id; the same as name for the SQLite schema
 	type:          dat.Data_Type,
 	order:         endian.Byte_Order, // integer and float types: the byte order they are read in
 	count:         Count,             // instances of a set, or elements of any other field
 	length:        Length,            // String and Blob only: the byte length of each element
+	drop_nul:      bool,              // String only: drop every NUL byte, as the SQLite schema did; Kaitai's str keeps them (§7.3)
 	children:      []^Node,           // Set only, in order
 	bits:          []Bit_Field,       // integer types only: packed subfields, decoded from each element
 	default_value: Scalar,            // DefaultValue as the field's type; nil when absent (not used by the decoder yet)

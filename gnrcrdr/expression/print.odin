@@ -107,7 +107,7 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 		if inst, is_instance := x.base.variant.(mdata.Instance); !is_instance || inst.root || inst.up > 0 {
 			strings.write_byte(b, '.')
 		}
-		strings.write_string(b, x.node.name)
+		strings.write_string(b, x.node.ref_name)
 	case mdata.Size:
 		write(b, x.operand)
 		strings.write_string(b, ".size")

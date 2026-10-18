@@ -11,7 +11,20 @@ import "core:mem"
 // first. Names refer to fields of the last type.
 Scope :: struct {
 	types:     []^mdata.Node,
-	in_repeat: bool, // the expression is evaluated for each element of a repeated field, so _index is defined
+	in_repeat: bool,   // the expression is evaluated for each element of a repeated field, so _index is defined
+	enums:     []Enum, // the enums enum constants may name; the first with a name is used
+}
+
+// A schema's enum: its values, by name. An enum constant (name::value) is
+// the value's integer.
+Enum :: struct {
+	name:   string,
+	values: []Enum_Value,
+}
+
+Enum_Value :: struct {
+	name:  string,
+	value: int,
 }
 
 // Parses text and resolves it in scope. The result must have type want.
@@ -93,13 +106,29 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 	case mdata.Member:
 		return resolve_member(r, e, x)
 	case mdata.Enum_Constant:
-		return fail(r, .Unsupported, e.offset, "enum constants (%s::%s) are not supported yet", x.enum_name, x.value_name)
+		return resolve_enum_constant(r, e, x)
 	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Peek:
 		assert(e.type != .Unresolved, "resolve: a resolved variant without a type")
 	case:
 		panic("resolve: empty expression")
 	}
 	return true
+}
+
+@(private = "file")
+resolve_enum_constant :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Enum_Constant) -> bool {
+	for en in r.scope.enums {
+		if en.name != x.enum_name do continue
+		for v in en.values {
+			if v.name == x.value_name {
+				e.variant = mdata.Int_Literal{v.value}
+				e.type = .Int
+				return true
+			}
+		}
+		return fail(r, .Invalid, e.offset, "enum %s has no value %s", x.enum_name, x.value_name)
+	}
+	return fail(r, .Invalid, e.offset, "no enum %s", x.enum_name)
 }
 
 @(private = "file")
@@ -143,7 +172,7 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 		e.variant = mdata.Instance{root = true, node = types[0]}
 		e.type = .Struct
 	case "_parent":
-		if len(types) < 2 do return fail(r, .Invalid, e.offset, "_parent: %s has no enclosing set here", types[0].name)
+		if len(types) < 2 do return fail(r, .Invalid, e.offset, "_parent: %s has no enclosing set here", types[0].ref_name)
 		e.variant = mdata.Instance{up = 1, node = types[len(types) - 2]}
 		e.type = .Struct
 	case "_index":
@@ -168,12 +197,12 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 	set := struct_node(base)
 	field: ^mdata.Node
 	for child in set.children {
-		if child.name == name {
+		if child.ref_name == name {
 			field = child
 			break
 		}
 	}
-	if field == nil do return fail(r, .Invalid, e.offset, "%s has no field %s", set.name, name)
+	if field == nil do return fail(r, .Invalid, e.offset, "%s has no field %s", set.ref_name, name)
 
 	if !mdata.is_single(field) {
 		e.type = .Array
@@ -236,7 +265,7 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 		}
 		inst.up += 1
 		types := r.scope.types
-		if inst.up >= len(types) do return fail(r, .Invalid, e.offset, "_parent: %s has no enclosing set here", types[0].name)
+		if inst.up >= len(types) do return fail(r, .Invalid, e.offset, "_parent: %s has no enclosing set here", types[0].ref_name)
 		inst.node = types[len(types) - 1 - inst.up]
 		e.variant = inst
 		e.type = .Struct

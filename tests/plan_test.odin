@@ -73,6 +73,7 @@ plan_fixed_fields :: proc(t: ^testing.T) {
 		testing.expect_value(t, signature.type, dat.Data_Type.String)
 		testing.expect_value(t, signature.count.(mdat.Fixed_Count) or_else {-1}, mdat.Fixed_Count{1})
 		testing.expect_value(t, signature.length, mdat.Length(mdat.Fixed_Length{3}))
+		testing.expect(t, signature.drop_nul, "a SQLite String must drop NUL bytes")
 	}
 
 	width := find_node(ff.root, 5004)

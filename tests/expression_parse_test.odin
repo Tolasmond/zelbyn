@@ -90,7 +90,6 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	{"a.to_s()", .Unsupported, 6, "method calls"},
 	{"a.as<u4>", .Unsupported, 2, "casts"},
 	{"a::b::c", .Unsupported, 0, "a::b::c"},
-	{"block_type::end_of_file", .Unsupported, 0, "enum constants"},
 	{"_io", .Unsupported, 0, "only _io.pos, _io.size and _io.eof"},
 	{"_io.foo", .Unsupported, 4, "_io.foo is not supported"},
 	{"_", .Unsupported, 0, "repeat-until"},
@@ -114,6 +113,7 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	{"hdr", .Invalid, 0, "expected an integer, found a set"},
 	{"items", .Invalid, 0, "expected an integer, found an array"},
 	{"hdr.tag", .Invalid, 4, "expected an integer, found a byte array"},
+	{"block_type::end_of_file", .Invalid, 0, "no enum block_type"},
 }
 
 @(test)
