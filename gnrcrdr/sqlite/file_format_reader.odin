@@ -1,9 +1,7 @@
 package sqlite
 
 import sql "../../sqlite3"
-import dat "../data"
 import mdata "../metadata"
-import "core:fmt"
 import "core:mem"
 import "core:mem/virtual"
 import "core:strings"
@@ -30,11 +28,25 @@ destroy_load_error :: proc(err: ^Load_Error) {
 }
 
 // Loads format format_id from the database at db_path, which is opened
-// read-only. After an error, mdata.destroy_file_format frees whatever was
-// loaded so far.
+// read-only, and compiles it into file_format. The records are read into a
+// scratch arena that is freed before returning. After an error,
+// mdata.destroy_file_format frees whatever was compiled so far.
 read_file_format :: proc(db_path: string, format_id: int, file_format: ^mdata.File_Format) -> (err: Load_Error) {
+	scratch: virtual.Arena
+	defer virtual.arena_destroy(&scratch)
+
+	records: Records
+	err = read_records(db_path, format_id, &records, virtual.arena_allocator(&scratch))
+	if err.kind != .None do return
+
+	return compile(&records, file_format)
+}
+
+// Reads the rows of format format_id from the database at db_path, which is
+// opened read-only, into records. Everything is allocated with allocator,
+// except an error's message.
+read_records :: proc(db_path: string, format_id: int, records: ^Records, allocator: mem.Allocator) -> (err: Load_Error) {
 	db: ^sql.sqlite3
-	allocator := virtual.arena_allocator(&file_format.arena)
 	cpath := strings.clone_to_cstring(db_path, allocator)
 
 	rc := sql.open_v2(cpath, &db, sql.OPEN_READONLY, nil)
@@ -44,7 +56,7 @@ read_file_format :: proc(db_path: string, format_id: int, file_format: ^mdata.Fi
 		return
 	}
 
-	err = load(db, format_id, file_format, allocator)
+	err = load(db, format_id, records, allocator)
 
 	rc = sql.close(db)
 	if rc != .OK && err.kind == .None {
@@ -55,34 +67,32 @@ read_file_format :: proc(db_path: string, format_id: int, file_format: ^mdata.Fi
 }
 
 @(private = "file")
-load :: proc(db: ^sql.sqlite3, format_id: int, file_format: ^mdata.File_Format, allocator: mem.Allocator) -> Load_Error {
-	metadata := &file_format.metadata
-
-	if rc := read_data_type(db, &metadata.data_type_map, allocator); rc != .OK {
+load :: proc(db: ^sql.sqlite3, format_id: int, records: ^Records, allocator: mem.Allocator) -> Load_Error {
+	if rc := read_data_type(db, &records.data_type_map, allocator); rc != .OK {
 		return query_error(db, rc, "DataType")
 	}
 
-	if rc := read_length(db, &metadata.set_length_map, allocator); rc != .OK {
+	if rc := read_length(db, &records.set_length_map, allocator); rc != .OK {
 		return query_error(db, rc, "Length")
 	}
 
-	if rc := read_marker_offset(db, &metadata.marker_offset_map, allocator); rc != .OK {
+	if rc := read_marker_offset(db, &records.marker_offset_map, allocator); rc != .OK {
 		return query_error(db, rc, "MarkerOffset")
 	}
 
-	if rc := read_set_helper(db, format_id, &metadata.set_helper_map, allocator); rc != .OK {
+	if rc := read_set_helper(db, format_id, &records.set_helper_map, allocator); rc != .OK {
 		return query_error(db, rc, "SetHelper")
 	}
 
-	if rc := read_packed(db, &metadata.packed_records, allocator); rc != .OK {
+	if rc := read_packed(db, &records.packed_records, allocator); rc != .OK {
 		return query_error(db, rc, "Packed")
 	}
 
-	if rc := read_field(db, metadata.packed_records[:], &metadata.data_type_map, &metadata.field_map, &metadata.field_metadata_map, allocator); rc != .OK {
+	if rc := read_field(db, &records.field_map, allocator); rc != .OK {
 		return query_error(db, rc, "Field")
 	}
 
-	found, format_rc := read_format(db, format_id, &metadata.format_record, allocator)
+	found, format_rc := read_format(db, format_id, &records.format_record, allocator)
 	if format_rc != .OK {
 		return query_error(db, format_rc, "Format")
 	}
@@ -90,63 +100,14 @@ load :: proc(db: ^sql.sqlite3, format_id: int, file_format: ^mdata.File_Format, 
 		return Load_Error{kind = .Format_Not_Found, table = "Format", message = strings.clone("format id not found")}
 	}
 
-	if rc := read_parent(db, format_id, &metadata.parent_map, allocator); rc != .OK {
+	if rc := read_parent(db, format_id, &records.parent_map, allocator); rc != .OK {
 		return query_error(db, rc, "Parent")
 	}
 
-	root := metadata.field_metadata_map[metadata.format_record.root_field]
-	if root == nil || root.data_type == nil {
-		return Load_Error {
-			kind = .Invalid_Schema,
-			table = "Format",
-			message = fmt.aprintf("root field %v has no field metadata or data type", metadata.format_record.root_field),
-		}
-	}
-
-	file_format.root_metadata_node.metadata = root
-
-	if err := read_children(&file_format.root_metadata_node, metadata, allocator); err.kind != .None do return err
-
-	return compile(metadata, file_format)
+	return {}
 }
 
 @(private = "file")
 query_error :: proc(db: ^sql.sqlite3, rc: sql.ResultCode, table: string) -> Load_Error {
 	return Load_Error{kind = .Query_Failed, code = rc, table = table, message = strings.clone(string(sql.errmsg(db)))}
-}
-
-@(private = "file")
-read_children :: proc(
-	parent_node: ^mdata.Field_Metadata_Tree_Node, metadata: ^mdata.Field_Metadata_Provider, allocator: mem.Allocator) -> Load_Error {
-
-	parent_node.children = make([dynamic]^mdata.Field_Metadata_Tree_Node, allocator)
-
-	parent_map := &metadata.parent_map
-	field_metadata_map := &metadata.field_metadata_map
-
-	for childRecord in parent_map[parent_node.metadata.id] {
-
-		child_tree_node := new(mdata.Field_Metadata_Tree_Node, allocator)
-
-		child_tree_node.metadata = field_metadata_map[childRecord.child_id]
-
-		child_tree_node.parent = parent_node
-
-		// appended before validation so destroy_file_format frees it on error
-		append(&parent_node.children, child_tree_node)
-
-		if child_tree_node.metadata == nil || child_tree_node.metadata.data_type == nil {
-			return Load_Error {
-				kind = .Invalid_Schema,
-				table = "Parent",
-				message = fmt.aprintf("child field %v has no field metadata or data type", childRecord.child_id),
-			}
-		}
-
-		if (dat.Data_Type(child_tree_node.metadata.data_type.type) == .Set) {
-			if err := read_children(child_tree_node, metadata, allocator); err.kind != .None do return err
-		}
-	}
-
-	return {}
 }

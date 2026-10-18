@@ -25,14 +25,14 @@ TYPE_SIZE :: #partial [dat.Data_Type]int {
 
 @(private = "file")
 Compiler :: struct {
-	records:   ^mdata.Field_Metadata_Provider,
+	records:   ^Records,
 	allocator: mem.Allocator,       // the File_Format's arena
 	nodes:     map[int]^mdata.Node, // by field id; nil while that field is being compiled
 	err:       Load_Error,
 }
 
-// Compiles the loaded records of one format into file_format.root, and
-// validates them. The first problem found is returned as .Invalid_Schema,
+// Compiles the records of one format into file_format, which must be zero
+// or destroyed, and validates them. The first problem found is returned as .Invalid_Schema,
 // naming the table at fault and the row ids involved. Rejected:
 //   - a missing root, child field, data type, Length or MarkerOffset row
 //   - a type code outside dat.Data_Type, and a field that contains itself
@@ -52,10 +52,12 @@ Compiler :: struct {
 //   - a String without MaxBufferLength, a blob whose fixed length is below
 //     its MinBufferLength, and MinBufferLength > MaxBufferLength
 //   - packed fields on a non-integer field, or with bits outside its width
-@(private)
-compile :: proc(records: ^mdata.Field_Metadata_Provider, file_format: ^mdata.File_Format) -> Load_Error {
+compile :: proc(records: ^Records, file_format: ^mdata.File_Format) -> Load_Error {
+	scratch: virtual.Arena
+	defer virtual.arena_destroy(&scratch)
+
 	c := Compiler{records = records, allocator = virtual.arena_allocator(&file_format.arena)}
-	c.nodes = make(map[int]^mdata.Node, c.allocator)
+	c.nodes = make(map[int]^mdata.Node, virtual.arena_allocator(&scratch))
 
 	file_format.name = strings.clone(records.format_record.name, c.allocator)
 	file_format.root, _ = compile_node(&c, records.format_record.root_field, "Format")
@@ -129,7 +131,7 @@ compile_node :: proc(c: ^Compiler, id: int, table: string) -> (node: ^mdata.Node
 
 // owner is the id of the row in table that refers to data type id.
 @(private = "file")
-data_type :: proc(c: ^Compiler, id: int, table: string, owner: int) -> (dt: ^dat.Data_Type_Record, ok: bool) {
+data_type :: proc(c: ^Compiler, id: int, table: string, owner: int) -> (dt: ^Data_Type_Record, ok: bool) {
 	dt = c.records.data_type_map[id]
 	if dt == nil do return nil, fail(c, table, "%s row %v: data type %v not found", table, owner, id)
 	if dt.type < 0 || dt.type > int(max(dat.Data_Type)) {
@@ -148,7 +150,7 @@ peek_type :: proc(c: ^Compiler, id: int, table: string, owner: int) -> (type: da
 }
 
 @(private = "file")
-min_array_length :: proc(c: ^Compiler, dt: ^dat.Data_Type_Record) -> (n: int, ok: bool) {
+min_array_length :: proc(c: ^Compiler, dt: ^Data_Type_Record) -> (n: int, ok: bool) {
 	n = dt.min_array_length.? or_else 1
 	if n < 0 do return 0, fail(c, "DataType", "data type %v: MinArrayLength is %v", dt.id, n)
 	return n, true
@@ -156,7 +158,7 @@ min_array_length :: proc(c: ^Compiler, dt: ^dat.Data_Type_Record) -> (n: int, ok
 
 // rows must be sorted by ChildIndex.
 @(private = "file")
-compile_children :: proc(c: ^Compiler, node: ^mdata.Node, rows: []^dat.Parent_Record) -> bool {
+compile_children :: proc(c: ^Compiler, node: ^mdata.Node, rows: []^Parent_Record) -> bool {
 	children := make([]^mdata.Node, len(rows), c.allocator)
 
 	for row, i in rows {
@@ -179,8 +181,8 @@ compile_children :: proc(c: ^Compiler, node: ^mdata.Node, rows: []^dat.Parent_Re
 set_count :: proc(
 	c: ^Compiler,
 	node: ^mdata.Node,
-	dt: ^dat.Data_Type_Record,
-	helper: ^dat.Set_Helper_Record,
+	dt: ^Data_Type_Record,
+	helper: ^Set_Helper_Record,
 	grow: bool) -> (count: mdata.Count, ok: bool) {
 
 	length_id, marker_id := 0, 0
@@ -226,7 +228,7 @@ marker_count :: proc(c: ^Compiler, node: ^mdata.Node, marker_id: int) -> (count:
 }
 
 @(private = "file")
-length_record :: proc(c: ^Compiler, node: ^mdata.Node, id: int) -> (rec: ^dat.Length_Record, ok: bool) {
+length_record :: proc(c: ^Compiler, node: ^mdata.Node, id: int) -> (rec: ^Length_Record, ok: bool) {
 	rec = c.records.set_length_map[id]
 	if rec == nil do return nil, fail(c, "SetHelper", "field %v (%s): length %v not found", node.id, node.name, id)
 	return rec, true
@@ -287,7 +289,7 @@ length_rule :: proc(c: ^Compiler, node: ^mdata.Node, length_id: int, allow_expre
 @(private = "file")
 peek :: proc(
 	c: ^Compiler,
-	rec: ^dat.Length_Record,
+	rec: ^Length_Record,
 	what: string,
 	absolute, relative, mask, shift: Maybe(int)) -> (p: Maybe(mdata.Peek), ok: bool) {
 
@@ -311,7 +313,7 @@ peek :: proc(
 }
 
 @(private = "file")
-blob_length :: proc(c: ^Compiler, node: ^mdata.Node, dt: ^dat.Data_Type_Record, helper: ^dat.Set_Helper_Record) -> (length: mdata.Length, ok: bool) {
+blob_length :: proc(c: ^Compiler, node: ^mdata.Node, dt: ^Data_Type_Record, helper: ^Set_Helper_Record) -> (length: mdata.Length, ok: bool) {
 	min_length, max_length := dt.min_buffer_length, dt.max_buffer_length
 	lo, has_lo := min_length.?
 	hi, has_hi := max_length.?

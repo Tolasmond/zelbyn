@@ -1,11 +1,10 @@
 package sqlite
 
 import "core:mem"
-import dat "../data"
 import sql "../../sqlite3"
 
-read_set_helper :: proc(db: ^sql.sqlite3, format_id: int, set_helper_map: ^map[int]^dat.Set_Helper_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
-	set_helper_map^ = make(map[int]^dat.Set_Helper_Record, allocator)
+read_set_helper :: proc(db: ^sql.sqlite3, format_id: int, set_helper_map: ^map[int]^Set_Helper_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
+	set_helper_map^ = make(map[int]^Set_Helper_Record, allocator)
 
 	stmt: ^sql.Stmt
 	rc := prepare(db, "SELECT * FROM SetHelper WHERE FormatId = ?1", &stmt)
@@ -20,7 +19,7 @@ read_set_helper :: proc(db: ^sql.sqlite3, format_id: int, set_helper_map: ^map[i
 
 		if !has_row do break
 
-		record := new(dat.Set_Helper_Record, allocator)
+		record := new(Set_Helper_Record, allocator)
 
 		record.format_id = sql.column_int64(stmt, i32(Set_Helper_Column.format_id))
 		record.field_id = sql.column_int64(stmt, i32(Set_Helper_Column.field_id))

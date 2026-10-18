@@ -1,11 +1,10 @@
 package sqlite
 
 import "core:mem"
-import dat "../data"
 import sql "../../sqlite3"
 
-read_marker_offset :: proc(db: ^sql.sqlite3, marker_offset_map: ^map[int][dynamic]^dat.Marker_Offset_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
-	marker_offset_map^ = make(map[int][dynamic]^dat.Marker_Offset_Record, allocator)
+read_marker_offset :: proc(db: ^sql.sqlite3, marker_offset_map: ^map[int][dynamic]^Marker_Offset_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
+	marker_offset_map^ = make(map[int][dynamic]^Marker_Offset_Record, allocator)
 
 	stmt: ^sql.Stmt
 	rc := prepare(db, "SELECT * FROM MarkerOffset", &stmt)
@@ -18,7 +17,7 @@ read_marker_offset :: proc(db: ^sql.sqlite3, marker_offset_map: ^map[int][dynami
 
 		if !has_row do break
 
-		record := new(dat.Marker_Offset_Record, allocator)
+		record := new(Marker_Offset_Record, allocator)
 
 		record.marker_id = sql.column_int64(stmt, i32(Marker_Offset_Column.marker_id))
 		record.byte_offset = sql.column_int64(stmt, i32(Marker_Offset_Column.byte_offset))
@@ -27,7 +26,7 @@ read_marker_offset :: proc(db: ^sql.sqlite3, marker_offset_map: ^map[int][dynami
 
 		key_exists := record.marker_id in marker_offset_map
 
-		if !key_exists do marker_offset_map[record.marker_id] = make([dynamic]^dat.Marker_Offset_Record, allocator)
+		if !key_exists do marker_offset_map[record.marker_id] = make([dynamic]^Marker_Offset_Record, allocator)
 
 		append(&marker_offset_map[record.marker_id], record)
 	}

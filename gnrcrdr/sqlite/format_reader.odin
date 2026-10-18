@@ -1,11 +1,10 @@
 package sqlite
 
 import sql "../../sqlite3"
-import dat "../data"
 import "core:mem"
 import "core:strings"
 
-read_format :: proc(db: ^sql.sqlite3, format_id: int, record: ^dat.Format_Record, allocator: mem.Allocator) -> (found: bool, result: sql.ResultCode) {
+read_format :: proc(db: ^sql.sqlite3, format_id: int, record: ^Format_Record, allocator: mem.Allocator) -> (found: bool, result: sql.ResultCode) {
 	stmt: ^sql.Stmt
 	rc := prepare(db, "SELECT * FROM Format WHERE Id = ?1", &stmt)
 	if rc != .OK do return false, rc
