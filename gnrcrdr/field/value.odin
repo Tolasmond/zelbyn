@@ -1,7 +1,5 @@
 package field
 
-import "core:mem/virtual"
-
 Value :: union {
 	i8,
 	i16,
@@ -24,12 +22,12 @@ Value :: union {
 // after decoding into it: its containers refer to &arena.
 Value_Tree :: struct {
 	root:  [dynamic]Value,
-	arena: virtual.Arena,
+	arena: Tree_Arena,
 }
 
 // Frees the whole tree and resets it to the zero value, ready for reuse. Safe
 // on a zero or already destroyed tree.
 destroy_value_tree :: proc(tree: ^Value_Tree) {
-	virtual.arena_destroy(&tree.arena)
+	tree_arena_destroy(&tree.arena)
 	tree^ = {}
 }
