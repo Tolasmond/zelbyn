@@ -131,6 +131,16 @@ value_tree_outlives_schema_and_input :: proc(t: ^testing.T) {
 		decode_bytes(&ff, data[:], &d)
 	}
 
+	// the slots of the fields looked at below, found while the schema exists
+	signature, version, blocks := slot_by_id(ff.root, 5001), slot_by_id(ff.root, 5002), slot_by_id(ff.root, 5017)
+	path := [?]int{5017, 5018, 5030, 5032, 5052} // blocks, extensions, comment, its data, the bytes
+	slots: [len(path)]int
+	set := ff.root
+	for id, i in path {
+		slots[i] = slot_by_id(set, id)
+		if i + 1 < len(path) do set = set.children[child_index(set, id)]
+	}
+
 	// clobber and free the input and the schema before looking at the tree
 	for &b in data do b = 0xAA
 	delete(data)
@@ -139,17 +149,32 @@ value_tree_outlives_schema_and_input :: proc(t: ^testing.T) {
 	testing.expect_value(t, track.total_allocation_count, 0)
 	if !testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path) do return
 
-	g := set_of(d.tree.root[0])
-	testing.expect_value(t, g[5001][0].(string), "GIF")
-	testing.expect_value(t, g[5002][0].(string), "89a")
+	g := d.tree.root[0].(^fld.Instance)
+	testing.expect_value(t, g.slots[signature][0].(string), "GIF")
+	testing.expect_value(t, g.slots[version][0].(string), "89a")
 
-	if !testing.expect_value(t, len(g[5017]), 1) do return
-	block := set_of(g[5017][0])
-	extension := set_of(block[5018][0])
-	comment := set_of(extension[5030][0])
-	comment_data := set_of(comment[5032][0])
-	blob := comment_data[5052][0].([]byte)
+	if !testing.expect_value(t, len(g.slots[blocks]), 1) do return
+	instance := g
+	for slot in slots[:len(slots) - 1] {
+		instance = instance.slots[slot][0].(^fld.Instance)
+	}
+	blob := instance.slots[slots[len(slots) - 1]][0].([]byte)
 	testing.expect_value(t, string(blob), "abc")
+}
+
+// The index in set's children of the child whose node id is id.
+@(private = "file")
+child_index :: proc(set: ^mdat.Node, id: int) -> int {
+	for child, i in set.children {
+		if child.id == id do return i
+	}
+	panic("child_index: no such child")
+}
+
+// The slot in an instance of set of the child whose node id is id.
+@(private = "file")
+slot_by_id :: proc(set: ^mdat.Node, id: int) -> int {
+	return mdat.slot_of(set, child_index(set, id))
 }
 
 @(test)

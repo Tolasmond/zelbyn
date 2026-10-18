@@ -13,7 +13,7 @@ Eval_Value :: union {
 	bool,
 	[]byte,
 	[]fld.Value,
-	map[int][dynamic]fld.Value,
+	^fld.Instance,
 }
 
 // What _index and _ are: index is -1 when the expression is not evaluated
@@ -69,11 +69,10 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, rep: Repeat) -> (v: Eval_Value, err: d
 	case mdata.Instance:
 		i := x.root ? 0 : len(d.frames) - 1 - x.up
 		if i < 0 || i >= len(d.frames) do return nil, .Absent_Field
-		return d.frames[i]^, .None
+		return d.frames[i], .None
 	case mdata.Field_Ref:
 		base := eval(d, x.base, rep) or_return
-		values, found := base.(map[int][dynamic]fld.Value)[x.node.id]
-		if !found do return nil, .Absent_Field
+		values := base.(^fld.Instance).slots[x.slot]
 		if e.type == .Array do return values[:], .None
 		if len(values) == 0 do return nil, .Absent_Field
 		return single_value(values[0])
@@ -99,9 +98,8 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, rep: Repeat) -> (v: Eval_Value, err: d
 		return single_value(rep.element)
 	case mdata.Value_Ref:
 		base := eval(d, x.base, rep) or_return
-		set := base.(map[int][dynamic]fld.Value)
 		// the instance's expression refers only to the fields of base
-		append(&d.frames, &set)
+		append(&d.frames, base.(^fld.Instance))
 		defer pop(&d.frames)
 		return eval(d, x.instance.expr, {index = -1})
 	case mdata.Peek:
@@ -136,7 +134,7 @@ single_value :: proc(value: fld.Value) -> (Eval_Value, dat.Read_Error) {
 		return int(v), .None
 	case []byte:
 		return v, .None
-	case map[int][dynamic]fld.Value:
+	case ^fld.Instance:
 		return v, .None
 	case f32, f64, string:
 		// the resolver rejects references to these

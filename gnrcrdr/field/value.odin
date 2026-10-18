@@ -13,10 +13,23 @@ Value :: union {
 	f64,
 	string,
 	[]byte,
-	map[int][dynamic]Value,
+	^Instance,
 }
 
-// A decoded value tree. Every map, array, string and blob reachable from root
+// A decoded set instance. slots holds the values of each field of the set
+// it was read as, by position: each child of the set in order, each
+// followed by its bit fields (metadata.slot_of gives a child's slot). For
+// an instance of a switch-on field, choice is the case it was read as: an
+// index into the field's cases, or DEFAULT_CASE; otherwise it is 0.
+Instance :: struct {
+	slots:  [][dynamic]Value,
+	choice: int,
+}
+
+// Instance.choice for the _ case of a switch-on field.
+DEFAULT_CASE :: -1
+
+// A decoded value tree. Every instance, array, string and blob reachable from root
 // is allocated in arena, so the tree is freed with one destroy_value_tree and
 // never references the input bytes or the schema. Do not copy a Value_Tree
 // after decoding into it: its containers refer to &arena.

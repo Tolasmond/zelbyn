@@ -8,7 +8,7 @@ import "core:encoding/endian"
 // the format is loaded, so decoding needs no lookups. A field contained in
 // several sets has one node, shared by all of them; the plan has no cycles.
 Node :: struct {
-	id:            int,    // the field's id: the key of its values in a decoded set instance
+	id:            int,    // the field's id: unique in the plan; the SQLite front end links rows by it
 	name:          string, // shown in the dump and in error paths
 	ref_name:      string, // what expressions call it: the .ksy id; the same as name for the SQLite schema
 	type:          dat.Data_Type,
@@ -144,8 +144,9 @@ Rule_Length :: struct {
 // A field whose type is chosen by a value (Kaitai's switch-on): each
 // instance is one of the set of the first case whose value equals on, or of
 // default when none does. Each case's set has the field's name and its own
-// children. With no match and no default, the field is not read: the
-// compiler allows that only when it is read at most once.
+// children, and each instance records which case it was read as
+// (field.Instance.choice). With no match and no default, the field is not
+// read: the compiler allows that only when it is read at most once.
 Switch :: struct {
 	on:      ^Expr, // an Int expression
 	cases:   []Switch_Case,
@@ -157,16 +158,28 @@ Switch_Case :: struct {
 	node:  ^Node,
 }
 
-// The set an instance of node (a Set field) was read as: node itself, or
-// for a switch-on field the case whose set holds instance's values; nil
-// when that cannot be told (a case with no children).
-instance_set :: proc(node: ^Node, instance: map[int][dynamic]fld.Value) -> ^Node {
-	if node.switch_on == nil do return node
-	for c in node.switch_on.cases {
-		if len(c.node.children) > 0 && c.node.children[0].id in instance do return c.node
-	}
-	if d := node.switch_on.default; d != nil && len(d.children) > 0 && d.children[0].id in instance do return d
-	return nil
+// The set instance was read as: node itself, or for a switch-on field the
+// case it records.
+instance_set :: proc(node: ^Node, instance: ^fld.Instance) -> ^Node {
+	sw := node.switch_on
+	if sw == nil do return node
+	if instance.choice == fld.DEFAULT_CASE do return sw.default
+	return sw.cases[instance.choice].node
+}
+
+// The number of slots in an instance of set: one for each child and each
+// of its bit fields.
+slot_count :: proc(set: ^Node) -> int {
+	n := len(set.children)
+	for child in set.children do n += len(child.bits)
+	return n
+}
+
+// The slot of child index of set; its bit fields follow it, in order.
+slot_of :: proc(set: ^Node, index: int) -> int {
+	slot := index
+	for child in set.children[:index] do slot += len(child.bits)
+	return slot
 }
 
 // A value instance of a set (Kaitai's instances with value:): an
@@ -180,9 +193,9 @@ Value_Instance :: struct {
 
 // Bits low through high (inclusive; 0 is the least significant) of an
 // integer field, as an unsigned number of type, an integer type wide
-// enough to hold it. Its values are those of a field id in the set
-// instance that holds the integer field, one for each element of it, and
-// are dumped right after it.
+// enough to hold it. Its values, one for each element of the integer
+// field, are in their own slot of the set instance that holds that field,
+// after the field's slot (slot_of), and are dumped right after it.
 Bit_Field :: struct {
 	id:            int,
 	name:          string,

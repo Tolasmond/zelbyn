@@ -72,8 +72,44 @@ destroy_decoded :: proc(d: ^Decoded) {
 	rdr.destroy_parse_error(&d.err)
 }
 
-set_of :: proc(v: fld.Value) -> map[int][dynamic]fld.Value {
-	return v.(map[int][dynamic]fld.Value)
+// A decoded set instance and the set it was read as, so that tests can
+// look its fields up by node id.
+Set_Instance :: struct {
+	instance: ^fld.Instance,
+	set:      ^mdat.Node,
+}
+
+// v, an instance of the set field node.
+instance_of :: proc(v: fld.Value, node: ^mdat.Node) -> Set_Instance {
+	instance := v.(^fld.Instance)
+	return {instance, mdat.instance_set(node, instance)}
+}
+
+// The root instance of a decoded tree.
+root_instance :: proc(ff: ^mdat.File_Format, d: ^Decoded) -> Set_Instance {
+	return instance_of(d.tree.root[0], ff.root)
+}
+
+// The values of the field or bit field of s whose node id is id; nil when
+// the set has none.
+field_values :: proc(s: Set_Instance, id: int) -> []fld.Value {
+	slot := 0
+	for child in s.set.children {
+		if child.id == id do return s.instance.slots[slot][:]
+		for bit, b in child.bits {
+			if bit.id == id do return s.instance.slots[slot + 1 + b][:]
+		}
+		slot += 1 + len(child.bits)
+	}
+	return nil
+}
+
+// Instance index of the set field of s whose node id is id.
+field_instance :: proc(s: Set_Instance, id: int, index := 0) -> Set_Instance {
+	for child in s.set.children {
+		if child.id == id do return instance_of(field_values(s, id)[index], child)
+	}
+	panic("field_instance: no such set field")
 }
 
 // a == b for a union that has no == (mdat.Scalar, fld.Value): the same

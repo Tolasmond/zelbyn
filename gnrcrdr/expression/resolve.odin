@@ -212,9 +212,10 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: string) -> bool {
 	set := struct_node(base)
 	field: ^mdata.Node
-	for child in set.children {
+	index: int
+	for child, i in set.children {
 		if child.ref_name == name {
-			field = child
+			field, index = child, i
 			break
 		}
 	}
@@ -232,7 +233,7 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 		e.type = value_type(r, e, field, name) or_return
 	}
 
-	e.variant = mdata.Field_Ref{base = base, node = field}
+	e.variant = mdata.Field_Ref{base = base, node = field, slot = mdata.slot_of(set, index)}
 	return true
 }
 

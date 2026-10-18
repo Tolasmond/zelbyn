@@ -82,11 +82,11 @@ expression_field_references :: proc(t: ^testing.T) {
 	if !testing.expectf(t, d.err.kind == .None, "decode: %v at %v (%s)", d.err.kind, d.err.offset, d.err.path) do return
 	testing.expect_value(t, d.consumed, DATA_POS + 2)
 
-	r := set_of(d.tree.root[0])
-	testing.expect_value(t, len(r[20]), 3) // items: hdr.n instances
-	tag := set_of(r[10][0])[12][0].([]byte)
+	r := root_instance(&p.ff, &d)
+	testing.expect_value(t, len(field_values(r, 20)), 3) // items: hdr.n instances
+	tag := field_values(field_instance(r, 10), 12)[0].([]byte)
 	testing.expect(t, len(tag) == 2 && tag[0] == 0xee && tag[1] == 0xee, "hdr.tag is not the 2 bytes _parent.a - 3")
-	testing.expect_value(t, len(r[30][0].([]byte)), 1) // data: 3 - 2
+	testing.expect_value(t, len(field_values(r, 30)[0].([]byte)), 1) // data: 3 - 2
 }
 
 @(test)
@@ -105,7 +105,7 @@ expression_repeat_index :: proc(t: ^testing.T) {
 	decode_bytes(&ff, {1, 2, 3}, &d)
 	if !testing.expectf(t, d.err.kind == .None, "decode: %v at %v (%s)", d.err.kind, d.err.offset, d.err.path) do return
 
-	values := set_of(d.tree.root[0])[2]
+	values := field_values(root_instance(&ff, &d), 2)
 	for v, i in values {
 		testing.expectf(t, len(v.([]byte)) == i, "s[%v] has %v bytes, want %v", i, len(v.([]byte)), i)
 	}
