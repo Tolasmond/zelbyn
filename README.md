@@ -100,3 +100,14 @@ Debug builds (`odin build . -debug`) run under a tracking allocator and exit 1 i
 odin test tests -define:GOLDEN_RECORD=true
 git diff --stat tests/golden
 ```
+
+### YAML corpus check
+
+`gnrcrdr/yaml` parses the subset of YAML that `.ksy` files use. `tools/yaml_corpus/compare.py` checks it against libyaml on every `.ksy` file in a directory, normally a clone of [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) kept outside this repository. It needs PyYAML built with libyaml (on Arch, `python-yaml`):
+
+```
+git clone --depth 1 https://github.com/kaitai-io/kaitai_struct_formats ../kaitai_struct_formats
+python3 tools/yaml_corpus/compare.py ../kaitai_struct_formats
+```
+
+Every file must give the same node tree from both parsers (kinds, scalar styles and text, and every line and column), or be rejected by gnrcrdr as outside the subset (anchors, aliases, tags, merge keys, complex keys, directives, multi-document streams, duplicate keys), or be rejected by both. The script exits 1 if any file differs. Run it when the parser changes.
