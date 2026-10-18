@@ -1,6 +1,7 @@
 package sqlite
 
 import dat "../data"
+import expr "../expression"
 import mdata "../metadata"
 import "base:intrinsics"
 import "core:fmt"
@@ -49,8 +50,9 @@ Compiler :: struct {
 //     Continuator and Terminator and nothing else, or with MinArrayLength > 0
 //   - a counting Length row with a Continuator or Terminator, both an
 //     absolute and a relative offset, or a mask or shift without an offset
-//   - a FlagExpression, and a ValueExpression on a blob length (the decoder
-//     ignored both before the plan existed)
+//   - a FlagExpression, a ValueExpression on a blob length (the decoder
+//     ignored both before the plan existed), and any ValueExpression other
+//     than LEGACY_POW2
 //   - peek types that are not integers of at most 64 bits (UInt64 included)
 //   - a String without MaxBufferLength, a blob whose fixed length is below
 //     its MinBufferLength, and MinBufferLength > MaxBufferLength
@@ -219,8 +221,8 @@ set_count :: proc(
 	if has_marker do return marker_count(c, node, marker_id)
 
 	if has_length {
-		rule := length_rule(c, node, length_id, true) or_return
-		return mdata.Rule_Count{rule = rule, max = dt.max_array_length}, true
+		e := length_expr(c, node, length_id, true) or_return
+		return mdata.Rule_Count{expr = e, max = dt.max_array_length}, true
 	}
 
 	return mdata.Fixed_Count{min_array_length(c, dt) or_return}, true
@@ -270,39 +272,62 @@ repeat_count :: proc(c: ^Compiler, node: ^mdata.Node, length_id: int) -> (repeat
 	return repeat, true
 }
 
-// A computed count or length. allow_expression is false for blob lengths.
+// The only ValueExpression the database uses: 2^(x+1), where x is the
+// value. It compiles to 2 << x.
 @(private = "file")
-length_rule :: proc(c: ^Compiler, node: ^mdata.Node, length_id: int, allow_expression: bool) -> (rule: mdata.Length_Rule, ok: bool) {
+LEGACY_POW2 :: "Pow(2, [x]+1)"
+
+// A computed count or length, as an Int expression over integers peeked at
+// the reader's position or from the start of the input. When the flag peek
+// reads as zero the result is 0; otherwise it is the value peek (0 when
+// absent), with ValueExpression applied when present:
+//   flag != 0 ? 2 << value : 0
+// allow_expression is false for blob lengths.
+@(private = "file")
+length_expr :: proc(c: ^Compiler, node: ^mdata.Node, length_id: int, allow_expression: bool) -> (e: ^mdata.Expr, ok: bool) {
 	rec := length_record(c, node, length_id) or_return
 
 	if rec.continuator != nil || rec.terminator != nil {
-		return {}, fail(c, "Length", "length %v: Continuator and Terminator only apply to growing sets, not to %v (%s)", rec.id, node.id, node.name)
+		return nil, fail(c, "Length", "length %v: Continuator and Terminator only apply to growing sets, not to %v (%s)", rec.id, node.id, node.name)
 	}
 	if rec.flag_expression != nil {
-		return {}, fail(c, "Length", "length %v: FlagExpression is not supported", rec.id)
+		return nil, fail(c, "Length", "length %v: FlagExpression is not supported", rec.id)
 	}
 
-	rule.type = peek_type(c, rec.data_type_id, "Length", rec.id) or_return
-	rule.flag = peek(c, rec, "Flag", rec.flag_absoute_offset_from_beginning, rec.flag_relative_offset_from_field, rec.flag_mask, rec.flag_shift) or_return
-	rule.value = peek(c, rec, "Value", rec.value_absolute_offset_from_beginning, rec.value_relative_offset_from_field, rec.value_mask, rec.value_shift) or_return
+	type := peek_type(c, rec.data_type_id, "Length", rec.id) or_return
+	flag := peek(c, rec, type, "Flag", rec.flag_absoute_offset_from_beginning, rec.flag_relative_offset_from_field, rec.flag_mask, rec.flag_shift) or_return
+	value := peek(c, rec, type, "Value", rec.value_absolute_offset_from_beginning, rec.value_relative_offset_from_field, rec.value_mask, rec.value_shift) or_return
+
+	e = value != nil ? value : expr.int_literal(0, c.allocator)
 
 	if expression, has_expression := rec.value_expression.?; has_expression {
 		if !allow_expression {
-			return {}, fail(c, "Length", "length %v: ValueExpression is not supported on a blob length (%v, %s)", rec.id, node.id, node.name)
+			return nil, fail(c, "Length", "length %v: ValueExpression is not supported on a blob length (%v, %s)", rec.id, node.id, node.name)
 		}
-		rule.expression = strings.clone(expression, c.allocator)
+		if expression != LEGACY_POW2 {
+			return nil, fail(c, "Length", "length %v: ValueExpression %q is not supported; the only one is %q", rec.id, expression, LEGACY_POW2)
+		}
+		e = expr.binary(.Shl, expr.int_literal(2, c.allocator), e, c.allocator)
 	}
 
-	return rule, true
+	if flag != nil {
+		is_set := expr.binary(.Ne, flag, expr.int_literal(0, c.allocator), c.allocator)
+		e = expr.ternary(is_set, e, expr.int_literal(0, c.allocator), c.allocator)
+	}
+
+	return e, true
 }
 
-// what is "Flag" or "Value", the prefix of the columns.
+// An integer of type read at an offset, then masked and shifted right; nil
+// when neither offset is set. what is "Flag" or "Value", the prefix of the
+// columns.
 @(private = "file")
 peek :: proc(
 	c: ^Compiler,
 	rec: ^Length_Record,
+	type: dat.Data_Type,
 	what: string,
-	absolute, relative, mask, shift: Maybe(int)) -> (p: Maybe(mdata.Peek), ok: bool) {
+	absolute, relative, mask, shift: Maybe(int)) -> (e: ^mdata.Expr, ok: bool) {
 
 	abs_offset, has_absolute := absolute.?
 	rel_offset, has_relative := relative.?
@@ -315,12 +340,27 @@ peek :: proc(
 		return nil, true
 	}
 
-	result := mdata.Peek{offset = has_absolute ? abs_offset : rel_offset, absolute = has_absolute, mask = mask}
+	pos: ^mdata.Expr
+	switch {
+	case has_absolute:
+		pos = expr.int_literal(abs_offset, c.allocator)
+	case rel_offset < 0:
+		pos = expr.binary(.Sub, expr.io_pos(c.allocator), expr.int_literal(-rel_offset, c.allocator), c.allocator)
+	case rel_offset > 0:
+		pos = expr.binary(.Add, expr.io_pos(c.allocator), expr.int_literal(rel_offset, c.allocator), c.allocator)
+	case:
+		pos = expr.io_pos(c.allocator)
+	}
+	e = expr.peek(type, pos, c.allocator)
+
+	if m, has_mask := mask.?; has_mask {
+		e = expr.binary(.And, e, expr.int_literal(m, c.allocator), c.allocator)
+	}
 	if s, has_shift := shift.?; has_shift {
 		if s < 0 || s > 63 do return nil, fail(c, "Length", "length %v: %sShift is %v, not 0 to 63", rec.id, what, s)
-		result.shift = uint(s)
+		if s > 0 do e = expr.binary(.Shr, e, expr.int_literal(s, c.allocator), c.allocator)
 	}
-	return result, true
+	return e, true
 }
 
 @(private = "file")
@@ -345,8 +385,8 @@ blob_length :: proc(c: ^Compiler, node: ^mdata.Node, dt: ^Data_Type_Record, help
 		if !has_length || helper.marker_id != nil {
 			return nil, fail(c, "SetHelper", "field %v (%s): a blob's SetHelper row needs a LengthId and no MarkerId", node.id, node.name)
 		}
-		rule := length_rule(c, node, length_id, false) or_return
-		return mdata.Rule_Length{rule = rule, min = min_length, max = max_length}, true
+		e := length_expr(c, node, length_id, false) or_return
+		return mdata.Rule_Length{expr = e, min = min_length, max = max_length}, true
 	}
 
 	if hi < lo {

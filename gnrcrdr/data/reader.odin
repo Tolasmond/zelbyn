@@ -11,6 +11,10 @@ Read_Error :: enum {
 	Invalid_Length,        // a computed count/length is negative, or outside [MinBufferLength, MaxBufferLength]
 	Repeat_Limit_Exceeded, // a set count exceeds the set's MaxArrayLength
 	No_Progress,           // a repeated (grow-as-needed) set instance consumed zero bytes
+	Division_By_Zero,      // an expression divides by zero, or takes a remainder by zero
+	Integer_Overflow,      // an expression's result, or an integer field it reads, does not fit in an int
+	Invalid_Shift,         // an expression shifts by a negative amount or by 64 or more
+	Absent_Field,          // an expression refers to a field that has no value (not read yet, or absent)
 	File_Read_Failed,      // the input file could not be read
 }
 

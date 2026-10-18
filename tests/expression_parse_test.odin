@@ -1,0 +1,152 @@
+package tests
+
+import expr "../gnrcrdr/expression"
+import mdat "../gnrcrdr/metadata"
+import "core:mem/virtual"
+import "core:strings"
+import "core:testing"
+
+// Each text parses to the fully parenthesized want.
+@(private = "file")
+PRECEDENCE_CASES := [?][2]string {
+	{"1 + 2 * 3", "(1 + (2 * 3))"},
+	{"1 * 2 + 3", "((1 * 2) + 3)"},
+	{"1 - 2 - 3", "((1 - 2) - 3)"},
+	{"a / b % c", "((a / b) % c)"},
+	{"a << 1 + 2", "(a << (1 + 2))"},
+	{"a & b << 1", "(a & (b << 1))"},
+	{"a | b ^ c & d", "(a | (b ^ (c & d)))"},
+	{"a & 1 == 0", "((a & 1) == 0)"},
+	{"a | b < c", "((a | b) < c)"},
+	{"not a == b", "(not (a == b))"},
+	{"not a and b or c and d", "(((not a) and b) or (c and d))"},
+	{"a and not not b", "(a and (not (not b)))"},
+	{"a ? b : c ? d : e", "(a ? b : (c ? d : e))"},
+	{"a ? b ? c : d : e", "(a ? (b ? c : d) : e)"},
+	{"a or b ? c + 1 : d", "((a or b) ? (c + 1) : d)"},
+	{"-a.b.c * 2", "((-a.b.c) * 2)"},
+	{"~-1", "(~(-1))"},
+	{"- 2 << 1", "((-2) << 1)"},
+	{"+1", "1"},
+	{"( ( a ) )", "a"},
+	{"a?b:c", "(a ? b : c)"},
+	{"_io.pos + _root.hdr._parent", "(_io.pos + _root.hdr._parent)"},
+	{"block_type::end_of_file", "block_type::end_of_file"},
+	{"0x1F + 0B1_0 + 0o17 + 1_000 + 0", "((((31 + 2) + 15) + 1000) + 0)"},
+	{"9223372036854775807", "9223372036854775807"},
+	{"true != false", "(true != false)"},
+}
+
+@(test)
+expression_precedence :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	defer virtual.arena_destroy(&arena)
+
+	for c in PRECEDENCE_CASES {
+		e, err := expr.parse(c[0], virtual.arena_allocator(&arena))
+		defer expr.destroy_error(&err)
+		if !testing.expectf(t, err.kind == .None, "%q: %v at %v: %s", c[0], err.kind, err.offset, err.message) do continue
+		testing.expectf(t, expr.to_string(e, context.temp_allocator) == c[1], "%q parses as %s, want %s", c[0], expr.to_string(e, context.temp_allocator), c[1])
+	}
+}
+
+@(private = "file")
+Compile_Error_Case :: struct {
+	text:    string,
+	kind:    expr.Error_Kind,
+	offset:  int,
+	message: string, // must occur in the error's message
+}
+
+// Compiled as an Int in the scope of r (Expr_Plan), or of hdr where noted.
+@(private = "file")
+COMPILE_ERROR_CASES := [?]Compile_Error_Case {
+	// syntax
+	{"", .Syntax, 0, "unexpected end of expression"},
+	{"a +", .Syntax, 3, "unexpected end of expression"},
+	{"(a + 1", .Syntax, 6, "expected ), found end of expression"},
+	{"a 1", .Syntax, 2, "unexpected 1"},
+	{"a $ 1", .Syntax, 2, "unexpected character '$'"},
+	{"a < b < 3", .Syntax, 6, "comparisons cannot be chained"},
+	{"a == b != c", .Syntax, 7, "comparisons cannot be chained"},
+	{"1 + not a", .Syntax, 4, "not must be parenthesized"},
+	{"a ? 1", .Syntax, 5, "expected : in ?:"},
+	{"a.", .Syntax, 2, "expected a name after ."},
+	{"and", .Syntax, 0, "unexpected and"},
+	{"x::", .Syntax, 3, "expected an enum value after ::"},
+	{"08", .Syntax, 0, "use 0o for octal"},
+	{"0x", .Syntax, 0, "invalid integer literal 0x"},
+	{"0b12", .Syntax, 0, "invalid integer literal 0b12"},
+	{"1__0", .Syntax, 0, "invalid integer literal 1__0"},
+	{"1_", .Syntax, 0, "invalid integer literal 1_"},
+	{"1e5", .Syntax, 0, "invalid integer literal 1e5"},
+	{"9223372036854775808", .Syntax, 0, "too large"},
+
+	// outside the subset
+	{"1.5", .Unsupported, 0, "float literals"},
+	{"'GIF'", .Unsupported, 0, "string literals"},
+	{"[1, 2]", .Unsupported, 0, "array literals"},
+	{"items[0]", .Unsupported, 5, "indexing"},
+	{"a.to_s()", .Unsupported, 6, "method calls"},
+	{"a.as<u4>", .Unsupported, 2, "casts"},
+	{"a::b::c", .Unsupported, 0, "a::b::c"},
+	{"block_type::end_of_file", .Unsupported, 0, "enum constants"},
+	{"_io", .Unsupported, 0, "only _io.pos, _io.size and _io.eof"},
+	{"_io.foo", .Unsupported, 4, "_io.foo is not supported"},
+	{"_", .Unsupported, 0, "repeat-until"},
+	{"hdr.n.size", .Unsupported, 6, "an integer has no member size"},
+	{"items.v", .Unsupported, 6, "an array has no member v"},
+	{"hdr._parent.a", .Unsupported, 4, "._parent is only supported after _parent"},
+	{"hdr._root", .Unsupported, 4, "._root is not supported"},
+	{"hdr == hdr ? 1 : 0", .Unsupported, 4, "comparing a set"},
+
+	// names and types
+	{"nope", .Invalid, 0, "r has no field nope"},
+	{"hdr.nope + 1", .Invalid, 4, "hdr has no field nope"},
+	{"_parent.a", .Invalid, 0, "_parent: r has no enclosing set"},
+	{"_index", .Invalid, 0, "_index is only defined for a repeated field"},
+	{"a == 1", .Invalid, 2, "expected an integer, found a boolean"},
+	{"a and true ? 1 : 0", .Invalid, 0, "expected a boolean, found an integer"},
+	{"a ? 1 : 0", .Invalid, 0, "expected a boolean, found an integer"},
+	{"true ? 1 : false", .Invalid, 11, "expected an integer, found a boolean"},
+	{"1 == true ? 1 : 0", .Invalid, 5, "expected an integer, found a boolean"},
+	{"-true", .Invalid, 1, "expected an integer, found a boolean"},
+	{"hdr", .Invalid, 0, "expected an integer, found a set"},
+	{"items", .Invalid, 0, "expected an integer, found an array"},
+	{"hdr.tag", .Invalid, 4, "expected an integer, found a byte array"},
+}
+
+@(test)
+expression_compile_errors :: proc(t: ^testing.T) {
+	p: Expr_Plan
+	defer mdat.destroy_file_format(&p.ff)
+	make_expr_plan(t, &p)
+
+	for c in COMPILE_ERROR_CASES {
+		e, err := expr.compile(c.text, {types = {p.root}}, .Int, virtual.arena_allocator(&p.ff.arena))
+		defer expr.destroy_error(&err)
+		testing.expectf(
+			t,
+			e == nil && err.kind == c.kind && err.offset == c.offset && strings.contains(err.message, c.message),
+			"%q: got %v at %v, %q; want %v at %v, a message containing %q",
+			c.text, err.kind, err.offset, err.message, c.kind, c.offset, c.message,
+		)
+	}
+}
+
+// _parent resolves against the enclosing set given in the scope.
+@(test)
+expression_parent_scope :: proc(t: ^testing.T) {
+	p: Expr_Plan
+	defer mdat.destroy_file_format(&p.ff)
+	make_expr_plan(t, &p)
+	a := virtual.arena_allocator(&p.ff.arena)
+
+	e, err := expr.compile("_parent._parent.a", {types = {p.root, p.hdr}}, .Int, a)
+	defer expr.destroy_error(&err)
+	testing.expectf(t, e == nil && err.kind == .Invalid && strings.contains(err.message, "_parent: r has no enclosing set"), "%v: %s", err.kind, err.message)
+
+	e2, err2 := expr.compile("_parent.hdr.n + n", {types = {p.root, p.hdr}}, .Int, a)
+	defer expr.destroy_error(&err2)
+	testing.expectf(t, e2 != nil && err2.kind == .None, "%v: %s", err2.kind, err2.message)
+}

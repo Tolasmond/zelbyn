@@ -73,6 +73,7 @@ SCHEMA_ERROR_CASES := [?]Schema_Error_Case {
 	{"mask without an offset", proc(r: ^sql.Records, a: mem.Allocator) {r.set_length_map[1].flag_mask = 1}, "Length", "FlagMask or FlagShift without an offset"},
 	{"shift out of range", proc(r: ^sql.Records, a: mem.Allocator) {r.set_length_map[5].flag_shift = 64}, "Length", "FlagShift is 64"},
 	{"FlagExpression", proc(r: ^sql.Records, a: mem.Allocator) {r.set_length_map[5].flag_expression = "x"}, "Length", "FlagExpression is not supported"},
+	{"unknown ValueExpression", proc(r: ^sql.Records, a: mem.Allocator) {r.set_length_map[5].value_expression = "Pow(3, [x])"}, "Length", `ValueExpression "Pow(3, [x])" is not supported`},
 	{"blob ValueExpression", proc(r: ^sql.Records, a: mem.Allocator) {r.set_length_map[1].value_expression = "x"}, "Length", "ValueExpression is not supported on a blob length"},
 	{"peek a String", proc(r: ^sql.Records, a: mem.Allocator) {r.set_length_map[5].data_type_id = 20}, "Length", "is a String, which cannot be peeked"},
 	{"peek a UInt64", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[8].type = 8}, "Length", "is a UInt64, which cannot be peeked"},

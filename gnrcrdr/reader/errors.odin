@@ -1,6 +1,7 @@
 package reader
 
 import dat "../data"
+import fld "../field"
 import "core:mem"
 import "core:os"
 import "core:strings"
@@ -22,6 +23,7 @@ Decoder :: struct {
 	r:         dat.Reader,
 	allocator: mem.Allocator, // the value tree's arena; also holds path
 	path:      [dynamic]Path_Segment,
+	frames:    [dynamic]^map[int][dynamic]fld.Value, // the set instances being decoded, outermost first; also in allocator
 	err:       Parse_Error,
 }
 

@@ -1,6 +1,7 @@
 package tests
 
 import dat "../gnrcrdr/data"
+import expr "../gnrcrdr/expression"
 import mdat "../gnrcrdr/metadata"
 import "core:testing"
 
@@ -93,18 +94,23 @@ plan_color_table_counts :: proc(t: ^testing.T) {
 	if !load_gif(t, &ff) do return
 
 	// the flag and size bits of the packed byte 3 bytes back (GCT) or 1 byte
-	// back (LCT)
-	for c in ([?][2]int{{5013, -3}, {5064, -1}}) {
-		node := find_node(ff.root, c[0])
-		if !testing.expectf(t, node != nil, "no node %v", c[0]) do continue
+	// back (LCT); Pow(2, [x]+1) becomes 2 << x
+	Count_Case :: struct {
+		id:   int,
+		expr: string,
+	}
+	for c in ([?]Count_Case {
+		{5013, "((((peek(u1, (_io.pos - 3)) & 128) >> 7) != 0) ? (2 << (peek(u1, (_io.pos - 3)) & 7)) : 0)"},
+		{5064, "((((peek(u1, (_io.pos - 1)) & 128) >> 7) != 0) ? (2 << (peek(u1, (_io.pos - 1)) & 7)) : 0)"},
+	}) {
+		node := find_node(ff.root, c.id)
+		if !testing.expectf(t, node != nil, "no node %v", c.id) do continue
 
 		count, is_rule := node.count.(mdat.Rule_Count)
-		if !testing.expectf(t, is_rule, "%v: count is %v, want a Rule_Count", c[0], node.count) do continue
+		if !testing.expectf(t, is_rule, "%v: count is %v, want a Rule_Count", c.id, node.count) do continue
 		testing.expect_value(t, count.max, 256)
-		testing.expect_value(t, count.rule.type, dat.Data_Type.UInt8)
-		testing.expect_value(t, count.rule.flag, mdat.Peek{offset = c[1], mask = 128, shift = 7})
-		testing.expect_value(t, count.rule.value, mdat.Peek{offset = c[1], mask = 7})
-		testing.expect_value(t, count.rule.expression, "Pow(2, [x]+1)")
+		testing.expect_value(t, count.expr.type, mdat.Expr_Type.Int)
+		testing.expect_value(t, expr.to_string(count.expr, context.temp_allocator), c.expr)
 	}
 }
 
@@ -172,10 +178,7 @@ plan_sub_block_blob :: proc(t: ^testing.T) {
 	if !testing.expectf(t, is_rule, "length is %v, want a Rule_Length", values.length) do return
 	testing.expect_value(t, length.min, 0)
 	testing.expect_value(t, length.max, 255)
-	testing.expect_value(t, length.rule.type, dat.Data_Type.UInt8)
-	testing.expect_value(t, length.rule.flag, nil)
-	testing.expect_value(t, length.rule.value, mdat.Peek{offset = -1})
-	testing.expect_value(t, length.rule.expression, nil)
+	testing.expect_value(t, expr.to_string(length.expr, context.temp_allocator), "peek(u1, (_io.pos - 1))")
 }
 
 @(test)
