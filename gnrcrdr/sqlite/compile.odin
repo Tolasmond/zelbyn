@@ -114,7 +114,8 @@ compile_node :: proc(c: ^Compiler, id: int, table: string) -> (node: ^mdata.Node
 	c.nodes[id] = nil // in progress: meeting id again below it is a cycle
 
 	node = new(mdata.Node, c.allocator)
-	node^ = {id = id, name = strings.clone(field.name, c.allocator), type = dat.Data_Type(dt.type), order = ORDER}
+	name := strings.clone(field.name, c.allocator)
+	node^ = {id = id, name = name, ref_name = name, type = dat.Data_Type(dt.type), order = ORDER}
 
 	grow := false
 	if g, has_grow := dt.is_grow_as_needed.?; has_grow {
@@ -140,6 +141,7 @@ compile_node :: proc(c: ^Compiler, id: int, table: string) -> (node: ^mdata.Node
 			n, has_n := dt.max_buffer_length.?
 			if !has_n || n < 0 do return nil, fail(c, "DataType", "data type %v: a String needs a MaxBufferLength of 0 or more", dt.id)
 			node.length = mdata.Fixed_Length{n}
+			node.drop_nul = true
 		case .Blob:
 			node.length = blob_length(c, node, dt, helper) or_return
 		case:

@@ -162,7 +162,13 @@ read_field :: proc(d: ^Decoder, instance: ^map[int][dynamic]fld.Value, node: ^md
 			n: int
 			n, err = byte_length(d, node.length, i)
 			if err != .None do return fail(d, err, start)
-			value, err = to_value(dat.read_string(&d.r, n, d.allocator))
+			if node.drop_nul {
+				value, err = to_value(dat.read_string(&d.r, n, d.allocator))
+			} else {
+				src: []byte
+				src, err = dat.read_bytes(&d.r, n)
+				if err == .None do value = fld.Value(string(slice.clone(src, d.allocator)))
+			}
 		case .Blob:
 			n: int
 			n, err = byte_length(d, node.length, i)

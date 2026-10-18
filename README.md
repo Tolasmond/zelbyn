@@ -1,5 +1,5 @@
 # gnrcrdr
-Data-driven binary file reader written in [Odin](https://odin-lang.org/). File formats are described in a SQLite database (see `data/Gif89a.sql`).
+Data-driven binary file reader written in [Odin](https://odin-lang.org/). File formats are described in [Kaitai Struct](https://kaitai.io/) `.ksy` files (a subset, see [Schemas](#schemas)) in `formats/`, or in a SQLite database (`data/Gif89aMetadata.sqlite3`), which the `.ksy` files are replacing.
 
 ## Building
 
@@ -15,17 +15,18 @@ odin build .
 ## Usage
 
 ```
-gnrcrdr <schema.db> <file> [--format N] [--dump tree|json]
+gnrcrdr <schema> <file> [--dump tree|json] [--format N]
 ```
 
-Decodes `<file>` with format `N` (default `1`) from the schema database and writes the decoded tree to stdout. For example:
+Decodes `<file>` with the schema and writes the decoded tree to stdout. A schema whose name ends in `.ksy` is a Kaitai Struct schema; any other is a SQLite database, from which `--format` picks the format (default `1`). For example:
 
 ```
+./gnrcrdr.bin formats/gif89a.ksy data/855.gif
+./gnrcrdr.bin formats/gif89a.ksy data/855.gif --dump json
 ./gnrcrdr.bin data/Gif89aMetadata.sqlite3 data/855.gif
-./gnrcrdr.bin data/Gif89aMetadata.sqlite3 data/855.gif --dump json
 ```
 
-Options may also be written `--format=N` and `--dump=json`. `--help` (or `-h`) prints usage.
+`formats/gif89a.ksy` is the SQLite schema ported field for field, and gives the same output. Options may also be written `--format=N` and `--dump=json`. `--help` (or `-h`) prints usage.
 
 ### Output
 
@@ -68,15 +69,47 @@ Stdout carries only the decoded tree. Errors and usage messages go to stderr, an
 |---|---|
 | 0 | Success, including `--help` |
 | 1 | The format could not be loaded, the file could not be read or decoded, or the output could not be written |
-| 2 | Usage error: a missing or extra argument, an unknown flag, or a bad `--format` or `--dump` value |
+| 2 | Usage error: a missing or extra argument, an unknown flag, a bad `--format` or `--dump` value, or `--format` with a `.ksy` schema |
 
 `--dump` values are case-sensitive.
 
-Decoding checks every value against its field's `MinValue`, `MaxValue` and `Pattern`. A value that does not pass stops the decode with `Not_Equal`, `Less_Than_Min` or `Greater_Than_Max`, at the offset and path of that value. A file that is not a GIF fails on its signature:
+A `.ksy` schema that cannot be compiled is reported with its line and column, and the kind of problem: `Syntax`, `Unsupported` (valid YAML or Kaitai outside the supported subset) or `Invalid`:
+
+```
+error: formats/x.ksy:6:5: Unsupported: attribute a: if is not supported
+```
+
+Decoding checks every value against its field's `contents` and `valid` (in a SQLite schema, `MinValue`, `MaxValue` and `Pattern`). A value that does not pass stops the decode with `Not_Equal`, `Less_Than_Min`, `Greater_Than_Max` or `Not_Any_Of`, at the offset and path of that value. A file that is not a GIF fails on its signature:
 
 ```
 error: Not_Equal at 0x00000000 in GIF89a[0].Signature[0]
 ```
+
+## Schemas
+
+`.ksy` schemas are read with gnrcrdr's own YAML parser, which accepts the YAML that `.ksy` files use and rejects anchors, aliases, tags, merge keys, complex keys, multi-document streams and duplicate keys. The compiler supports this subset of Kaitai Struct, and rejects everything else, naming the key and its location:
+
+| Area | Supported |
+|---|---|
+| Top level | `meta`, `seq`, `types`, `enums`, `doc`, `doc-ref` |
+| `meta` | `id`, `endian`, `bit-endian`, `encoding`; `title`, `file-extension`, `xref`, `license` (ignored) |
+| Attributes | `id`, `type`, `size`, `contents`, `valid` (a constant, or `eq`, `min`/`max`, `any-of`), `repeat: expr` with `repeat-expr`, `encoding`, `doc`, `doc-ref` |
+| Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `str` with `size` (ASCII or UTF-8, kept as bytes, NULs included), byte arrays, user types (not recursive) |
+| Expressions | integer and boolean operators, `?:`, field references, `_parent`, `_root`, `_io.pos`, `_io.size`, `_io.eof`, `.size`, `_index`, enum constants (`kinds::two`) |
+
+A `repeat-expr` that is not a literal is supported only on a user type. Not supported yet: `if`, `enum` on an attribute, `repeat: eos` and `until`, `terminator`, `strz`, `size-eos`, bit types (`b1`–`b64`), `switch-on`, `instances`, `size` on a user type, and `valid` constants other than integer and string literals.
+
+Keys starting with `-` are extensions; the official Kaitai tools ignore them, and so does gnrcrdr when it does not know them. gnrcrdr's extensions keep the SQLite schema's dumps while it is ported:
+
+| Extension | Meaning | In standard Kaitai |
+|---|---|---|
+| `-orig-id: Name` | The name shown in the dump and in error paths, instead of the `id` (on `meta`, the root's name). Expressions still use the `id`. | No equivalent; the dump uses the `id`. |
+| `-peek: [b, ...]` | On a user-type attribute: read it once if the input at the current position starts with these bytes, else not at all. Nothing is consumed by the test. | `if:` on an `instances` entry that reads the bytes at `pos: _io.pos`. |
+| `-while-peek: [b]` | On a user-type attribute: read instances while the next byte is `b`, which is not consumed. Stops at the end of the input. | `repeat: until` over a type that reads the byte, or an `instances` peek in each element. |
+| `-until-peek: [b]` | As `-while-peek`, but until the next byte is `b`, which is not consumed; reaching the end of the input first is an error. | `repeat: until`, which consumes the terminating element and keeps it. |
+| `-bits: [{id, -orig-id, low, high}, ...]` | On an integer attribute: unsigned subfields of bits `low` to `high` (0 is the least significant), dumped after the integer in order of their low bit. | `value:` instances that mask and shift the integer, or `b1`–`b64` fields in a user type. |
+
+Each instance read by `-while-peek` or `-until-peek` must consume input. The byte lists take the same forms as `contents`; `-while-peek` and `-until-peek` take one byte.
 
 ## Checks and tests
 
@@ -94,7 +127,7 @@ Debug builds (`odin build . -debug`) run under a tracking allocator and exit 1 i
 
 ### Golden dumps
 
-`tests/golden/` holds the `--dump tree` and `--dump json` output of every sample in `data/`, and the tests compare each dump with it byte for byte. When a change to the decoder or the dump is meant to change the output, re-record the files and review the diff before committing it:
+`tests/golden/` holds the `--dump tree` and `--dump json` output of every sample in `data/`, and the tests compare each dump, from the SQLite schema and from `formats/gif89a.ksy`, with it byte for byte. When a change to the decoder or the dump is meant to change the output, re-record the files (from the SQLite schema) and review the diff before committing it:
 
 ```
 odin test tests -define:GOLDEN_RECORD=true
