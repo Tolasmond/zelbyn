@@ -81,6 +81,37 @@ SCHEMA_ERROR_CASES := [?]Schema_Error_Case {
 	// Packed rows
 	{"packed set", proc(r: ^sql.Records, a: mem.Allocator) {r.packed_records[0].id = 5003}, "Packed", "is a Set, which cannot have packed fields"},
 	{"packed bits too wide", proc(r: ^sql.Records, a: mem.Allocator) {r.packed_records[0].high_bit = 8}, "Packed", "not within 0 to 7"},
+	{"packed field without a data type", proc(r: ^sql.Records, a: mem.Allocator) {r.field_map[5009].data_type_id = 999}, "Field", "Field row 5009: data type 999 not found"},
+	{"packed field not an integer", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[6].type = 11}, "Packed", "packed field 5009 is a String, not an integer"},
+
+	// DefaultValue
+	{"default on a set", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[1].default_value = "0"}, "DataType", "data type 1: a Set cannot have a DefaultValue"},
+	{"default on a blob", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[22].default_value = "00"}, "DataType", "data type 22: a Blob cannot have a DefaultValue"},
+	{"default not a number", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[13].default_value = "0x21"}, "DataType", `data type 13: DefaultValue "0x21" is not a UInt8`},
+	{"default too large for the type", proc(r: ^sql.Records, a: mem.Allocator) {
+			r.data_type_map[7].default_value = "256"
+			r.data_type_map[7].max_value = nil
+		}, "DataType", `DefaultValue "256" is not a UInt8`},
+	{"negative unsigned default", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[7].default_value = "-1"}, "DataType", `DefaultValue "-1" is not a UInt8`},
+	{"default too large for any type", proc(r: ^sql.Records, a: mem.Allocator) {
+			r.data_type_map[7].type = 8 // UInt64
+			r.data_type_map[7].default_value = "18446744073709551616"
+			r.data_type_map[7].max_value = nil
+		}, "DataType", `DefaultValue "18446744073709551616" is not a UInt64`},
+	{"default below MinValue", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[19].min_value = "10"}, "DataType", "data type 19: DefaultValue 0 is below MinValue 10"},
+	{"default above MaxValue", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[6].default_value = "8"}, "DataType", "data type 6: DefaultValue 8 is above MaxValue 7"},
+	{"MinValue not a number", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[19].min_value = "low"}, "DataType", `data type 19: MinValue "low" is not a UInt16`},
+	{"MaxValue not a number", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[19].max_value = "65536"}, "DataType", `data type 19: MaxValue "65536" is not a UInt16`},
+	{"float default above MaxValue", proc(r: ^sql.Records, a: mem.Allocator) {
+			r.data_type_map[19].type = 9 // Float32
+			r.data_type_map[19].default_value = "65535.5"
+		}, "DataType", "data type 19: DefaultValue 65535.5 is above MaxValue 65535"},
+	{"float default out of range", proc(r: ^sql.Records, a: mem.Allocator) {
+			r.data_type_map[19].type = 9 // Float32
+			r.data_type_map[19].default_value = "1e39"
+			r.data_type_map[19].max_value = nil
+		}, "DataType", `DefaultValue "1e39" is not a Float32`},
+	{"String default too long", proc(r: ^sql.Records, a: mem.Allocator) {r.data_type_map[10000].default_value = "GIF8"}, "DataType", `data type 10000: DefaultValue "GIF8" is longer than MaxBufferLength 3`},
 }
 
 @(test)

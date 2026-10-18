@@ -2,9 +2,12 @@ package sqlite
 
 import dat "../data"
 import mdata "../metadata"
+import "base:intrinsics"
 import "core:fmt"
+import "core:math"
 import "core:mem"
 import "core:mem/virtual"
+import "core:strconv"
 import "core:strings"
 
 // Integer types the decoder can peek (dat.read_integer).
@@ -51,7 +54,12 @@ Compiler :: struct {
 //   - peek types that are not integers of at most 64 bits (UInt64 included)
 //   - a String without MaxBufferLength, a blob whose fixed length is below
 //     its MinBufferLength, and MinBufferLength > MaxBufferLength
-//   - packed fields on a non-integer field, or with bits outside its width
+//   - packed fields on a non-integer field, or with bits outside its width,
+//     or whose own data type is missing or not an integer
+//   - a DefaultValue on a Set or Blob, one that is not a number of the
+//     field's type (integers in decimal) or lies outside MinValue and
+//     MaxValue (when a default is present, those must be numbers of the type
+//     too), and a String default longer than MaxBufferLength
 compile :: proc(records: ^Records, file_format: ^mdata.File_Format) -> Load_Error {
 	scratch: virtual.Arena
 	defer virtual.arena_destroy(&scratch)
@@ -123,6 +131,9 @@ compile_node :: proc(c: ^Compiler, id: int, table: string) -> (node: ^mdata.Node
 		}
 	}
 
+	max_bytes := 0
+	if l, fixed := node.length.(mdata.Fixed_Length); fixed do max_bytes = l.n
+	node.default_value = compile_default(c, dt, node.type, max_bytes) or_return
 	node.bits = compile_bits(c, node) or_return
 
 	c.nodes[id] = node
@@ -364,12 +375,114 @@ compile_bits :: proc(c: ^Compiler, node: ^mdata.Node) -> (bits: []mdata.Bit_Fiel
 		field := c.records.field_map[p.field_id]
 		if field == nil do return nil, fail(c, "Packed", "field %v (%s): packed field %v not found", node.id, node.name, p.field_id)
 
+		dt := data_type(c, field.data_type_id, "Field", p.field_id) or_return
+		type := dat.Data_Type(dt.type)
+		if sizes[type] == 0 do return nil, fail(c, "Packed", "field %v (%s): packed field %v is a %v, not an integer", node.id, node.name, p.field_id, type)
+
 		if p.low_bit < 0 || p.low_bit > p.high_bit || p.high_bit >= width {
 			return nil, fail(c, "Packed", "field %v (%s): packed field %v has bits %v to %v, not within 0 to %v", node.id, node.name, p.field_id, p.low_bit, p.high_bit, width - 1)
 		}
 
-		bits[i] = {id = p.field_id, name = strings.clone(field.name, c.allocator), low = p.low_bit, high = p.high_bit}
+		bits[i] = {
+			id            = p.field_id,
+			name          = strings.clone(field.name, c.allocator),
+			low           = p.low_bit,
+			high          = p.high_bit,
+			default_value = compile_default(c, dt, type, 0) or_return,
+		}
 		i += 1
 	}
 	return bits, true
+}
+
+// dt's DefaultValue as type, or nil when there is none. max_bytes bounds a
+// String default.
+@(private = "file")
+compile_default :: proc(c: ^Compiler, dt: ^Data_Type_Record, type: dat.Data_Type, max_bytes: int) -> (value: mdata.Scalar, ok: bool) {
+	text, has_default := dt.default_value.?
+	if !has_default do return nil, true
+
+	switch type {
+	case .Set, .Blob:
+		return nil, fail(c, "DataType", "data type %v: a %v cannot have a DefaultValue", dt.id, type)
+	case .String:
+		if len(text) > max_bytes {
+			return nil, fail(c, "DataType", "data type %v: DefaultValue %q is longer than MaxBufferLength %v", dt.id, text, max_bytes)
+		}
+		return strings.clone(text, c.allocator), true
+	case .Int8:
+		return default_number(c, dt, text, type, i8)
+	case .UInt8:
+		return default_number(c, dt, text, type, u8)
+	case .Int16:
+		return default_number(c, dt, text, type, i16)
+	case .UInt16:
+		return default_number(c, dt, text, type, u16)
+	case .Int32:
+		return default_number(c, dt, text, type, i32)
+	case .UInt32:
+		return default_number(c, dt, text, type, u32)
+	case .Int64:
+		return default_number(c, dt, text, type, i64)
+	case .UInt64:
+		return default_number(c, dt, text, type, u64)
+	case .Float32:
+		return default_number(c, dt, text, type, f32)
+	case .Float64:
+		return default_number(c, dt, text, type, f64)
+	}
+	unreachable()
+}
+
+// The default text as a T, within MinValue and MaxValue when they are set.
+@(private = "file")
+default_number :: proc(c: ^Compiler, dt: ^Data_Type_Record, text: string, type: dat.Data_Type, $T: typeid) -> (value: mdata.Scalar, ok: bool) {
+	n := parse_number(c, dt, "DefaultValue", text, type, T) or_return
+
+	if lo_text, has_min := dt.min_value.?; has_min {
+		lo := parse_number(c, dt, "MinValue", lo_text, type, T) or_return
+		if !(lo <= n) do return nil, fail(c, "DataType", "data type %v: DefaultValue %v is below MinValue %v", dt.id, text, lo_text)
+	}
+	if hi_text, has_max := dt.max_value.?; has_max {
+		hi := parse_number(c, dt, "MaxValue", hi_text, type, T) or_return
+		if !(n <= hi) do return nil, fail(c, "DataType", "data type %v: DefaultValue %v is above MaxValue %v", dt.id, text, hi_text)
+	}
+
+	return n, true
+}
+
+// text as a T: a float, or a decimal integer within T's range. column names
+// the DataType column text came from, for the error.
+@(private = "file")
+parse_number :: proc(c: ^Compiler, dt: ^Data_Type_Record, column, text: string, type: dat.Data_Type, $T: typeid) -> (n: T, ok: bool) {
+	when intrinsics.type_is_float(T) {
+		f, parsed := strconv.parse_f64(text)
+		n = T(f)
+		ok = parsed && (math.is_inf(f) || !math.is_inf(n)) // out of range for f32
+	} else {
+		n, ok = parse_integer(text, T)
+	}
+
+	if !ok do return n, fail(c, "DataType", "data type %v: %s %q is not a %v", dt.id, column, text, type)
+	return n, true
+}
+
+// text as an optionally signed decimal integer that fits in T.
+@(private = "file")
+parse_integer :: proc(text: string, $T: typeid) -> (n: T, ok: bool) where intrinsics.type_is_integer(T) {
+	digits := text
+	negative := len(digits) > 0 && digits[0] == '-'
+	if negative || (len(digits) > 0 && digits[0] == '+') do digits = digits[1:]
+	if digits == "" do return
+
+	v: i128
+	for ch in transmute([]byte)digits {
+		if ch < '0' || ch > '9' do return
+		v = v * 10 + i128(ch - '0')
+		if v > i128(max(u64)) do return // too large for any T; stop before v overflows
+	}
+	if negative do v = -v
+
+	if v < i128(min(T)) || v > i128(max(T)) do return
+	return T(v), true
 }

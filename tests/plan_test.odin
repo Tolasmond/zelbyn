@@ -188,10 +188,10 @@ plan_bits :: proc(t: ^testing.T) {
 	if !testing.expect(t, node != nil, "no Logical Screen Descriptor Packed Fields node") do return
 
 	want := [?]mdat.Bit_Field {
-		{5009, "Size of Global Color Table", 0, 2},
-		{5008, "Sort Flag", 3, 3},
-		{5007, "Color Resolution", 4, 6},
-		{5006, "Global Color Table Flag", 7, 7},
+		{5009, "Size of Global Color Table", 0, 2, i32(0)},
+		{5008, "Sort Flag", 3, 3, i32(0)},
+		{5007, "Color Resolution", 4, 6, i32(0)},
+		{5006, "Global Color Table Flag", 7, 7, i32(0)},
 	}
 	if !testing.expect_value(t, len(node.bits), len(want)) do return
 	for b, i in node.bits {
@@ -203,4 +203,29 @@ plan_bits :: proc(t: ^testing.T) {
 		testing.expectf(t, n != nil && len(n.bits) == (id == 5023 ? 3 : 4), "%v: packed fields missing", id)
 	}
 	testing.expect_value(t, len(find_node(ff.root, 5011).bits), 0)
+}
+
+@(test)
+plan_defaults :: proc(t: ^testing.T) {
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	if !load_gif(t, &ff) do return
+
+	Default_Case :: struct {
+		id:    int,
+		value: mdat.Scalar,
+	}
+	for c in ([?]Default_Case {
+		{5020, u8(33)}, // Extension Introducer
+		{5068, u8(59)}, // Trailer
+		{5029, u8(0)}, // Block Terminator
+		{5004, u16(0)}, // Logical Screen Width
+		{5001, nil}, // Signature: a String without a default
+		{5003, nil}, // Logical Screen Descriptor: a Set
+		{5052, nil}, // Data Sub-Block Values: a Blob
+	}) {
+		node := find_node(ff.root, c.id)
+		if !testing.expectf(t, node != nil, "no node %v", c.id) do continue
+		testing.expectf(t, node.default_value == c.value, "%v: default is %v (%T), want %v (%T)", c.id, node.default_value, node.default_value, c.value, c.value)
+	}
 }
