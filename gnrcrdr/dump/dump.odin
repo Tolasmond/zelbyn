@@ -1,6 +1,5 @@
 package dump
 
-import dat "../data"
 import fld "../field"
 import mdat "../metadata"
 import "core:encoding/json"
@@ -21,7 +20,7 @@ write_text :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tre
 	path := strings.builder_make()
 	defer strings.builder_destroy(&path)
 
-	return write_text_array(w, &path, &format.root_metadata_node, tree.root[:])
+	return write_text_array(w, &path, format.root, tree.root[:])
 }
 
 // Writes tree as compact JSON followed by a newline. A set instance is an
@@ -30,10 +29,10 @@ write_text :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tre
 // are numbers, and NaN and infinities are null.
 @(require_results)
 write_json :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tree) -> io.Error {
-	node := &format.root_metadata_node
+	node := format.root
 
 	io.write_byte(w, '{') or_return
-	write_json_string(w, node.metadata.name) or_return
+	write_json_string(w, node.name) or_return
 	io.write_byte(w, ':') or_return
 	write_json_array(w, node, tree.root[:]) or_return
 	io.write_string(w, "}\n") or_return
@@ -77,15 +76,15 @@ write_value :: proc(w: io.Writer, v: fld.Value) -> io.Error {
 }
 
 @(private = "file", require_results)
-write_text_array :: proc(w: io.Writer, path: ^strings.Builder, node: ^mdat.Field_Metadata_Tree_Node, values: []fld.Value) -> io.Error {
-	is_set := dat.Data_Type(node.metadata.data_type.type) == .Set
+write_text_array :: proc(w: io.Writer, path: ^strings.Builder, node: ^mdat.Node, values: []fld.Value) -> io.Error {
+	is_set := node.type == .Set
 	parent_len := strings.builder_len(path^)
 	defer resize(&path.buf, parent_len)
 
 	for v, i in values {
 		resize(&path.buf, parent_len)
 		if parent_len > 0 do strings.write_byte(path, '.')
-		strings.write_string(path, node.metadata.name)
+		strings.write_string(path, node.name)
 		strings.write_byte(path, '[')
 		strings.write_int(path, i)
 		strings.write_byte(path, ']')
@@ -93,7 +92,7 @@ write_text_array :: proc(w: io.Writer, path: ^strings.Builder, node: ^mdat.Field
 		if is_set {
 			set_map := v.(map[int][dynamic]fld.Value)
 			for child in node.children {
-				write_text_array(w, path, child, set_map[child.metadata.id][:]) or_return
+				write_text_array(w, path, child, set_map[child.id][:]) or_return
 			}
 		} else {
 			io.write_string(w, strings.to_string(path^)) or_return
@@ -106,8 +105,8 @@ write_text_array :: proc(w: io.Writer, path: ^strings.Builder, node: ^mdat.Field
 }
 
 @(private = "file", require_results)
-write_json_array :: proc(w: io.Writer, node: ^mdat.Field_Metadata_Tree_Node, values: []fld.Value) -> io.Error {
-	is_set := dat.Data_Type(node.metadata.data_type.type) == .Set
+write_json_array :: proc(w: io.Writer, node: ^mdat.Node, values: []fld.Value) -> io.Error {
+	is_set := node.type == .Set
 
 	io.write_byte(w, '[') or_return
 	for v, i in values {
@@ -123,13 +122,13 @@ write_json_array :: proc(w: io.Writer, node: ^mdat.Field_Metadata_Tree_Node, val
 }
 
 @(private = "file", require_results)
-write_json_object :: proc(w: io.Writer, node: ^mdat.Field_Metadata_Tree_Node, set_map: map[int][dynamic]fld.Value) -> io.Error {
+write_json_object :: proc(w: io.Writer, node: ^mdat.Node, set_map: map[int][dynamic]fld.Value) -> io.Error {
 	io.write_byte(w, '{') or_return
 	for child, i in node.children {
 		if i > 0 do io.write_byte(w, ',') or_return
-		write_json_string(w, child.metadata.name) or_return
+		write_json_string(w, child.name) or_return
 		io.write_byte(w, ':') or_return
-		write_json_array(w, child, set_map[child.metadata.id][:]) or_return
+		write_json_array(w, child, set_map[child.id][:]) or_return
 	}
 	io.write_byte(w, '}') or_return
 	return .None

@@ -1,7 +1,7 @@
 package tests
 
-import fld "../gnrcrdr/field"
 import mdat "../gnrcrdr/metadata"
+import rdr "../gnrcrdr/reader"
 import "core:os"
 import "core:testing"
 import "core:time"
@@ -255,8 +255,8 @@ truncation_sweep_large :: proc(t: ^testing.T) {
 
 @(test)
 checked_count_limits :: proc(t: ^testing.T) {
-	testing.expect_value(t, fld.check_count(-1, nil), .Invalid_Length)
-	testing.expect_value(t, fld.check_count(5, 4), .Repeat_Limit_Exceeded)
-	testing.expect_value(t, fld.check_count(4, 4), .None)
-	testing.expect_value(t, fld.check_count(10, nil), .None)
+	testing.expect_value(t, rdr.check_count(-1, nil), .Invalid_Length)
+	testing.expect_value(t, rdr.check_count(5, 4), .Repeat_Limit_Exceeded)
+	testing.expect_value(t, rdr.check_count(4, 4), .None)
+	testing.expect_value(t, rdr.check_count(10, nil), .None)
 }

@@ -11,7 +11,6 @@ Read_Error :: enum {
 	Invalid_Length,        // a computed count/length is negative, or outside [MinBufferLength, MaxBufferLength]
 	Repeat_Limit_Exceeded, // a set count exceeds the set's MaxArrayLength
 	No_Progress,           // a repeated (grow-as-needed) set instance consumed zero bytes
-	Invalid_Schema,        // metadata needed for decoding is missing (nil lookup, String without MaxBufferLength)
 	File_Read_Failed,      // the input file could not be read
 }
 
