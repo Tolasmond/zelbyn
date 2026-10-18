@@ -1,6 +1,5 @@
 package expression
 
-import dat "../data"
 import mdata "../metadata"
 import "core:strings"
 
@@ -41,18 +40,6 @@ BINARY_TEXT := [mdata.Binary_Op]string {
 	.Ge          = ">=",
 	.Logical_And = "and",
 	.Logical_Or  = "or",
-}
-
-@(private = "file")
-KAITAI_TYPE := #partial [dat.Data_Type]string {
-	.Int8   = "s1",
-	.UInt8  = "u1",
-	.Int16  = "s2",
-	.UInt16 = "u2",
-	.Int32  = "s4",
-	.UInt32 = "u4",
-	.Int64  = "s8",
-	.UInt64 = "u8",
 }
 
 @(private = "file")
@@ -119,13 +106,6 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 		strings.write_string(b, "_index")
 	case mdata.Repeat_Element:
 		strings.write_string(b, "_")
-	case mdata.Peek:
-		strings.write_string(b, "peek(")
-		strings.write_string(b, KAITAI_TYPE[x.type])
-		if x.type != .Int8 && x.type != .UInt8 do strings.write_string(b, x.order == .Little ? "le" : "be")
-		strings.write_string(b, ", ")
-		write(b, x.pos)
-		strings.write_byte(b, ')')
 	}
 }
 

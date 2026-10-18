@@ -1,6 +1,7 @@
-# GIF89a, ported field for field from data/Gif89aMetadata.sqlite3 (format
-# 1). Each field keeps its SQLite name in -orig-id, so the dumps match the
-# SQLite schema's byte for byte. The SQLite schema's look-ahead markers and
+# GIF89a, ported field for field from the SQLite schema gnrcrdr used before
+# .ksy (format 1 of data/Gif89aMetadata.sqlite3, removed in step 7). Each
+# field keeps its SQLite name in -orig-id, so the dumps match the SQLite
+# schema's byte for byte. The SQLite schema's look-ahead markers and
 # growing sets are -peek, -while-peek and -until-peek, and its packed fields
 # are -bits. Its counting rules peeked at the packed bytes; here they name
 # them. Ranges that every value of the type is within (0 to 255 on a u1),

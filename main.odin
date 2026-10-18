@@ -8,18 +8,15 @@ import "core:log"
 import "core:mem"
 import "core:os"
 import "core:path/filepath"
-import "core:strings"
 import dmp "gnrcrdr/dump"
 import fld "gnrcrdr/field"
 import ksy "gnrcrdr/ksy"
 import mdat "gnrcrdr/metadata"
 import rdr "gnrcrdr/reader"
-import sql "gnrcrdr/sqlite"
 
 Options :: struct {
-	schema: string `args:"pos=0,required" usage:"Schema: a .ksy file, or a SQLite database."`,
+	schema: string `args:"pos=0,required" usage:"Schema: a Kaitai Struct .ksy file."`,
 	file:   string `args:"pos=1,required" usage:"File to decode."`,
-	format: int    `usage:"Format id in a SQLite schema (default 1)."`,
 	dump:   string `usage:"Output form: tree or json (default tree)."`,
 }
 
@@ -34,7 +31,7 @@ main :: proc() {
 	opts, dump, usage_exit, ok := parse_args(os.args)
 	if !ok do os.exit(usage_exit)
 
-	exit_code := run_tracked(opts.schema, opts.format, opts.file, dump)
+	exit_code := run_tracked(opts.schema, opts.file, dump)
 
 	os.exit(exit_code) // os.exit skips defers: run_tracked has already cleaned up
 }
@@ -55,16 +52,6 @@ parse_args :: proc(args: []string) -> (opts: Options, dump: Dump_Kind, exit_code
 		return opts, dump, 2, false
 	}
 
-	if is_ksy(opts.schema) {
-		if opts.format != 0 {
-			fmt.eprintln("error: --format applies only to a SQLite schema")
-			flags.write_usage(stderr, Options, program, .Unix)
-			return opts, dump, 2, false
-		}
-	} else if opts.format == 0 {
-		opts.format = 1
-	}
-
 	switch opts.dump {
 	case "tree":
 		dump = .Tree
@@ -82,14 +69,14 @@ parse_args :: proc(args: []string) -> (opts: Options, dump: Dump_Kind, exit_code
 // Calls run. In debug builds (-debug) it runs under a tracking allocator and
 // reports leaks and bad frees on stderr, either of which turns exit code 0
 // into 1.
-run_tracked :: proc(schema_path: string, format_id: int, file_path: string, dump: Dump_Kind) -> int {
+run_tracked :: proc(schema_path: string, file_path: string, dump: Dump_Kind) -> int {
 	when ODIN_DEBUG {
 		tracking_allocator: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&tracking_allocator, context.allocator)
 		tracking_allocator.bad_free_callback = mem.tracking_allocator_bad_free_callback_add_to_array
 		context.allocator = mem.tracking_allocator(&tracking_allocator)
 
-		exit_code := run(schema_path, format_id, file_path, dump)
+		exit_code := run(schema_path, file_path, dump)
 
 		if reset_tracking_allocator(&tracking_allocator) && exit_code == 0 {
 			exit_code = 1
@@ -97,26 +84,19 @@ run_tracked :: proc(schema_path: string, format_id: int, file_path: string, dump
 		mem.tracking_allocator_destroy(&tracking_allocator)
 		return exit_code
 	} else {
-		return run(schema_path, format_id, file_path, dump)
+		return run(schema_path, file_path, dump)
 	}
 }
 
-// A schema whose name ends in .ksy is a Kaitai Struct schema; any other is
-// a SQLite database.
-is_ksy :: proc(schema_path: string) -> bool {
-	return strings.has_suffix(schema_path, ".ksy")
-}
-
-// Loads the format from schema_path (format format_id of a SQLite schema),
-// decodes file_path with it and writes the decoded tree to stdout as a text
+// Loads the format from schema_path, decodes file_path with it and writes the decoded tree to stdout as a text
 // dump or JSON. Errors are reported on stderr, and nothing is written to
 // stdout unless decoding succeeds. Returns 0 on success, 1 on a load, parse
 // or output error.
-run :: proc(schema_path: string, format_id: int, file_path: string, dump: Dump_Kind) -> int {
+run :: proc(schema_path: string, file_path: string, dump: Dump_Kind) -> int {
 	file_format: mdat.File_Format
 	defer mdat.destroy_file_format(&file_format)
 
-	if !load_format(schema_path, format_id, &file_format) do return 1
+	if !load_format(schema_path, &file_format) do return 1
 
 	tree: fld.Value_Tree
 	// the tree may be partially filled after a parse error; free it either way
@@ -156,32 +136,21 @@ run :: proc(schema_path: string, format_id: int, file_path: string, dump: Dump_K
 }
 
 // Loads file_format from schema_path, reporting any error on stderr.
-load_format :: proc(schema_path: string, format_id: int, file_format: ^mdat.File_Format) -> bool {
-	if is_ksy(schema_path) {
-		err := ksy.read_file_format(schema_path, file_format)
-		defer ksy.destroy_error(&err)
+load_format :: proc(schema_path: string, file_format: ^mdat.File_Format) -> bool {
+	err := ksy.read_file_format(schema_path, file_format)
+	defer ksy.destroy_error(&err)
 
-		switch {
-		case err.kind == .None:
-			return true
-		case err.kind == .Read_Failed:
-			fmt.eprintfln("error: cannot read %s: %v", schema_path, err.os_error)
-		case err.line == 0:
-			fmt.eprintfln("error: %s: %v: %s", schema_path, err.kind, err.message)
-		case:
-			fmt.eprintfln("error: %s:%v:%v: %v: %s", schema_path, err.line, err.column, err.kind, err.message)
-		}
-		return false
+	switch {
+	case err.kind == .None:
+		return true
+	case err.kind == .Read_Failed:
+		fmt.eprintfln("error: cannot read %s: %v", schema_path, err.os_error)
+	case err.line == 0:
+		fmt.eprintfln("error: %s: %v: %s", schema_path, err.kind, err.message)
+	case:
+		fmt.eprintfln("error: %s:%v:%v: %v: %s", schema_path, err.line, err.column, err.kind, err.message)
 	}
-
-	err := sql.read_file_format(schema_path, format_id, file_format)
-	defer sql.destroy_load_error(&err)
-
-	if err.kind != .None {
-		fmt.eprintfln("error: loading format %v from %s: %v (%v, table %s): %s", format_id, schema_path, err.kind, err.code, err.table, err.message)
-		return false
-	}
-	return true
+	return false
 }
 
 reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> bool {

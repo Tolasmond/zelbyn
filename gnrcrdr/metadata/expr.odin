@@ -1,8 +1,5 @@
 package metadata
 
-import dat "../data"
-import "core:encoding/endian"
-
 // A node of a parsed expression (§6.3). The parser (package expression)
 // gives every node a syntax variant; resolving the expression replaces the
 // names and member accesses with the resolved variants and sets type. The
@@ -45,7 +42,6 @@ Expr_Variant :: union {
 	Repeat_Index,
 	Repeat_Element,
 	Value_Ref,
-	Peek,
 }
 
 Int_Literal :: struct {
@@ -153,15 +149,6 @@ Repeat_Element :: struct {
 Value_Ref :: struct {
 	base:     ^Expr,
 	instance: ^Value_Instance,
-}
-
-// The integer of type, in order, at position pos (from the start of the
-// input), read without moving the reader. No .ksy syntax yet: front ends
-// build it.
-Peek :: struct {
-	type:  dat.Data_Type,
-	order: endian.Byte_Order,
-	pos:   ^Expr,
 }
 
 // True when the field is read at most once in each instance of its parent,

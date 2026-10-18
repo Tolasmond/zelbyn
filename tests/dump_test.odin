@@ -10,7 +10,7 @@ import "core:time"
 
 // Decodes path and dumps it into b as JSON (as_json) or text. Fails the
 // test and returns false on any error.
-dump_sample :: proc(t: ^testing.T, path: string, as_json: bool, b: ^strings.Builder, source := Schema_Source.SQLite) -> bool {
+dump_sample :: proc(t: ^testing.T, path: string, as_json: bool, b: ^strings.Builder, source := Schema_Source.Ported) -> bool {
 	ff: mdat.File_Format
 	defer mdat.destroy_file_format(&ff)
 	if !load_gif_from(t, source, &ff) do return false

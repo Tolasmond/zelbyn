@@ -1,8 +1,6 @@
 package expression
 
-import dat "../data"
 import mdata "../metadata"
-import "core:encoding/endian"
 import "core:fmt"
 import "core:mem"
 
@@ -116,7 +114,7 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		return resolve_member(r, e, x)
 	case mdata.Enum_Constant:
 		return resolve_enum_constant(r, e, x)
-	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref, mdata.Peek:
+	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref:
 		assert(e.type != .Unresolved, "resolve: a resolved variant without a type")
 	case:
 		panic("resolve: empty expression")
@@ -328,56 +326,4 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 		}
 	}
 	return fail(r, .Unsupported, e.offset, "%s has no member %s (of methods, only .size is supported)", type_name(operand.type), m.name)
-}
-
-// Constructors for front ends that build expressions without text (the
-// SQLite schema). Each returns a resolved node allocated with allocator;
-// its offset is -1.
-
-int_literal :: proc(value: int, allocator: mem.Allocator) -> ^mdata.Expr {
-	return built(.Int, mdata.Int_Literal{value}, allocator)
-}
-
-// left and right must have the types the operator takes.
-binary :: proc(op: mdata.Binary_Op, left, right: ^mdata.Expr, allocator: mem.Allocator) -> ^mdata.Expr {
-	t: mdata.Expr_Type
-	switch op {
-	case .Mul, .Div, .Mod, .Add, .Sub, .Shl, .Shr, .And, .Xor, .Or:
-		assert(left.type == .Int && right.type == .Int)
-		t = .Int
-	case .Lt, .Le, .Gt, .Ge:
-		assert(left.type == .Int && right.type == .Int)
-		t = .Bool
-	case .Eq, .Ne:
-		assert(left.type == right.type && (left.type == .Int || left.type == .Bool))
-		t = .Bool
-	case .Logical_And, .Logical_Or:
-		assert(left.type == .Bool && right.type == .Bool)
-		t = .Bool
-	}
-	return built(t, mdata.Binary{op, left, right}, allocator)
-}
-
-// cond must be Bool, and then and otherwise of one type, Int or Bool.
-ternary :: proc(cond, then, otherwise: ^mdata.Expr, allocator: mem.Allocator) -> ^mdata.Expr {
-	assert(cond.type == .Bool && then.type == otherwise.type && (then.type == .Int || then.type == .Bool))
-	return built(then.type, mdata.Ternary{cond, then, otherwise}, allocator)
-}
-
-io_pos :: proc(allocator: mem.Allocator) -> ^mdata.Expr {
-	return built(.Int, mdata.Io_Pos{}, allocator)
-}
-
-// type must be an integer type the reader can peek (not UInt64), and pos an
-// Int.
-peek :: proc(type: dat.Data_Type, order: endian.Byte_Order, pos: ^mdata.Expr, allocator: mem.Allocator) -> ^mdata.Expr {
-	assert(type in bit_set[dat.Data_Type]{.Int8, .UInt8, .Int16, .UInt16, .Int32, .UInt32, .Int64} && pos.type == .Int)
-	return built(.Int, mdata.Peek{type, order, pos}, allocator)
-}
-
-@(private = "file")
-built :: proc(t: mdata.Expr_Type, variant: mdata.Expr_Variant, allocator: mem.Allocator) -> ^mdata.Expr {
-	e := new(mdata.Expr, allocator)
-	e^ = {type = t, offset = -1, variant = variant}
-	return e
 }

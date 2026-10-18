@@ -1,5 +1,5 @@
 # gnrcrdr
-Data-driven binary file reader written in [Odin](https://odin-lang.org/). File formats are described in [Kaitai Struct](https://kaitai.io/) `.ksy` files (a subset, see [Schemas](#schemas)) in `formats/`, or in a SQLite database (`data/Gif89aMetadata.sqlite3`), which the `.ksy` files are replacing.
+Data-driven binary file reader written in [Odin](https://odin-lang.org/). File formats are described in [Kaitai Struct](https://kaitai.io/) `.ksy` files (a subset, see [Schemas](#schemas)) in `formats/`.
 
 ## Building
 
@@ -9,24 +9,23 @@ Requires Odin `dev-2026-10` or newer. Build and run from the repository root:
 odin build .
 ```
 
-- **Windows:** links the bundled `sqlite3/sqlite3.lib` and produces `gnrcrdr.exe`.
-- **Linux:** links the system SQLite (`libsqlite3`; on Arch the `sqlite` package, on Debian/Ubuntu `libsqlite3-dev`) and produces `gnrcrdr.bin`.
+This produces `gnrcrdr.exe` on Windows and `gnrcrdr.bin` on Linux. There are no other dependencies.
 
 ## Usage
 
 ```
-gnrcrdr <schema> <file> [--dump tree|json] [--format N]
+gnrcrdr <schema.ksy> <file> [--dump tree|json]
 ```
 
-Decodes `<file>` with the schema and writes the decoded tree to stdout. A schema whose name ends in `.ksy` is a Kaitai Struct schema; any other is a SQLite database, from which `--format` picks the format (default `1`). For example:
+Decodes `<file>` with the Kaitai Struct schema and writes the decoded tree to stdout. For example:
 
 ```
 ./gnrcrdr.bin formats/gif.ksy data/855.gif
 ./gnrcrdr.bin formats/gif.ksy data/855.gif --dump json
-./gnrcrdr.bin data/Gif89aMetadata.sqlite3 data/855.gif
+./gnrcrdr.bin formats/gif89a.ksy data/855.gif
 ```
 
-`formats/gif.ksy` is `gif.ksy` from [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats), unchanged (CC0-1.0), and decodes the samples as the official Kaitai Struct runtime does (see [Kaitai runtime check](#kaitai-runtime-check)). `formats/gif89a.ksy` is the SQLite schema ported field for field, and gives the same output as it. Options may also be written `--format=N` and `--dump=json`. `--help` (or `-h`) prints usage.
+`formats/gif.ksy` is `gif.ksy` from [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats), unchanged (CC0-1.0), and decodes the samples as the official Kaitai Struct runtime does (see [Kaitai runtime check](#kaitai-runtime-check)). `formats/gif89a.ksy` is a field-for-field port of the SQLite schema gnrcrdr used before `.ksy`, written with gnrcrdr's extensions, and gives the same output as that schema did. Options may also be written `--dump=json`. `--help` (or `-h`) prints usage.
 
 ### Output
 
@@ -71,7 +70,7 @@ Stdout carries only the decoded tree. Errors and usage messages go to stderr, an
 |---|---|
 | 0 | Success, including `--help` |
 | 1 | The format could not be loaded, the file could not be read or decoded, or the output could not be written |
-| 2 | Usage error: a missing or extra argument, an unknown flag, a bad `--format` or `--dump` value, or `--format` with a `.ksy` schema |
+| 2 | Usage error: a missing or extra argument, an unknown flag, or a bad `--dump` value |
 
 `--dump` values are case-sensitive.
 
@@ -81,7 +80,7 @@ A `.ksy` schema that cannot be compiled is reported with its line and column, an
 error: formats/x.ksy:6:5: Unsupported: attribute a: terminator is not supported
 ```
 
-Decoding checks every value against its field's `contents` and `valid` (in a SQLite schema, `MinValue`, `MaxValue` and `Pattern`). A value that does not pass stops the decode with `Not_Equal`, `Less_Than_Min`, `Greater_Than_Max` or `Not_Any_Of`, at the offset and path of that value. A file that is not a GIF fails on its signature:
+Decoding checks every value against its field's `contents` and `valid`. A value that does not pass stops the decode with `Not_Equal`, `Less_Than_Min`, `Greater_Than_Max` or `Not_Any_Of`, at the offset and path of that value. A file that is not a GIF fails on its signature:
 
 ```
 error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]
@@ -104,7 +103,7 @@ A field read once whose `switch-on` matches no case, without a `_` case, is not 
 
 Not supported yet: `terminator`, `strz`, `size-eos`, bit types (`b1`–`b64`), instances other than value instances (`pos`, `io`), `params`, `imports`, attributes without an `id`, `size` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
 
-Keys starting with `-` are extensions. The official Kaitai tools ignore them, and gnrcrdr ignores the ones it does not know, as well as `-orig-id` on a type. gnrcrdr's own extensions keep the SQLite schema's dumps while it is ported:
+Keys starting with `-` are extensions. The official Kaitai tools ignore them, and gnrcrdr ignores the ones it does not know, as well as `-orig-id` on a type. gnrcrdr's own extensions let `formats/gif89a.ksy` give the same dumps as the SQLite schema it was ported from:
 
 | Extension | Meaning | In standard Kaitai |
 |---|---|---|
@@ -132,7 +131,7 @@ Debug builds (`odin build . -debug`) run under a tracking allocator and exit 1 i
 
 ### Golden dumps
 
-`tests/golden/` holds the `--dump tree` and `--dump json` output of every sample in `data/` from `formats/gif.ksy`, and `tests/golden/gif89a/` that from the SQLite schema, which `formats/gif89a.ksy` must also give. The tests compare each dump with them byte for byte. When a change to the decoder or the dump is meant to change the output, re-record the files (from `formats/gif.ksy` and the SQLite schema) and review the diff before committing it:
+`tests/golden/` holds the `--dump tree` and `--dump json` output of every sample in `data/` from `formats/gif.ksy`, and `tests/golden/gif89a/` that from `formats/gif89a.ksy`. The `gif89a/` dumps were recorded from the SQLite schema, which the port reproduces exactly. The tests compare each dump with them byte for byte. When a change to the decoder or the dump is meant to change the output, re-record the files from both schemas and review the diff before committing it:
 
 ```
 odin test tests -define:GOLDEN_RECORD=true
