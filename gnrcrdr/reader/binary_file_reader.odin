@@ -4,25 +4,51 @@ import dat "../data"
 import fld "../field"
 import mdata "../metadata"
 import "core:os"
-import "core:slice"
 
+// Reads the file name into tree's arena, closes it, and decodes it into
+// tree, which must be zero or destroyed. Strings and blobs are views of that
+// copy, so the tree owns its input: it needs neither the file nor the
+// schema once read returns.
 @(require_results)
 read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
-	data, os_err := os.read_entire_file(name, context.allocator)
-	if os_err != nil {
-		return 0, Parse_Error{kind = .File_Read_Failed, os_error = os_err}
+	assert(tree.arena.block == nil && tree.root == nil, "read: tree must be zero or destroyed")
+	f, open_err := os.open(name)
+	if open_err != nil {
+		return 0, Parse_Error{kind = .File_Read_Failed, os_error = open_err}
 	}
-	defer delete(data)
-	return read_from_bytes(data, format, tree)
+	// a size that cannot be found leaves the arena at its default first block
+	size, _ := os.file_size(f)
+	init_arena(tree, int(size))
+	data, read_err := os.read_entire_file(f, fld.tree_arena_allocator(&tree.arena))
+	os.close(f)
+	if read_err != nil {
+		return 0, Parse_Error{kind = .File_Read_Failed, os_error = read_err}
+	}
+	return decode(data, format, tree)
 }
 
-// Decodes data into tree, which must be zero or destroyed. Strings and blobs are copied into the tree's arena, so the tree references neither data nor the schema.
+// Decodes data into tree, which must be zero or destroyed. Strings and
+// blobs are views of data, which the tree borrows: keep data alive and
+// unchanged for as long as the tree is used. The tree references nothing
+// in the schema.
 @(require_results)
 read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
-	// one block, reserved and committed as it is used, holds every sample's
-	// tree (at most about 6 times its input)
-	fld.tree_arena_init(&tree.arena, max(16 * uint(len(data)), fld.TREE_ARENA_BLOCK_SIZE))
+	init_arena(tree, len(data))
+	return decode(data, format, tree)
+}
+
+// Sizes the first block of tree's arena for an input of input_size bytes.
+// The block is reserved, and committed only as it is used; it holds the
+// tree of every sample, and the input too when read put it there.
+@(private = "file")
+init_arena :: proc(tree: ^fld.Value_Tree, input_size: int) {
+	fld.tree_arena_init(&tree.arena, max(16 * uint(max(input_size, 0)), fld.TREE_ARENA_BLOCK_SIZE))
+}
+
+// Decodes data into tree, whose arena init_arena has sized.
+@(private = "file", require_results)
+decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
 	allocator := fld.tree_arena_allocator(&tree.arena)
 	tree.root = make([dynamic]fld.Value, allocator)
 
@@ -264,7 +290,7 @@ read_scalar :: proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.V
 		if err != .None do return nil, fail(d, err, start)
 		src: []byte
 		src, err = dat.read_bytes(&d.r, n)
-		if err == .None do value = fld.Value(string(slice.clone(src, d.allocator)))
+		if err == .None do value = fld.Value(string(src))
 	case .Blob:
 		n: int
 		n, err = byte_length(d, node.length, index)
@@ -272,7 +298,7 @@ read_scalar :: proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.V
 		src: []byte
 		src, err = dat.read_bytes(&d.r, n)
 		if err != .None do return nil, fail(d, err, start)
-		value = fld.Value(slice.clone(src, d.allocator))
+		value = fld.Value(src)
 	case .Set:
 		panic("read_scalar: called for a set")
 	}
