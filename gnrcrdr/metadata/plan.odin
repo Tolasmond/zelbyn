@@ -6,13 +6,30 @@ import dat "../data"
 // the format is loaded, so decoding needs no lookups. A field contained in
 // several sets has one node, shared by all of them; the plan has no cycles.
 Node :: struct {
-	id:       int, // the field's id: the key of its values in a decoded set instance
-	name:     string,
-	type:     dat.Data_Type,
-	count:    Count,       // instances of a set, or elements of any other field
-	length:   Length,      // String and Blob only: the byte length of each element
-	children: []^Node,     // Set only, in order
-	bits:     []Bit_Field, // integer types only: packed subfields (not decoded yet)
+	id:            int, // the field's id: the key of its values in a decoded set instance
+	name:          string,
+	type:          dat.Data_Type,
+	count:         Count,       // instances of a set, or elements of any other field
+	length:        Length,      // String and Blob only: the byte length of each element
+	children:      []^Node,     // Set only, in order
+	bits:          []Bit_Field, // integer types only: packed subfields (not decoded yet)
+	default_value: Scalar,      // DefaultValue as the field's type; nil when absent (not used by the decoder yet)
+}
+
+// A value given in the schema, as the type of the field it belongs to: one
+// of the integer and float types, or string.
+Scalar :: union {
+	i8,
+	i16,
+	i32,
+	i64,
+	u8,
+	u16,
+	u32,
+	u64,
+	f32,
+	f64,
+	string,
 }
 
 // How many instances (Set) or elements (other types) a field has in each
@@ -97,7 +114,8 @@ Rule_Length :: struct {
 // Bits low through high (inclusive; 0 is the least significant) of an
 // integer field.
 Bit_Field :: struct {
-	id:        int,
-	name:      string,
-	low, high: int,
+	id:            int,
+	name:          string,
+	low, high:     int,
+	default_value: Scalar, // as for Node
 }
