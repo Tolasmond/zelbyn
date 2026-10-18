@@ -7,7 +7,7 @@ import "core:strings"
 // e as text, with every unary, binary and ?: operation parenthesized, so
 // that the result shows how e was grouped. A resolved field reference is
 // written as its path (_parent.a.b), and a peek as peek(<type>, <pos>), with
-// the Kaitai name of the type. Allocated with allocator.
+// the Kaitai name of the type (u1, u2le, s4be). Allocated with allocator.
 to_string :: proc(e: ^mdata.Expr, allocator := context.allocator) -> string {
 	b := strings.builder_make(allocator)
 	write(&b, e)
@@ -122,6 +122,7 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 	case mdata.Peek:
 		strings.write_string(b, "peek(")
 		strings.write_string(b, KAITAI_TYPE[x.type])
+		if x.type != .Int8 && x.type != .UInt8 do strings.write_string(b, x.order == .Little ? "le" : "be")
 		strings.write_string(b, ", ")
 		write(b, x.pos)
 		strings.write_byte(b, ')')

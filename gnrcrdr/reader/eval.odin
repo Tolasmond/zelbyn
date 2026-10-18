@@ -79,7 +79,7 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, index: int) -> (v: Eval_Value, err: da
 		return index, .None
 	case mdata.Peek:
 		pos := eval(d, x.pos, index) or_return
-		return dat.peek_integer_at(&d.r, pos.(int), x.type)
+		return dat.peek_integer_at(&d.r, pos.(int), x.type, x.order)
 	case mdata.Name, mdata.Member, mdata.Enum_Constant:
 		panic("eval: unresolved expression")
 	}

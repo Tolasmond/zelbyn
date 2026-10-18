@@ -91,7 +91,7 @@ decode_error_allocates_only_path :: proc(t: ^testing.T) {
 		d: Decoded
 		decode_bytes(&ff, transmute([]byte)text, &d)
 		kind = d.err.kind
-		path_ok = d.err.path == "GIF89a[0].Blocks[0]"
+		path_ok = d.err.path == "GIF89a[0].Signature[0]"
 		live_with_error = len(track.allocation_map)
 		destroy_decoded(&d)
 
@@ -101,8 +101,8 @@ decode_error_allocates_only_path :: proc(t: ^testing.T) {
 		destroy_decoded(&md)
 	}
 
-	testing.expect_value(t, kind, .No_Progress)
-	testing.expect(t, path_ok, "path should be \"GIF89a[0].Blocks[0]\"")
+	testing.expect_value(t, kind, .Not_Equal)
+	testing.expect(t, path_ok, "path should be \"GIF89a[0].Signature[0]\"")
 	testing.expect_value(t, live_with_error, 1) // only Parse_Error.path
 	testing.expect_value(t, missing_kind, .File_Read_Failed)
 	testing.expect_value(t, len(track.allocation_map), 0)

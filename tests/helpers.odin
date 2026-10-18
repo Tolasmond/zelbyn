@@ -4,6 +4,8 @@ import fld "../gnrcrdr/field"
 import mdat "../gnrcrdr/metadata"
 import rdr "../gnrcrdr/reader"
 import sql "../gnrcrdr/sqlite"
+import "base:intrinsics"
+import "core:reflect"
 import "core:testing"
 
 DB_PATH :: "data/Gif89aMetadata.sqlite3"
@@ -38,4 +40,11 @@ destroy_decoded :: proc(d: ^Decoded) {
 
 set_of :: proc(v: fld.Value) -> map[int][dynamic]fld.Value {
 	return v.(map[int][dynamic]fld.Value)
+}
+
+// a == b for a union that has no == (mdat.Scalar, fld.Value): the same
+// variant, with equal values, comparing slices by their elements.
+variant_equal :: proc(a, b: $U) -> bool where intrinsics.type_is_union(U) {
+	x, y := reflect.get_union_variant(a), reflect.get_union_variant(b)
+	return x.id == y.id && reflect.equal(x, y, including_indirect_array_recursion = true)
 }

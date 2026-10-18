@@ -39,6 +39,10 @@ dump_text_855 :: proc(t: ^testing.T) {
 		`GIF89a[0].Logical Screen Descriptor[0].Logical Screen Width[0] = 500`,
 		`GIF89a[0].Logical Screen Descriptor[0].Logical Screen Height[0] = 228`,
 		`GIF89a[0].Logical Screen Descriptor[0].Logical Screen Descriptor Packed Fields[0] = 246`,
+		`GIF89a[0].Logical Screen Descriptor[0].Size of Global Color Table[0] = 6`,
+		`GIF89a[0].Logical Screen Descriptor[0].Sort Flag[0] = 0`,
+		`GIF89a[0].Logical Screen Descriptor[0].Color Resolution[0] = 7`,
+		`GIF89a[0].Logical Screen Descriptor[0].Global Color Table Flag[0] = 1`,
 		`GIF89a[0].Logical Screen Descriptor[0].Background Color Index[0] = 127`,
 		`GIF89a[0].Logical Screen Descriptor[0].Pixel Aspect Ratio[0] = 0`,
 		`GIF89a[0].Global Color Table[0].Red[0] = 252`,
@@ -53,8 +57,9 @@ dump_text_855 :: proc(t: ^testing.T) {
 	lines := strings.split_lines(strings.trim_suffix(text, "\n"))
 	defer delete(lines)
 
-	// one line per per-value "Read" line in the debug log of the same run
-	testing.expect_value(t, len(lines), 8114)
+	// one line per per-value "Read" line in the debug log of the run before
+	// bit fields were decoded, and one per bit field value
+	testing.expect_value(t, len(lines), 8114 + 214)
 	for line, i in want {
 		if i >= len(lines) do break
 		testing.expectf(t, lines[i] == line, "line %v = %q, want %q", i + 1, lines[i], line)

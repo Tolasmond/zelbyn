@@ -11,11 +11,11 @@ reads_little_endian :: proc(t: ^testing.T) {
 	r: dat.Reader
 	dat.reader_init(&r, data)
 
-	v16, e16 := dat.read(&r, u16)
+	v16, e16 := dat.read(&r, u16, .Little)
 	testing.expect_value(t, e16, dat.Read_Error.None)
 	testing.expect_value(t, v16, u16(0x1234))
 
-	v32, e32 := dat.read(&r, u32)
+	v32, e32 := dat.read(&r, u32, .Little)
 	testing.expect_value(t, e32, dat.Read_Error.None)
 	testing.expect_value(t, v32, u32(0x12345678))
 
@@ -27,9 +27,9 @@ reads_little_endian :: proc(t: ^testing.T) {
 reads_big_endian :: proc(t: ^testing.T) {
 	data := []byte{0x34, 0x12, 0x78, 0x56, 0x34, 0x12}
 	r: dat.Reader
-	dat.reader_init(&r, data, .Big)
+	dat.reader_init(&r, data)
 
-	v, err := dat.read(&r, u16)
+	v, err := dat.read(&r, u16, .Big)
 	testing.expect_value(t, err, dat.Read_Error.None)
 	testing.expect_value(t, v, u16(0x3412))
 }
@@ -40,11 +40,11 @@ signed_values :: proc(t: ^testing.T) {
 	r: dat.Reader
 	dat.reader_init(&r, data)
 
-	v8, e8 := dat.read(&r, i8)
+	v8, e8 := dat.read(&r, i8, .Little)
 	testing.expect_value(t, e8, dat.Read_Error.None)
 	testing.expect_value(t, v8, i8(-1))
 
-	v16, e16 := dat.read(&r, i16)
+	v16, e16 := dat.read(&r, i16, .Little)
 	testing.expect_value(t, e16, dat.Read_Error.None)
 	testing.expect_value(t, v16, i16(-2))
 }
@@ -56,11 +56,11 @@ eof_is_error_and_pos_unchanged :: proc(t: ^testing.T) {
 	dat.reader_init(&r, data)
 	r.pos = 2
 
-	_, err := dat.read(&r, u16)
+	_, err := dat.read(&r, u16, .Little)
 	testing.expect_value(t, err, dat.Read_Error.Unexpected_EOF)
 	testing.expect_value(t, r.pos, 2)
 
-	v, err2 := dat.read(&r, u8)
+	v, err2 := dat.read(&r, u8, .Little)
 	testing.expect_value(t, err2, dat.Read_Error.None)
 	testing.expect_value(t, v, u8(3))
 	testing.expect_value(t, r.pos, 3)
@@ -75,11 +75,11 @@ eof_does_not_poison_reader :: proc(t: ^testing.T) {
 	_, e1 := dat.read_bytes(&r, 2)
 	testing.expect_value(t, e1, dat.Read_Error.None)
 
-	_, e2 := dat.read(&r, u8)
+	_, e2 := dat.read(&r, u8, .Little)
 	testing.expect_value(t, e2, dat.Read_Error.Unexpected_EOF)
 
 	r.pos = 0
-	v, e3 := dat.read(&r, u8)
+	v, e3 := dat.read(&r, u8, .Little)
 	testing.expect_value(t, e3, dat.Read_Error.None)
 	testing.expect_value(t, v, u8(7))
 	testing.expect_value(t, len(r.data), 2)
@@ -106,7 +106,7 @@ read_integer_types :: proc(t: ^testing.T) {
 	for c in cases {
 		r: dat.Reader
 		dat.reader_init(&r, data)
-		v, err := dat.read_integer(&r, c.type)
+		v, err := dat.read_integer(&r, c.type, .Little)
 		testing.expectf(t, err == .None, "%v: err = %v", c.type, err)
 		testing.expectf(t, v == c.value, "%v: value = %v, want %v", c.type, v, c.value)
 		testing.expectf(t, r.pos == c.size, "%v: pos = %v, want %v", c.type, r.pos, c.size)
@@ -116,7 +116,7 @@ read_integer_types :: proc(t: ^testing.T) {
 	for type in unsupported {
 		r: dat.Reader
 		dat.reader_init(&r, data)
-		_, err := dat.read_integer(&r, type)
+		_, err := dat.read_integer(&r, type, .Little)
 		testing.expectf(t, err == .Unsupported_Type, "%v: err = %v", type, err)
 		testing.expectf(t, r.pos == 0, "%v: pos = %v, want 0", type, r.pos)
 	}
@@ -129,7 +129,7 @@ peek_is_pure :: proc(t: ^testing.T) {
 	dat.reader_init(&r, data)
 	r.pos = 1
 
-	v, err := dat.peek_integer_at(&r, 3, .UInt8)
+	v, err := dat.peek_integer_at(&r, 3, .UInt8, .Little)
 	testing.expect_value(t, err, dat.Read_Error.None)
 	testing.expect_value(t, v, int(data[3]))
 	testing.expect_value(t, r.pos, 1)
@@ -141,13 +141,13 @@ peek_out_of_range :: proc(t: ^testing.T) {
 	r: dat.Reader
 	dat.reader_init(&r, data)
 
-	_, e1 := dat.peek_integer_at(&r, -1, .UInt8)
+	_, e1 := dat.peek_integer_at(&r, -1, .UInt8, .Little)
 	testing.expect_value(t, e1, dat.Read_Error.Offset_Out_Of_Range)
 
-	_, e2 := dat.peek_integer_at(&r, 4, .UInt8)
+	_, e2 := dat.peek_integer_at(&r, 4, .UInt8, .Little)
 	testing.expect_value(t, e2, dat.Read_Error.Offset_Out_Of_Range)
 
-	_, e3 := dat.peek_integer_at(&r, 3, .UInt16)
+	_, e3 := dat.peek_integer_at(&r, 3, .UInt16, .Little)
 	testing.expect_value(t, e3, dat.Read_Error.Unexpected_EOF)
 
 	testing.expect_value(t, r.pos, 0)
@@ -193,7 +193,7 @@ read_string_drops_nul :: proc(t: ^testing.T) {
 	testing.expect_value(t, r.pos, 0)
 }
 
-// Reads a T from le (little-endian bytes) and from its reverse in a .Big reader;
+// Reads a T from le (little-endian bytes), and from its reverse as .Big;
 // both must give want and consume exactly size_of(T) bytes.
 @(private = "file")
 check_read :: proc(t: ^testing.T, le: []byte, want: $T, loc := #caller_location) {
@@ -203,8 +203,8 @@ check_read :: proc(t: ^testing.T, le: []byte, want: $T, loc := #caller_location)
 		if order == .Big do slice.reverse(buf[:n])
 
 		r: dat.Reader
-		dat.reader_init(&r, buf[:n], order)
-		v, err := dat.read(&r, T)
+		dat.reader_init(&r, buf[:n])
+		v, err := dat.read(&r, T, order)
 		testing.expectf(t, err == .None, "%v %v: err = %v", typeid_of(T), order, err, loc = loc)
 		testing.expectf(t, v == want, "%v %v: value = %v, want %v", typeid_of(T), order, v, want, loc = loc)
 		testing.expectf(t, r.pos == size_of(T), "%v %v: pos = %v, want %v", typeid_of(T), order, r.pos, size_of(T), loc = loc)
@@ -217,7 +217,7 @@ check_read_eof :: proc(t: ^testing.T, $T: typeid, loc := #caller_location) {
 	buf: [8]byte
 	r: dat.Reader
 	dat.reader_init(&r, buf[:size_of(T) - 1])
-	_, err := dat.read(&r, T)
+	_, err := dat.read(&r, T, .Little)
 	testing.expectf(t, err == .Unexpected_EOF, "%v: err = %v", typeid_of(T), err, loc = loc)
 	testing.expectf(t, r.pos == 0, "%v: pos = %v, want 0", typeid_of(T), r.pos, loc = loc)
 }

@@ -116,10 +116,49 @@ not_a_gif :: proc(t: ^testing.T) {
 	decode_bytes(&ff, transmute([]byte)text, &d)
 	defer destroy_decoded(&d)
 
-	testing.expect_value(t, len(text), 29)
-	testing.expect_value(t, d.err.kind, .No_Progress)
-	testing.expect_value(t, d.err.offset, 13)
-	testing.expect_value(t, d.err.path, "GIF89a[0].Blocks[0]")
+	testing.expect_value(t, d.err.kind, .Not_Equal)
+	testing.expect_value(t, d.err.offset, 0)
+	testing.expect_value(t, d.err.path, "GIF89a[0].Signature[0]")
+}
+
+@(test)
+wrong_version :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	if !load_gif(t, &ff) do return
+
+	data := with_header({0x3B})
+	defer delete(data)
+	data[4] = '7' // GIF87a
+
+	d: Decoded
+	decode_bytes(&ff, data[:], &d)
+	defer destroy_decoded(&d)
+
+	testing.expect_value(t, d.err.kind, .Not_Equal)
+	testing.expect_value(t, d.err.offset, 3)
+	testing.expect_value(t, d.err.path, "GIF89a[0].Version[0]")
+}
+
+// A Graphic Control Extension's block size must be 4.
+@(test)
+wrong_block_size :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	if !load_gif(t, &ff) do return
+
+	data := with_header({0x21, 0xF9, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3B})
+	defer delete(data)
+
+	d: Decoded
+	decode_bytes(&ff, data[:], &d)
+	defer destroy_decoded(&d)
+
+	testing.expect_value(t, d.err.kind, .Not_Equal)
+	testing.expect_value(t, d.err.offset, 15)
+	testing.expect_value(t, d.err.path, "GIF89a[0].Blocks[0].Extensions[0].Graphic Control Extension[0].Graphic Control Block Size[0]")
 }
 
 // The extension markers' second byte would be past EOF, so every extension

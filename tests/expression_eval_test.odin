@@ -217,7 +217,7 @@ expression_absent_set :: proc(t: ^testing.T) {
 
 	// opt: present only when the input starts with 0x21
 	opt := plan_node(2, "opt", .Set, a, plan_node(3, "n", .UInt8, a))
-	opt.count = mdat.Marker_Count{markers = slice_marker(mdat.Marker{0, .UInt8, 0x21}, a)}
+	opt.count = mdat.Marker_Count{markers = slice_marker(mdat.Marker{0, .UInt8, 0x21, .Little}, a)}
 	data := plan_node(4, "data", .Blob, a)
 	ff.root = plan_node(1, "r", .Set, a, opt, data)
 	data.length = mdat.Rule_Length{expr = must_compile(t, &ff, "opt.n - 0x21", ff.root)}

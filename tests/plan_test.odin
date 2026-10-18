@@ -3,6 +3,7 @@ package tests
 import dat "../gnrcrdr/data"
 import expr "../gnrcrdr/expression"
 import mdat "../gnrcrdr/metadata"
+import "core:encoding/endian"
 import "core:testing"
 
 // Returns the node for field id, searching depth first from node; nil if
@@ -140,8 +141,8 @@ plan_repeats_and_markers :: proc(t: ^testing.T) {
 		markers: []mdat.Marker,
 	}
 	for c in ([?]Marker_Case {
-		{5019, {{0, .UInt8, 33}, {1, .UInt8, 249}}}, // Graphic Control Extension
-		{5053, {{0, .UInt8, 44}}}, // Image
+		{5019, {{0, .UInt8, 33, .Little}, {1, .UInt8, 249, .Little}}}, // Graphic Control Extension
+		{5053, {{0, .UInt8, 44, .Little}}}, // Image
 	}) {
 		node := find_node(ff.root, c.id)
 		if !testing.expectf(t, node != nil, "no node %v", c.id) do continue
@@ -190,15 +191,29 @@ plan_bits :: proc(t: ^testing.T) {
 	node := find_node(ff.root, 5010)
 	if !testing.expect(t, node != nil, "no Logical Screen Descriptor Packed Fields node") do return
 
-	want := [?]mdat.Bit_Field {
-		{5009, "Size of Global Color Table", 0, 2, i32(0)},
-		{5008, "Sort Flag", 3, 3, i32(0)},
-		{5007, "Color Resolution", 4, 6, i32(0)},
-		{5006, "Global Color Table Flag", 7, 7, i32(0)},
+	Bit_Case :: struct {
+		id:        int,
+		name:      string,
+		low, high: int,
+		max:       i32,
+	}
+	want := [?]Bit_Case {
+		{5009, "Size of Global Color Table", 0, 2, 7},
+		{5008, "Sort Flag", 3, 3, 1},
+		{5007, "Color Resolution", 4, 6, 7},
+		{5006, "Global Color Table Flag", 7, 7, 1},
 	}
 	if !testing.expect_value(t, len(node.bits), len(want)) do return
 	for b, i in node.bits {
-		testing.expectf(t, b == want[i], "bit field %v is %v, want %v", i, b, want[i])
+		w := want[i]
+		testing.expectf(
+			t,
+			b.id == w.id && b.name == w.name && b.type == .Int32 && b.low == w.low && b.high == w.high && variant_equal(b.default_value, i32(0)),
+			"bit field %v is %v, want %v",
+			i, b, w,
+		)
+		r, is_range := b.valid.(mdat.Valid_Range)
+		testing.expectf(t, is_range && variant_equal(r.min, i32(0)) && variant_equal(r.max, w.max), "bit field %v: valid is %v, want 0 to %v", i, b.valid, w.max)
 	}
 
 	for id in ([?]int{5023, 5060}) {
@@ -206,6 +221,45 @@ plan_bits :: proc(t: ^testing.T) {
 		testing.expectf(t, n != nil && len(n.bits) == (id == 5023 ? 3 : 4), "%v: packed fields missing", id)
 	}
 	testing.expect_value(t, len(find_node(ff.root, 5011).bits), 0)
+}
+
+// MinValue and MaxValue compile to a range, or to an equality when they
+// are equal, and ^GIF$ to an equality on the string.
+@(test)
+plan_checks :: proc(t: ^testing.T) {
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	if !load_gif(t, &ff) do return
+
+	Eq_Case :: struct {
+		id:    int,
+		value: mdat.Scalar,
+	}
+	for c in ([?]Eq_Case {
+		{5001, "GIF"}, // Signature
+		{5002, "89a"}, // Version
+		{5020, u8(33)}, // Extension Introducer
+		{5029, u8(0)}, // Block Terminator
+		{5068, u8(59)}, // Trailer
+	}) {
+		node := find_node(ff.root, c.id)
+		if !testing.expectf(t, node != nil, "no node %v", c.id) do continue
+		eq, is_eq := node.valid.(mdat.Valid_Eq)
+		testing.expectf(t, is_eq && variant_equal(eq.value, c.value), "%v: valid is %v, want eq %v", c.id, node.valid, c.value)
+	}
+
+	width := find_node(ff.root, 5004)
+	r, is_range := width.valid.(mdat.Valid_Range)
+	testing.expectf(t, is_range && variant_equal(r.min, u16(0)) && variant_equal(r.max, u16(65535)), "Logical Screen Width: valid is %v", width.valid)
+
+	for id in ([?]int{5000, 5003, 5052}) {
+		node := find_node(ff.root, id)
+		testing.expectf(t, node != nil && node.valid == nil, "%v: valid is %v, want none", id, node.valid)
+	}
+
+	for id in ([?]int{5004, 5010, 5052}) {
+		testing.expect_value(t, find_node(ff.root, id).order, endian.Byte_Order.Little)
+	}
 }
 
 @(test)
@@ -229,6 +283,6 @@ plan_defaults :: proc(t: ^testing.T) {
 	}) {
 		node := find_node(ff.root, c.id)
 		if !testing.expectf(t, node != nil, "no node %v", c.id) do continue
-		testing.expectf(t, node.default_value == c.value, "%v: default is %v (%T), want %v (%T)", c.id, node.default_value, node.default_value, c.value, c.value)
+		testing.expectf(t, variant_equal(node.default_value, c.value), "%v: default is %v (%T), want %v (%T)", c.id, node.default_value, node.default_value, c.value, c.value)
 	}
 }

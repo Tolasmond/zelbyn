@@ -40,7 +40,17 @@ GIF89a[0].Blocks[0].Image[0].Table Based Image Data[0].Image Data[0].Data Sub-Bl
 
 Integers are decimal and strings are quoted. A blob shows its length and its first 16 bytes in hex, followed by `...` if it is longer.
 
-`--dump json` writes the same tree as compact JSON on one line. Each set instance is an object whose keys are its field names in schema order, and every field is an array:
+An integer with packed bit fields is followed by one line for each of them, in the order of their lowest bit:
+
+```
+GIF89a[0].Logical Screen Descriptor[0].Logical Screen Descriptor Packed Fields[0] = 246
+GIF89a[0].Logical Screen Descriptor[0].Size of Global Color Table[0] = 6
+GIF89a[0].Logical Screen Descriptor[0].Sort Flag[0] = 0
+GIF89a[0].Logical Screen Descriptor[0].Color Resolution[0] = 7
+GIF89a[0].Logical Screen Descriptor[0].Global Color Table Flag[0] = 1
+```
+
+`--dump json` writes the same tree as compact JSON on one line. Each set instance is an object whose keys are its field names in schema order, each followed by its bit fields, and every field is an array:
 
 ```
 {"GIF89a":[{"Signature":["GIF"],"Version":["89a"],"Logical Screen Descriptor":[{"Logical Screen Width":[500],...
@@ -61,6 +71,12 @@ Stdout carries only the decoded tree. Errors and usage messages go to stderr, an
 | 2 | Usage error: a missing or extra argument, an unknown flag, or a bad `--format` or `--dump` value |
 
 `--dump` values are case-sensitive.
+
+Decoding checks every value against its field's `MinValue`, `MaxValue` and `Pattern`. A value that does not pass stops the decode with `Not_Equal`, `Less_Than_Min` or `Greater_Than_Max`, at the offset and path of that value. A file that is not a GIF fails on its signature:
+
+```
+error: Not_Equal at 0x00000000 in GIF89a[0].Signature[0]
+```
 
 ## Checks and tests
 
