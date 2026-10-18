@@ -6,7 +6,8 @@ import dat "../data"
 import mdat "../metadata"
 import sql "../../sqlite3"
 
-read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_type_map: ^map[int]^dat.Data_Type_Record, field_metadata_map: ^map[int]^mdat.Field_Metadata, allocator: mem.Allocator) -> (result: sql.ResultCode) {
+read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_type_map: ^map[int]^dat.Data_Type_Record, field_map: ^map[int]^dat.Field_Record, field_metadata_map: ^map[int]^mdat.Field_Metadata, allocator: mem.Allocator) -> (result: sql.ResultCode) {
+	field_map^ = make(map[int]^dat.Field_Record, allocator)
 	field_metadata_map^ = make(map[int]^mdat.Field_Metadata, allocator)
 
 	stmt: ^sql.Stmt
@@ -20,7 +21,7 @@ read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_
 
 		if !has_row do break
 
-		record: dat.Field_Record
+		record := new(dat.Field_Record, allocator)
 
 		record.id = sql.column_int64(stmt, i32(Field_Column.id))
 
@@ -50,6 +51,7 @@ read_field :: proc(db: ^sql.sqlite3, packed_records: []^dat.Packed_Record, data_
 			field_metadata.packed_fields = packed_records[start:end]
 		}
 
+		field_map[record.id] = record
 		field_metadata_map[record.id] = field_metadata
 	}
 

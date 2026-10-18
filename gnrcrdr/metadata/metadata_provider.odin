@@ -4,6 +4,7 @@ import dat "../data"
 
 Field_Metadata_Provider :: struct {
 	data_type_map: map[int]^dat.Data_Type_Record,
+	field_map: map[int]^dat.Field_Record,
 	field_metadata_map: map[int]^Field_Metadata,
 	set_helper_map: map[int]^dat.Set_Helper_Record,
 	set_length_map: map[int]^dat.Length_Record,
