@@ -8,7 +8,7 @@ import "core:strings"
 
 Parse_Error :: struct {
 	kind:     dat.Read_Error,
-	offset:   int,      // where the failing read started, or the reader position for peeks and computed lengths
+	offset:   int,      // in the input: where the failing read started, or the reader position for peeks and computed lengths
 	path:     string,   // owned (context.allocator); "" on success; free with destroy_parse_error
 	os_error: os.Error, // set only when kind == .File_Read_Failed
 }
@@ -20,7 +20,8 @@ Path_Segment :: struct {
 
 @(private)
 Decoder :: struct {
-	r:         dat.Reader,
+	r:         dat.Reader, // the stream being read: the input, or a substream of it
+	base:      int,        // the offset in the input of r.data[0]
 	allocator: mem.Allocator, // the value tree's arena; also holds path
 	path:      [dynamic]Path_Segment,
 	frames:    [dynamic]^map[int][dynamic]fld.Value, // the set instances being decoded, outermost first; also in allocator
@@ -28,11 +29,12 @@ Decoder :: struct {
 }
 
 // Records the first error with the current path; always returns kind.
+// offset is in the stream being read.
 @(private)
 fail :: proc(d: ^Decoder, kind: dat.Read_Error, offset: int) -> dat.Read_Error {
 	if d.err.kind == .None {
 		d.err.kind = kind
-		d.err.offset = offset
+		d.err.offset = d.base + offset
 		d.err.path = format_path(d.path[:])
 	}
 	return kind

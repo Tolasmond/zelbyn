@@ -1,6 +1,7 @@
 package metadata
 
 import dat "../data"
+import fld "../field"
 import "core:encoding/endian"
 
 // One field of a compiled format. Every rule is resolved and validated when
@@ -12,10 +13,13 @@ Node :: struct {
 	ref_name:      string, // what expressions call it: the .ksy id; the same as name for the SQLite schema
 	type:          dat.Data_Type,
 	order:         endian.Byte_Order, // integer and float types: the byte order they are read in
+	cond:          ^Expr,             // a Bool expression: the field is read only when it is true; nil when always read (Kaitai's if)
 	count:         Count,             // instances of a set, or elements of any other field
-	length:        Length,            // String and Blob only: the byte length of each element
+	length:        Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from, or nil to read from the parent's stream
 	drop_nul:      bool,              // String only: drop every NUL byte, as the SQLite schema did; Kaitai's str keeps them (§7.3)
-	children:      []^Node,           // Set only, in order
+	children:      []^Node,           // Set only, in order; nil when switch_on is set
+	switch_on:     ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
+	instances:     []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
 	bits:          []Bit_Field,       // integer types only: packed subfields, decoded from each element
 	default_value: Scalar,            // DefaultValue as the field's type; nil when absent (not used by the decoder yet)
 	valid:         Valid,             // checked on every element; nil when there is no check
@@ -69,6 +73,8 @@ Count :: union {
 	Rule_Count,
 	Marker_Count,
 	Repeat_Count,
+	Eos_Count,
+	Until_Count,
 }
 
 Fixed_Count :: struct {
@@ -100,6 +106,17 @@ Repeat_Count :: struct {
 	order: endian.Byte_Order,
 }
 
+// Elements are read until the end of the stream (Kaitai's repeat: eos).
+// Each must consume input.
+Eos_Count :: struct {}
+
+// Elements are read until expr, a Bool expression evaluated after each
+// element with _ the element just read, is true (Kaitai's repeat: until).
+// At least one element is read, and each but the last must consume input.
+Until_Count :: struct {
+	expr: ^Expr,
+}
+
 Marker :: struct {
 	offset: int, // from the reader's position
 	type:   dat.Data_Type,
@@ -122,6 +139,43 @@ Fixed_Length :: struct {
 Rule_Length :: struct {
 	expr:     ^Expr,
 	min, max: Maybe(int),
+}
+
+// A field whose type is chosen by a value (Kaitai's switch-on): each
+// instance is one of the set of the first case whose value equals on, or of
+// default when none does. Each case's set has the field's name and its own
+// children. With no match and no default, the field is not read: the
+// compiler allows that only when it is read at most once.
+Switch :: struct {
+	on:      ^Expr, // an Int expression
+	cases:   []Switch_Case,
+	default: ^Node, // nil when there is no _ case
+}
+
+Switch_Case :: struct {
+	value: int,
+	node:  ^Node,
+}
+
+// The set an instance of node (a Set field) was read as: node itself, or
+// for a switch-on field the case whose set holds instance's values; nil
+// when that cannot be told (a case with no children).
+instance_set :: proc(node: ^Node, instance: map[int][dynamic]fld.Value) -> ^Node {
+	if node.switch_on == nil do return node
+	for c in node.switch_on.cases {
+		if len(c.node.children) > 0 && c.node.children[0].id in instance do return c.node
+	}
+	if d := node.switch_on.default; d != nil && len(d.children) > 0 && d.children[0].id in instance do return d
+	return nil
+}
+
+// A value instance of a set (Kaitai's instances with value:): an
+// expression over the set's fields and other value instances. It is
+// evaluated for an instance of the set each time an expression refers to
+// it, and is not read, so it has no values in the decoded tree.
+Value_Instance :: struct {
+	name: string, // the .ksy id
+	expr: ^Expr,  // Int or Bool; nil only while the schema is being compiled
 }
 
 // Bits low through high (inclusive; 0 is the least significant) of an

@@ -21,27 +21,27 @@ gnrcrdr <schema> <file> [--dump tree|json] [--format N]
 Decodes `<file>` with the schema and writes the decoded tree to stdout. A schema whose name ends in `.ksy` is a Kaitai Struct schema; any other is a SQLite database, from which `--format` picks the format (default `1`). For example:
 
 ```
-./gnrcrdr.bin formats/gif89a.ksy data/855.gif
-./gnrcrdr.bin formats/gif89a.ksy data/855.gif --dump json
+./gnrcrdr.bin formats/gif.ksy data/855.gif
+./gnrcrdr.bin formats/gif.ksy data/855.gif --dump json
 ./gnrcrdr.bin data/Gif89aMetadata.sqlite3 data/855.gif
 ```
 
-`formats/gif89a.ksy` is the SQLite schema ported field for field, and gives the same output. Options may also be written `--format=N` and `--dump=json`. `--help` (or `-h`) prints usage.
+`formats/gif.ksy` is `gif.ksy` from [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats), unchanged (CC0-1.0), and decodes the samples as the official Kaitai Struct runtime does (see [Kaitai runtime check](#kaitai-runtime-check)). `formats/gif89a.ksy` is the SQLite schema ported field for field, and gives the same output as it. Options may also be written `--format=N` and `--dump=json`. `--help` (or `-h`) prints usage.
 
 ### Output
 
-`--dump tree` (the default) writes one line per decoded value: its path, ` = `, then the value. Fields are listed in schema order, and `[i]` is the index within each array. A set (such as `Logical Screen Descriptor`) gets no line of its own.
+`--dump tree` (the default) writes one line per decoded value: its path, ` = `, then the value. Fields are listed in schema order, and `[i]` is the index within each array. A set (such as `logical_screen_descriptor`) gets no line of its own, and a field that was not read (its `if` was false, or no `switch-on` case matched) gets none either.
 
 ```
-GIF89a[0].Signature[0] = "GIF"
-GIF89a[0].Logical Screen Descriptor[0].Logical Screen Width[0] = 500
-GIF89a[0].Global Color Table[0].Red[0] = 252
-GIF89a[0].Blocks[0].Image[0].Table Based Image Data[0].Image Data[0].Data Sub-Block Values[0] = <254 bytes> 80 42 29 83 84 83 56 3c 83 7e 29 8a 8c 8b 8e 8d ...
+gif[0].hdr[0].version[0] = "89a"
+gif[0].logical_screen_descriptor[0].screen_width[0] = 500
+gif[0].global_color_table[0].entries[0].red[0] = 252
+gif[0].blocks[2].body[0].image_data[0].subblocks[0].entries[0].bytes[0] = <254 bytes> 80 42 29 83 84 83 56 3c 83 7e 29 8a 8c 8b 8e 8d ...
 ```
 
-Integers are decimal and strings are quoted. A blob shows its length and its first 16 bytes in hex, followed by `...` if it is longer.
+Integers are decimal and strings are quoted. A blob shows its length and its first 16 bytes in hex, followed by `...` if it is longer. A field with an `enum` shows its integer. Value instances (such as `has_color_table`) are not read from the file, so they are not shown.
 
-An integer with packed bit fields is followed by one line for each of them, in the order of their lowest bit:
+In a schema with the `-bits` extension, such as `formats/gif89a.ksy`, an integer with packed bit fields is followed by one line for each of them, in the order of their lowest bit:
 
 ```
 GIF89a[0].Logical Screen Descriptor[0].Logical Screen Descriptor Packed Fields[0] = 246
@@ -54,12 +54,14 @@ GIF89a[0].Logical Screen Descriptor[0].Global Color Table Flag[0] = 1
 `--dump json` writes the same tree as compact JSON on one line. Each set instance is an object whose keys are its field names in schema order, each followed by its bit fields, and every field is an array:
 
 ```
-{"GIF89a":[{"Signature":["GIF"],"Version":["89a"],"Logical Screen Descriptor":[{"Logical Screen Width":[500],...
+{"gif":[{"hdr":[{"magic":["474946"],"version":["89a"]}],"logical_screen_descriptor":[{"screen_width":[500],...
 ```
 
 Blobs are written in full as lowercase hex strings. NaN and infinite floats are written as `null`.
 
-Because the path is on every line, the text dump works well with `grep`, for example `... data/BOB_89A.GIF | grep 'Comment'`.
+A field that was not read is an empty array.
+
+Because the path is on every line, the text dump works well with `grep`, for example `... data/BOB_89A.GIF | grep 'subblocks'`.
 
 ### Errors and exit codes
 
@@ -76,13 +78,13 @@ Stdout carries only the decoded tree. Errors and usage messages go to stderr, an
 A `.ksy` schema that cannot be compiled is reported with its line and column, and the kind of problem: `Syntax`, `Unsupported` (valid YAML or Kaitai outside the supported subset) or `Invalid`:
 
 ```
-error: formats/x.ksy:6:5: Unsupported: attribute a: if is not supported
+error: formats/x.ksy:6:5: Unsupported: attribute a: terminator is not supported
 ```
 
 Decoding checks every value against its field's `contents` and `valid` (in a SQLite schema, `MinValue`, `MaxValue` and `Pattern`). A value that does not pass stops the decode with `Not_Equal`, `Less_Than_Min`, `Greater_Than_Max` or `Not_Any_Of`, at the offset and path of that value. A file that is not a GIF fails on its signature:
 
 ```
-error: Not_Equal at 0x00000000 in GIF89a[0].Signature[0]
+error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]
 ```
 
 ## Schemas
@@ -91,15 +93,18 @@ error: Not_Equal at 0x00000000 in GIF89a[0].Signature[0]
 
 | Area | Supported |
 |---|---|
-| Top level | `meta`, `seq`, `types`, `enums`, `doc`, `doc-ref` |
+| Top level | `meta`, `seq`, `types`, `instances`, `enums`, `doc`, `doc-ref` |
 | `meta` | `id`, `endian`, `bit-endian`, `encoding`; `title`, `file-extension`, `xref`, `license` (ignored) |
-| Attributes | `id`, `type`, `size`, `contents`, `valid` (a constant, or `eq`, `min`/`max`, `any-of`), `repeat: expr` with `repeat-expr`, `encoding`, `doc`, `doc-ref` |
-| Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `str` with `size` (ASCII or UTF-8, kept as bytes, NULs included), byte arrays, user types (not recursive) |
-| Expressions | integer and boolean operators, `?:`, field references, `_parent`, `_root`, `_io.pos`, `_io.size`, `_io.eof`, `.size`, `_index`, enum constants (`kinds::two`) |
+| Attributes | `id`, `type`, `size`, `contents`, `if`, `enum`, `valid` (a constant, or `eq`, `min`/`max`, `any-of`), `repeat` (`expr` with `repeat-expr`, `eos`, `until` with `repeat-until`), `encoding`, `doc`, `doc-ref` |
+| Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `str` with `size` (ASCII or UTF-8, kept as bytes, NULs included), byte arrays, user types (not recursive; with `size`, read from a substream of that many bytes), `switch-on` with `cases` whose types are user types, including the `_` default case |
+| Instances | value instances (`value:`), over the fields and other value instances of their own type. Expressions anywhere can refer to them; they are evaluated each time, and not dumped |
+| Expressions | integer and boolean operators, `?:`, field references, `_parent`, `_root`, `_io.pos`, `_io.size`, `_io.eof` (of the substream, inside one), `.size`, `_index`, `_` in `repeat-until`, enum constants (`kinds::two`) |
 
-A `repeat-expr` that is not a literal is supported only on a user type. Not supported yet: `if`, `enum` on an attribute, `repeat: eos` and `until`, `terminator`, `strz`, `size-eos`, bit types (`b1`–`b64`), `switch-on`, `instances`, `size` on a user type, and `valid` constants other than integer and string literals.
+A field read once whose `switch-on` matches no case, without a `_` case, is not read, as in Kaitai; a repeated `switch-on` needs a `_` case. Expressions cannot refer to a `switch-on` field. Each element read by `repeat: eos` must consume input, and so must each element of `repeat: until` but the last.
 
-Keys starting with `-` are extensions; the official Kaitai tools ignore them, and so does gnrcrdr when it does not know them. gnrcrdr's extensions keep the SQLite schema's dumps while it is ported:
+Not supported yet: `terminator`, `strz`, `size-eos`, bit types (`b1`–`b64`), instances other than value instances (`pos`, `io`), `params`, `imports`, attributes without an `id`, `size` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
+
+Keys starting with `-` are extensions. The official Kaitai tools ignore them, and gnrcrdr ignores the ones it does not know, as well as `-orig-id` on a type. gnrcrdr's own extensions keep the SQLite schema's dumps while it is ported:
 
 | Extension | Meaning | In standard Kaitai |
 |---|---|---|
@@ -127,12 +132,23 @@ Debug builds (`odin build . -debug`) run under a tracking allocator and exit 1 i
 
 ### Golden dumps
 
-`tests/golden/` holds the `--dump tree` and `--dump json` output of every sample in `data/`, and the tests compare each dump, from the SQLite schema and from `formats/gif89a.ksy`, with it byte for byte. When a change to the decoder or the dump is meant to change the output, re-record the files (from the SQLite schema) and review the diff before committing it:
+`tests/golden/` holds the `--dump tree` and `--dump json` output of every sample in `data/` from `formats/gif.ksy`, and `tests/golden/gif89a/` that from the SQLite schema, which `formats/gif89a.ksy` must also give. The tests compare each dump with them byte for byte. When a change to the decoder or the dump is meant to change the output, re-record the files (from `formats/gif.ksy` and the SQLite schema) and review the diff before committing it:
 
 ```
 odin test tests -define:GOLDEN_RECORD=true
 git diff --stat tests/golden
 ```
+
+### Kaitai runtime check
+
+`tools/kaitai_compare/compare.py` decodes files with a `.ksy` schema both in gnrcrdr and with the official Kaitai Struct compiler and JavaScript runtime, and compares the results value by value. It needs Node.js and PyYAML, and the compiler and runtime, pinned in `tools/kaitai_compare/package.json`:
+
+```
+npm ci --prefix tools/kaitai_compare
+python3 tools/kaitai_compare/compare.py formats/gif.ksy data/*.gif data/*.GIF
+```
+
+Both decodes are brought to one shape, every field an array of its values, and compared field by field. Fields with no values are left out on both sides, as are value instances. The script exits 1 if any file differs or fails to decode. Run it when the decoder, the `.ksy` compiler or `formats/gif.ksy` changes.
 
 ### YAML corpus check
 

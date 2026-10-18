@@ -16,24 +16,41 @@ Eval_Value :: union {
 	map[int][dynamic]fld.Value,
 }
 
+// What _index and _ are: index is -1 when the expression is not evaluated
+// for an element of a repeat, and element nil outside repeat-until.
+@(private = "file")
+Repeat :: struct {
+	index:   int,
+	element: fld.Value,
+}
+
 // Evaluates e, an Int expression, in the set instance being decoded. index
 // is _index, or -1 when e is not evaluated for an element of a repeat.
 @(private, require_results)
 eval_int :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (n: int, err: dat.Read_Error) {
 	assert(e.type == .Int)
-	v := eval(d, e, index) or_return
+	v := eval(d, e, {index = index}) or_return
 	return v.(int), .None
 }
 
+// Evaluates e, a Bool expression, as eval_int does. element is _, the
+// element of a repeat-until just read.
+@(private, require_results)
+eval_bool :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1, element: fld.Value = nil) -> (b: bool, err: dat.Read_Error) {
+	assert(e.type == .Bool)
+	v := eval(d, e, {index, element}) or_return
+	return v.(bool), .None
+}
+
 @(private = "file", require_results)
-eval :: proc(d: ^Decoder, e: ^mdata.Expr, index: int) -> (v: Eval_Value, err: dat.Read_Error) {
+eval :: proc(d: ^Decoder, e: ^mdata.Expr, rep: Repeat) -> (v: Eval_Value, err: dat.Read_Error) {
 	switch x in e.variant {
 	case mdata.Int_Literal:
 		return x.value, .None
 	case mdata.Bool_Literal:
 		return x.value, .None
 	case mdata.Unary:
-		operand := eval(d, x.operand, index) or_return
+		operand := eval(d, x.operand, rep) or_return
 		switch x.op {
 		case .Neg:
 			n := operand.(int)
@@ -45,23 +62,23 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, index: int) -> (v: Eval_Value, err: da
 			return !operand.(bool), .None
 		}
 	case mdata.Binary:
-		return eval_binary(d, x, index)
+		return eval_binary(d, x, rep)
 	case mdata.Ternary:
-		cond := eval(d, x.cond, index) or_return
-		return eval(d, cond.(bool) ? x.then : x.otherwise, index)
+		cond := eval(d, x.cond, rep) or_return
+		return eval(d, cond.(bool) ? x.then : x.otherwise, rep)
 	case mdata.Instance:
 		i := x.root ? 0 : len(d.frames) - 1 - x.up
 		if i < 0 || i >= len(d.frames) do return nil, .Absent_Field
 		return d.frames[i]^, .None
 	case mdata.Field_Ref:
-		base := eval(d, x.base, index) or_return
+		base := eval(d, x.base, rep) or_return
 		values, found := base.(map[int][dynamic]fld.Value)[x.node.id]
 		if !found do return nil, .Absent_Field
 		if e.type == .Array do return values[:], .None
 		if len(values) == 0 do return nil, .Absent_Field
 		return single_value(values[0])
 	case mdata.Size:
-		operand := eval(d, x.operand, index) or_return
+		operand := eval(d, x.operand, rep) or_return
 		#partial switch o in operand {
 		case []byte:
 			return len(o), .None
@@ -75,10 +92,20 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, index: int) -> (v: Eval_Value, err: da
 	case mdata.Io_Eof:
 		return d.r.pos >= len(d.r.data), .None
 	case mdata.Repeat_Index:
-		assert(index >= 0, "eval: _index outside a repeat")
-		return index, .None
+		assert(rep.index >= 0, "eval: _index outside a repeat")
+		return rep.index, .None
+	case mdata.Repeat_Element:
+		assert(rep.element != nil, "eval: _ outside repeat-until")
+		return single_value(rep.element)
+	case mdata.Value_Ref:
+		base := eval(d, x.base, rep) or_return
+		set := base.(map[int][dynamic]fld.Value)
+		// the instance's expression refers only to the fields of base
+		append(&d.frames, &set)
+		defer pop(&d.frames)
+		return eval(d, x.instance.expr, {index = -1})
 	case mdata.Peek:
-		pos := eval(d, x.pos, index) or_return
+		pos := eval(d, x.pos, rep) or_return
 		return dat.peek_integer_at(&d.r, pos.(int), x.type, x.order)
 	case mdata.Name, mdata.Member, mdata.Enum_Constant:
 		panic("eval: unresolved expression")
@@ -121,19 +148,19 @@ single_value :: proc(value: fld.Value) -> (Eval_Value, dat.Read_Error) {
 // negative infinity (as Python does, and so Kaitai's Python runtime).
 // and and or evaluate their right operand only when they need it.
 @(private = "file", require_results)
-eval_binary :: proc(d: ^Decoder, x: mdata.Binary, index: int) -> (v: Eval_Value, err: dat.Read_Error) {
-	left := eval(d, x.left, index) or_return
+eval_binary :: proc(d: ^Decoder, x: mdata.Binary, rep: Repeat) -> (v: Eval_Value, err: dat.Read_Error) {
+	left := eval(d, x.left, rep) or_return
 
 	#partial switch x.op {
 	case .Logical_And:
 		if !left.(bool) do return false, .None
-		return eval(d, x.right, index)
+		return eval(d, x.right, rep)
 	case .Logical_Or:
 		if left.(bool) do return true, .None
-		return eval(d, x.right, index)
+		return eval(d, x.right, rep)
 	}
 
-	right := eval(d, x.right, index) or_return
+	right := eval(d, x.right, rep) or_return
 
 	if l, is_bool := left.(bool); is_bool {
 		r := right.(bool)

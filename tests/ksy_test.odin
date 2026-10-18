@@ -27,13 +27,11 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta: [\n", .Syntax, 2, 1, "unterminated flow collection"},
 
 	// keys: Kaitai keys outside the subset, unknown keys, misplaced extensions
-	{HEAD + "seq:\n  - id: a\n    type: u1\n    if: true\n", .Unsupported, 7, 5, "attribute a: if is not supported"},
-	{HEAD + "seq:\n  - id: a\n    type: u1\n    enum: e\n", .Unsupported, 7, 5, "enum is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    pos: 1\n", .Unsupported, 7, 5, "attribute a: pos is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    process: xor(1)\n", .Unsupported, 7, 5, "process is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: str\n    terminator: 0\n", .Unsupported, 7, 5, "terminator is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size-eos: true\n", .Unsupported, 6, 5, "size-eos is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    sizee: 1\n", .Invalid, 7, 5, `attribute a: unknown key "sizee"`},
-	{HEAD + "instances:\n  x:\n    value: 1\n", .Unsupported, 4, 1, "instances is not supported"},
 	{HEAD + "params:\n  - id: p\n", .Unsupported, 4, 1, "params is not supported"},
 	{HEAD + "sequence: []\n", .Invalid, 4, 1, `the top level: unknown key "sequence"`},
 	{"meta:\n  id: t\n  ks-version: 0.9\n", .Unsupported, 3, 3, "meta: ks-version is not supported"},
@@ -41,7 +39,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\n  name: x\n", .Invalid, 3, 3, `meta: unknown key "name"`},
 	{"meta:\n  id: t\n  -peek: [1]\n", .Invalid, 3, 3, "the extension -peek does not apply here"},
 	{HEAD + "types:\n  u:\n    meta:\n      endian: be\n", .Unsupported, 6, 5, "type u: meta in a type is not supported"},
-	{HEAD + "types:\n  unused:\n    seq:\n      - id: a\n        type: u1\n        if: false\n", .Unsupported, 9, 9, "attribute a: if is not supported"},
+	{HEAD + "types:\n  unused:\n    seq:\n      - id: a\n        type: u1\n        pos: 0\n", .Unsupported, 9, 9, "attribute a: pos is not supported"},
+	{HEAD + "types:\n  unused:\n    instances:\n      x:\n        pos: 0\n        type: u1\n", .Unsupported, 8, 9, "instance x: pos is not supported"},
 
 	// the top level and meta
 	{"# nothing\n", .Invalid, 0, 0, "the schema is empty"},
@@ -53,7 +52,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\n  encoding: UTF-16LE\n", .Unsupported, 3, 13, `encoding "UTF-16LE" is not supported`},
 
 	// attributes
-	{HEAD + "seq:\n  - type: u1\n", .Invalid, 5, 5, "an attribute in type t has no id"},
+	{HEAD + "seq:\n  - type: u1\n", .Unsupported, 5, 5, "an attribute in type t has no id"},
 	{HEAD + "seq:\n  - id: A\n    type: u1\n", .Invalid, 5, 9, `id "A" is not an identifier`},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n  - id: a\n    type: u1\n", .Invalid, 7, 9, "id a is already used (line 5, column 9)"},
 	{HEAD + "seq:\n  - id: a\n", .Invalid, 5, 5, "a needs a type, a size or contents"},
@@ -64,24 +63,54 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\nseq:\n  - id: a\n    type: u2\n", .Invalid, 5, 11, "a: u2 needs le or be, or meta endian"},
 	{HEAD + "seq:\n  - id: a\n    type: strz\n    encoding: ASCII\n", .Unsupported, 6, 11, "a: type strz is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: b3\n", .Unsupported, 6, 11, "a: type b3 is not supported"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases: {}\n", .Unsupported, 7, 7, "a: switch-on is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: str\n    encoding: ASCII\n", .Unsupported, 6, 11, "a: str without size is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: str\n    size: 1\n", .Invalid, 6, 11, "a: str needs an encoding"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    encoding: ASCII\n", .Invalid, 7, 5, "a: encoding applies only to str"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    size: 2\n", .Invalid, 7, 5, "a: size does not apply to u1"},
-	{HEAD + "seq:\n  - id: a\n    type: s\n    size: 2\ntypes:\n  s: {}\n", .Unsupported, 7, 5, "size on a user type (a substream) is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    seq:\n      - id: b\n        type: s\n", .Unsupported, 9, 5, "type s contains itself"},
 	{HEAD + "seq:\n  - id: a\n    contents: [1]\n    type: u1\n", .Invalid, 7, 5, "a: contents cannot have a type"},
 	{HEAD + "seq:\n  - id: a\n    contents: 1\n", .Invalid, 6, 15, "contents: write a byte as a sequence, [1]"},
 	{HEAD + "seq:\n  - id: a\n    contents: [256]\n", .Invalid, 6, 16, "contents: 256 is not a byte"},
 
 	// counts
-	{HEAD + "seq:\n  - id: a\n    type: u1\n    repeat: eos\n", .Unsupported, 7, 13, "a: repeat: eos is not supported"},
-	{HEAD + "seq:\n  - id: a\n    type: u1\n    repeat: until\n", .Unsupported, 7, 13, "a: repeat: until is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    repeat: forever\n", .Invalid, 7, 13, `a: repeat must be expr, eos or until, not "forever"`},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    repeat: until\n", .Invalid, 7, 5, "a: repeat: until needs repeat-until"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    repeat-until: _ == 0\n", .Invalid, 7, 5, "a: repeat-until needs repeat: until"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    repeat: eos\n    repeat-expr: 2\n", .Invalid, 8, 5, "a: repeat-expr needs repeat: expr"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    repeat: expr\n", .Invalid, 7, 5, "a: repeat: expr needs repeat-expr"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    repeat-expr: 2\n", .Invalid, 7, 5, "a: repeat-expr needs repeat: expr"},
-	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type: u1\n    repeat: expr\n    repeat-expr: n\n", .Unsupported, 10, 18, "only supported on a user type"},
-	{HEAD + "seq:\n  - id: a\n    type: u1\n    -peek: [1]\n", .Unsupported, 7, 5, "-peek on a field that is not a user type"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    repeat: until\n    repeat-until: _ + 1\n", .Invalid, 8, 21, "repeat-until: expected a boolean, found an integer"},
+	{HEAD + "seq:\n  - id: a\n    type: s\n    repeat: until\n    repeat-until: _.c == 0\ntypes:\n  s:\n    seq:\n      - id: b\n        type: u1\n", .Invalid, 8, 21, "repeat-until: a has no field c"},
+	{HEAD + "seq:\n  - id: a\n    size: _\n", .Invalid, 6, 11, "size: _ is only defined in repeat-until"},
+
+	// if and enum
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    if: 1\n", .Invalid, 7, 9, "if: expected a boolean, found an integer"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    if: a == 1\n", .Invalid, 7, 9, "if: t has no field a"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    enum: e\n", .Invalid, 7, 11, "a: no enum e"},
+	{HEAD + "seq:\n  - id: a\n    size: 1\n    enum: e\nenums:\n  e:\n    1: x\n", .Invalid, 7, 5, "a: enum applies only to integer types"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    enum: s::e\n", .Unsupported, 7, 11, "an enum of another type (s::e) is not supported"},
+
+	// switch-on
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n", .Invalid, 7, 7, "a: switch-on needs cases"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      cases: {}\n", .Invalid, 7, 7, "a: a type mapping needs switch-on"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases: {}\n      default: x\n", .Invalid, 9, 7, `a: type: unknown key "default"`},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1 == 1\n      cases: {}\n", .Invalid, 7, 20, "switch-on: expected an integer, found a boolean"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n", .Unsupported, 9, 12, "a: a case of type u1 is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: nope\n", .Invalid, 9, 12, "a: unknown type nope"},
+	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        n: s\ntypes:\n  s: {}\n", .Unsupported, 11, 9, "a case must be an integer or an enum constant"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n        0x1: s\ntypes:\n  s: {}\n", .Invalid, 10, 9, "a: case 1 is already given (line 9, column 9)"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    size: 2\ntypes:\n  s: {}\n", .Unsupported, 10, 5, "a: size on a switch-on field is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    repeat: expr\n    repeat-expr: 2\ntypes:\n  s: {}\n", .Unsupported, 7, 18, "a repeated switch-on without a _ case is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        _: s\n  - id: b\n    size: a.c\ntypes:\n  s:\n    seq:\n      - id: c\n        type: u1\n", .Unsupported, 11, 11, "size: a is a switch-on field; it cannot be used in expressions"},
+
+	// instances: value instances only, over their own type
+	{HEAD + "instances:\n  x:\n    doc: d\n", .Unsupported, 5, 3, "instance x: only value instances are supported"},
+	{HEAD + "instances:\n  x:\n    value: y\n  y:\n    value: x + 1\n", .Invalid, 6, 12, "value instance x refers to itself"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\ninstances:\n  a:\n    value: 1\n", .Invalid, 8, 3, "id a is already used (line 5, column 9)"},
+	{HEAD + "seq:\n  - id: b\n    size: 1\ninstances:\n  x:\n    value: b\n", .Unsupported, 9, 12, "value instance x: only integer and boolean values are supported"},
+	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    instances:\n      x:\n        value: _parent.y\n", .Unsupported, 11, 16, "_parent in a value instance is not supported"},
+	{HEAD + "instances:\n  x:\n    value: _io.pos\n", .Unsupported, 6, 12, "_io in a value instance is not supported"},
+	{HEAD + "seq:\n  - id: a\n    size: x\n  - id: n\n    type: u1\ninstances:\n  x:\n    value: n\n", .Invalid, 11, 12, "value: t has no field n"},
 	{HEAD + "seq:\n  - id: a\n    type: s\n    -peek: [1]\n    -until-peek: [0]\ntypes:\n  s: {}\n", .Invalid, 8, 5, "-until-peek cannot be combined with -peek"},
 	{HEAD + "seq:\n  - id: a\n    type: s\n    repeat: expr\n    repeat-expr: 2\n    -while-peek: [1]\ntypes:\n  s: {}\n", .Invalid, 9, 5, "-while-peek cannot be combined with repeat"},
 	{HEAD + "seq:\n  - id: a\n    type: s\n    -while-peek: [1, 2]\ntypes:\n  s: {}\n", .Unsupported, 7, 18, "-while-peek with more than one byte"},
@@ -306,4 +335,180 @@ t[0].z[0] = -2
 
 	// - keys gnrcrdr does not know are ignored, as the official tools do
 	expect_dump(t, "unknown extension", ksy_dump(t, HEAD + "-webide-representation: x\nseq:\n  - id: a\n    type: u1\n    -note: y\n", {7}), "t[0].a[0] = 7\n")
+
+	// -orig-id on a type documents its original name, as in
+	// kaitai_struct_formats; nothing shows it
+	expect_dump(t, "-orig-id on a type", ksy_dump(t, HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    -orig-id: S\n    seq:\n      - id: b\n        type: u1\n", {7}), "t[0].a[0].b[0] = 7\n")
+}
+
+@(test)
+ksy_kaitai_features :: proc(t: ^testing.T) {
+	// if, value instances (Bool and Int, one referring to a later one, used
+	// in the type and from outside it), a substream read with repeat: eos,
+	// repeat: until over _ and _io.eof, enum, and switch-on whose cases are
+	// enum constants and an integer, with no case for stop
+	src := HEAD + `seq:
+  - id: hdr
+    type: hdr
+  - id: opt
+    type: u1
+    if: hdr.has_opt
+  - id: skipped
+    type: u1
+    if: not hdr.has_opt
+  - id: table
+    type: table
+    size: hdr.count * 2
+  - id: blocks
+    type: block
+    repeat: until
+    repeat-until: _io.eof or _.kind == kind::stop
+types:
+  hdr:
+    seq:
+      - id: flags
+        type: u1
+    instances:
+      has_opt:
+        value: (flags & 1) != 0
+      count:
+        value: double_count >> 1
+      double_count:
+        value: (flags >> 4) * 2
+  table:
+    seq:
+      - id: entries
+        type: u2
+        repeat: eos
+  block:
+    seq:
+      - id: kind
+        type: u1
+        enum: kind
+      - id: body
+        type:
+          switch-on: kind
+          cases:
+            'kind::one': one
+            2: two
+  one:
+    seq:
+      - id: v
+        type: u1
+  two:
+    seq:
+      - id: v
+        type: u2
+enums:
+  kind:
+    1: one
+    2: two
+    9: stop
+`
+	expect_dump(t, "until stop", ksy_dump(t, src, {0x21, 7, 1, 0, 2, 0, 1, 0xaa, 2, 0xbb, 0xcc, 9}), `t[0].hdr[0].flags[0] = 33
+t[0].opt[0] = 7
+t[0].table[0].entries[0] = 1
+t[0].table[0].entries[1] = 2
+t[0].blocks[0].kind[0] = 1
+t[0].blocks[0].body[0].v[0] = 170
+t[0].blocks[1].kind[0] = 2
+t[0].blocks[1].body[0].v[0] = 52411
+t[0].blocks[2].kind[0] = 9
+`)
+	expect_dump(t, "until eof", ksy_dump(t, src, {0x10, 3, 4, 0, 1, 5}), `t[0].hdr[0].flags[0] = 16
+t[0].skipped[0] = 3
+t[0].table[0].entries[0] = 4
+t[0].blocks[0].kind[0] = 1
+t[0].blocks[0].body[0].v[0] = 5
+`)
+	expect_dump(t, "until past the end", ksy_dump(t, src, {0x10, 3, 4, 0, 2, 5}), "error: Unexpected_EOF at 5 in t[0].blocks[0].body[0].v[0]")
+
+	// a substream: _io is the substream, its unread bytes are skipped, and
+	// errors in it give offsets in the input
+	sub := HEAD + `seq:
+  - id: len
+    type: u1
+  - id: sub
+    type: sub
+    size: len
+  - id: after
+    type: u1
+types:
+  sub:
+    seq:
+      - id: a
+        type: u1
+      - id: rest
+        size: _io.size - _io.pos - 1
+      - id: wide
+        type: u2
+        if: _io.size == 2
+`
+	expect_dump(t, "substream", ksy_dump(t, sub, {4, 10, 20, 30, 40, 99}), `t[0].len[0] = 4
+t[0].sub[0].a[0] = 10
+t[0].sub[0].rest[0] = <2 bytes> 14 1e
+t[0].after[0] = 99
+`)
+	expect_dump(t, "substream end", ksy_dump(t, sub, {2, 10, 20, 30, 99}), "error: Unexpected_EOF at 2 in t[0].sub[0].wide[0]")
+	expect_dump(t, "substream too long", ksy_dump(t, sub, {5, 10, 20}), "error: Unexpected_EOF at 1 in t[0].sub[0]")
+
+	// every count on primitives: an expression, -peek, repeat: eos and
+	// repeat: until over _
+	counts := HEAD + `seq:
+  - id: n
+    type: u1
+  - id: v
+    type: u1
+    repeat: expr
+    repeat-expr: n
+  - id: z
+    type: u1
+    repeat: until
+    repeat-until: _ == 0
+  - id: m
+    type: u1
+    -peek: [0xff]
+  - id: rest
+    type: u1
+    repeat: eos
+`
+	expect_dump(t, "counts", ksy_dump(t, counts, {2, 5, 6, 3, 0, 0xff, 8, 9}), `t[0].n[0] = 2
+t[0].v[0] = 5
+t[0].v[1] = 6
+t[0].z[0] = 3
+t[0].z[1] = 0
+t[0].m[0] = 255
+t[0].rest[0] = 8
+t[0].rest[1] = 9
+`)
+
+	// a repeated switch-on on _index, with a _ case
+	switched := HEAD + `seq:
+  - id: items
+    type:
+      switch-on: _index
+      cases:
+        0: one
+        _: two
+    repeat: expr
+    repeat-expr: 2
+types:
+  one:
+    seq:
+      - id: v
+        type: u1
+  two:
+    seq:
+      - id: w
+        type: u2
+`
+	expect_dump(t, "default case", ksy_dump(t, switched, {1, 2, 3}), `t[0].items[0].v[0] = 1
+t[0].items[1].w[0] = 770
+`)
+
+	// repeat: eos and repeat: until stop an element that consumes nothing
+	empty := HEAD + "seq:\n  - id: e\n    type: empty\n    repeat: eos\ntypes:\n  empty: {}\n"
+	expect_dump(t, "eos without progress", ksy_dump(t, empty, {1}), "error: No_Progress at 0 in t[0].e[0]")
+	empty_until := HEAD + "seq:\n  - id: e\n    type: empty\n    repeat: until\n    repeat-until: _io.eof\ntypes:\n  empty: {}\n"
+	expect_dump(t, "until without progress", ksy_dump(t, empty_until, {1}), "error: No_Progress at 0 in t[0].e[0]")
 }

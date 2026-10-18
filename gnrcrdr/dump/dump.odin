@@ -14,7 +14,9 @@ BLOB_PREVIEW :: 16
 // Writes one line per scalar in tree: its path in reader.format_path form
 // (Name[i].Name[i]..., root included), " = ", then the value as write_value
 // writes it. Sets get no line of their own, and empty arrays write nothing.
-// Children are taken in schema order, each followed by its bit fields.
+// Children are taken in schema order, each followed by its bit fields;
+// those of a switch-on field are those of the case each instance was read
+// as. Value instances are not read, so they are not written.
 @(require_results)
 write_text :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tree) -> io.Error {
 	path := strings.builder_make()
@@ -89,7 +91,7 @@ write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set
 
 		if set != nil {
 			set_map := v.(map[int][dynamic]fld.Value)
-			for child in set.children {
+			for child in children_of(set, set_map) {
 				write_text_array(w, path, child.name, set_of(child), set_map[child.id][:]) or_return
 				for bit in child.bits {
 					write_text_array(w, path, bit.name, nil, set_map[bit.id][:]) or_return
@@ -124,7 +126,7 @@ write_json_array :: proc(w: io.Writer, set: ^mdat.Node, values: []fld.Value) -> 
 @(private = "file", require_results)
 write_json_object :: proc(w: io.Writer, node: ^mdat.Node, set_map: map[int][dynamic]fld.Value) -> io.Error {
 	io.write_byte(w, '{') or_return
-	for child, i in node.children {
+	for child, i in children_of(node, set_map) {
 		if i > 0 do io.write_byte(w, ',') or_return
 		write_json_field(w, child.name, set_of(child), set_map[child.id][:]) or_return
 		for bit in child.bits {
@@ -141,6 +143,14 @@ write_json_field :: proc(w: io.Writer, name: string, set: ^mdat.Node, values: []
 	write_json_string(w, name) or_return
 	io.write_byte(w, ':') or_return
 	return write_json_array(w, set, values)
+}
+
+// The fields of set_map, an instance of set: for a switch-on field, those
+// of the case it was read as.
+@(private = "file")
+children_of :: proc(set: ^mdat.Node, set_map: map[int][dynamic]fld.Value) -> []^mdat.Node {
+	s := mdat.instance_set(set, set_map)
+	return s == nil ? nil : s.children
 }
 
 // node when it is a set, else nil.
