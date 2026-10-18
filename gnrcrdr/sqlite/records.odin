@@ -1,4 +1,18 @@
-package data
+package sqlite
+
+// The rows of one format, as read from the database by read_records and
+// compiled into a File_Format by compile. SetHelper and Parent rows are
+// those of the format only; the other tables are shared by all formats.
+Records :: struct {
+	format_record: Format_Record,
+	field_map: map[int]^Field_Record,
+	data_type_map: map[int]^Data_Type_Record,
+	set_helper_map: map[int]^Set_Helper_Record, // by FieldId
+	set_length_map: map[int]^Length_Record,
+	marker_offset_map: map[int][dynamic]^Marker_Offset_Record, // by MarkerId
+	packed_records: [dynamic]^Packed_Record, // ordered by Id, LowBit
+	parent_map: map[int][dynamic]^Parent_Record, // by ParentId, each ordered by ChildIndex
+}
 
 Data_Type_Record :: struct {
 	id: int,

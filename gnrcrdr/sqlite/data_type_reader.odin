@@ -2,11 +2,10 @@ package sqlite
 
 import "core:mem"
 import "core:strings"
-import dat "../data"
 import sql "../../sqlite3"
 
-read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^dat.Data_Type_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
-	data_type_map^ = make(map[int]^dat.Data_Type_Record, allocator)
+read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^Data_Type_Record, allocator: mem.Allocator) -> (result: sql.ResultCode) {
+	data_type_map^ = make(map[int]^Data_Type_Record, allocator)
 
 	stmt: ^sql.Stmt
 	rc := prepare(db, "SELECT * FROM DataType", &stmt)
@@ -19,7 +18,7 @@ read_data_type :: proc(db: ^sql.sqlite3, data_type_map: ^map[int]^dat.Data_Type_
 
 		if !has_row do break
 
-		record := new(dat.Data_Type_Record, allocator)
+		record := new(Data_Type_Record, allocator)
 
 		record.id = sql.column_int64(stmt, i32(Data_Type_Column.id))
 		record.type = sql.column_int64(stmt, i32(Data_Type_Column.type))

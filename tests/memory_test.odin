@@ -277,21 +277,21 @@ destroy_file_format_resets :: proc(t: ^testing.T) {
 		return
 	}
 
-	arena_reset, map_reset, root_reset: bool
+	arena_reset, name_reset, root_reset: bool
 	{
 		context.allocator = mem.tracking_allocator(&track)
 		context.logger = log.nil_logger()
 
 		mdat.destroy_file_format(&ff)
 		arena_reset = ff.arena.curr_block == nil
-		map_reset = ff.metadata.data_type_map == nil
-		root_reset = ff.root_metadata_node.metadata == nil
+		name_reset = ff.name == ""
+		root_reset = ff.root == nil
 
 		mdat.destroy_file_format(&ff) // already destroyed: must not crash
 	}
 
 	testing.expect_value(t, track.total_allocation_count, 0)
 	testing.expect(t, arena_reset, "ff.arena.curr_block should be nil")
-	testing.expect(t, map_reset, "ff.metadata.data_type_map should be nil")
-	testing.expect(t, root_reset, "ff.root_metadata_node.metadata should be nil")
+	testing.expect(t, name_reset, "ff.name should be empty")
+	testing.expect(t, root_reset, "ff.root should be nil")
 }
