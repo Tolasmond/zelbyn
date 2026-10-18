@@ -45,18 +45,18 @@ check_sample :: proc(t: ^testing.T, s: Sample) {
 	testing.expectf(t, d.consumed == s.consumed, "%s: consumed %v, want %v", s.path, d.consumed, s.consumed)
 
 	g := root_instance(&ff, &d)
-	lsd := field_instance(g, 5003)
-	width, height := field_values(lsd, 5004)[0], field_values(lsd, 5005)[0]
+	lsd := field_instance(g, "logical_screen_descriptor")
+	width, height := field_values(lsd, "logical_screen_width")[0], field_values(lsd, "logical_screen_height")[0]
 	testing.expectf(t, width.(u16) == s.width, "%s: width %v, want %v", s.path, width, s.width)
 	testing.expectf(t, height.(u16) == s.height, "%s: height %v, want %v", s.path, height, s.height)
-	gct, blocks := field_values(g, 5013), field_values(g, 5017)
+	gct, blocks := field_values(g, "global_color_table"), field_values(g, "blocks")
 	testing.expectf(t, len(gct) == s.gct_len, "%s: %v GCT entries, want %v", s.path, len(gct), s.gct_len)
 	testing.expectf(t, len(blocks) == s.blocks, "%s: %v blocks, want %v", s.path, len(blocks), s.blocks)
 	if len(gct) > 0 {
-		red := field_values(field_instance(g, 5013), 5014)[0].(u8)
+		red := field_values(field_instance(g, "global_color_table"), "red")[0].(u8)
 		testing.expectf(t, red == s.first_red, "%s: first GCT red %v, want %v", s.path, red, s.first_red)
 	}
-	trailer := field_values(g, 5068)[0]
+	trailer := field_values(g, "trailer")[0]
 	testing.expectf(t, trailer.(u8) == s.trailer, "%s: trailer %v, want %v", s.path, trailer, s.trailer)
 }
 
@@ -75,13 +75,13 @@ decode_855 :: proc(t: ^testing.T) {
 	if d.err.kind != .None do return
 
 	g := root_instance(&ff, &d)
-	testing.expect_value(t, field_values(g, 5001)[0].(string), "GIF")
-	testing.expect_value(t, field_values(g, 5002)[0].(string), "89a")
+	testing.expect_value(t, field_values(g, "signature")[0].(string), "GIF")
+	testing.expect_value(t, field_values(g, "version")[0].(string), "89a")
 
-	first := field_instance(g, 5013)
-	testing.expect_value(t, field_values(first, 5014)[0].(u8), 252)
-	testing.expect_value(t, field_values(first, 5015)[0].(u8), 243)
-	testing.expect_value(t, field_values(first, 5016)[0].(u8), 233)
+	first := field_instance(g, "global_color_table")
+	testing.expect_value(t, field_values(first, "red")[0].(u8), 252)
+	testing.expect_value(t, field_values(first, "green")[0].(u8), 243)
+	testing.expect_value(t, field_values(first, "blue")[0].(u8), 233)
 }
 
 @(test)

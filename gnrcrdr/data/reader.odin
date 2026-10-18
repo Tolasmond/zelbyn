@@ -6,11 +6,11 @@ import "core:encoding/endian"
 Read_Error :: enum {
 	None,
 	Unexpected_EOF,        // a read needs more bytes than remain
-	Offset_Out_Of_Range,   // a computed absolute/relative peek offset is outside [0, len(data))
+	Offset_Out_Of_Range,   // a peek offset is outside [0, len(data))
 	Unsupported_Type,      // the data type cannot be read as an integer (Set, UInt64, floats, String, Blob)
-	Invalid_Length,        // a computed count/length is negative, or outside [MinBufferLength, MaxBufferLength]
-	Repeat_Limit_Exceeded, // a set count exceeds the set's MaxArrayLength
-	No_Progress,           // a repeated (grow-as-needed) set instance consumed zero bytes
+	Invalid_Length,        // a computed count or length is negative, or outside its field's bounds
+	Repeat_Limit_Exceeded, // a count exceeds its field's maximum
+	No_Progress,           // an element of a repeat that must consume input consumed none
 	Division_By_Zero,      // an expression divides by zero, or takes a remainder by zero
 	Integer_Overflow,      // an expression's result, or an integer field it reads, does not fit in an int
 	Invalid_Shift,         // an expression shifts by a negative amount or by 64 or more
@@ -99,30 +99,6 @@ read_bytes :: proc(r: ^Reader, n: int) -> ([]byte, Read_Error) {
 	return take(r, n)
 }
 
-// Reads n bytes as a string, dropping every 0x00 byte. The result is owned
-// and allocated with allocator.
-@(require_results)
-read_string :: proc(r: ^Reader, n: int, allocator := context.allocator) -> (value: string, err: Read_Error) {
-	b := take(r, n) or_return
-
-	non_nul := 0
-	for c in b {
-		if c != 0 do non_nul += 1
-	}
-
-	if non_nul == 0 do return "", .None
-
-	buf := make([]byte, non_nul, allocator)
-	i := 0
-	for c in b {
-		if c != 0 {
-			buf[i] = c
-			i += 1
-		}
-	}
-
-	return string(buf), .None
-}
 
 // Reads an integer at absolute position pos without changing r.
 @(require_results)

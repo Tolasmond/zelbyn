@@ -173,26 +173,6 @@ read_bytes_is_view :: proc(t: ^testing.T) {
 	testing.expect_value(t, r.pos, 3)
 }
 
-@(test)
-read_string_drops_nul :: proc(t: ^testing.T) {
-	data := []byte{'a', 0, 'b', 0}
-	r: dat.Reader
-	dat.reader_init(&r, data)
-
-	s, err := dat.read_string(&r, 4)
-	defer delete(s)
-	testing.expect_value(t, err, dat.Read_Error.None)
-	testing.expect_value(t, s, "ab")
-	testing.expect_value(t, r.pos, 4)
-
-	r.pos = 0
-	empty, e2 := dat.read_string(&r, 0)
-	defer delete(empty)
-	testing.expect_value(t, e2, dat.Read_Error.None)
-	testing.expect_value(t, empty, "")
-	testing.expect_value(t, r.pos, 0)
-}
-
 // Reads a T from le (little-endian bytes), and from its reverse as .Big;
 // both must give want and consume exactly size_of(T) bytes.
 @(private = "file")

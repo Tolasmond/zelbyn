@@ -5,24 +5,23 @@ import fld "../field"
 import "core:encoding/endian"
 
 // One field of a compiled format. Every rule is resolved and validated when
-// the format is loaded, so decoding needs no lookups. A field contained in
-// several sets has one node, shared by all of them; the plan has no cycles.
+// the format is loaded, so decoding needs no lookups. Each field has its
+// own node, even when several fields have the same type, and the plan has
+// no cycles.
 Node :: struct {
-	id:            int,    // the field's id: unique in the plan; the SQLite front end links rows by it
-	name:          string, // shown in the dump and in error paths
-	ref_name:      string, // what expressions call it: the .ksy id; the same as name for the SQLite schema
-	type:          dat.Data_Type,
-	order:         endian.Byte_Order, // integer and float types: the byte order they are read in
-	cond:          ^Expr,             // a Bool expression: the field is read only when it is true; nil when always read (Kaitai's if)
-	count:         Count,             // instances of a set, or elements of any other field
-	length:        Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from, or nil to read from the parent's stream
-	drop_nul:      bool,              // String only: drop every NUL byte, as the SQLite schema did; Kaitai's str keeps them (§7.3)
-	children:      []^Node,           // Set only, in order; nil when switch_on is set
-	switch_on:     ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
-	instances:     []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
-	bits:          []Bit_Field,       // integer types only: packed subfields, decoded from each element
-	default_value: Scalar,            // DefaultValue as the field's type; nil when absent (not used by the decoder yet)
-	valid:         Valid,             // checked on every element; nil when there is no check
+	id:        int,    // unique in the plan; tests find fields by it
+	name:      string, // shown in the dump and in error paths: the .ksy -orig-id, or else the id
+	ref_name:  string, // what expressions call it: the .ksy id
+	type:      dat.Data_Type,
+	order:     endian.Byte_Order, // integer and float types: the byte order they are read in
+	cond:      ^Expr,             // a Bool expression: the field is read only when it is true; nil when always read (Kaitai's if)
+	count:     Count,             // instances of a set, or elements of any other field
+	length:    Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from, or nil to read from the parent's stream
+	children:  []^Node,           // Set only, in order; nil when switch_on is set
+	switch_on: ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
+	instances: []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
+	bits:      []Bit_Field,       // integer types only: packed subfields, decoded from each element
+	valid:     Valid,             // checked on every element; nil when there is no check
 }
 
 // A value given in the schema, as the type of the field it belongs to: one
@@ -197,10 +196,9 @@ Value_Instance :: struct {
 // field, are in their own slot of the set instance that holds that field,
 // after the field's slot (slot_of), and are dumped right after it.
 Bit_Field :: struct {
-	id:            int,
-	name:          string,
-	type:          dat.Data_Type,
-	low, high:     int,
-	default_value: Scalar, // as for Node
-	valid:         Valid,  // as for Node
+	id:        int,
+	name:      string,
+	type:      dat.Data_Type,
+	low, high: int,
+	valid:     Valid, // as for Node
 }

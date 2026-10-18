@@ -4,32 +4,26 @@ import fld "../gnrcrdr/field"
 import ksy "../gnrcrdr/ksy"
 import mdat "../gnrcrdr/metadata"
 import rdr "../gnrcrdr/reader"
-import sql "../gnrcrdr/sqlite"
 import "base:intrinsics"
 import "core:reflect"
 import "core:testing"
 
-DB_PATH :: "data/Gif89aMetadata.sqlite3"
-
-// The SQLite GIF schema ported to .ksy (step 5); it gives the same dumps.
+// The GIF schema ported field for field from the SQLite schema (step 5),
+// with its dumps.
 KSY_PATH :: "formats/gif89a.ksy"
 
 // gif.ksy from kaitai_struct_formats, unchanged (step 6).
 GIF_KSY_PATH :: "formats/gif.ksy"
 
-// The GIF schemas: the SQLite one and its .ksy port, which give the same
-// dumps, and gif.ksy.
+// The GIF schemas: the port of the SQLite schema, and gif.ksy.
 Schema_Source :: enum {
-	SQLite,
 	Ported,
 	Kaitai,
 }
 
-// Loads the GIF89a format (id 1). Fails the test and returns false on error.
+// Loads the ported GIF schema. Fails the test and returns false on error.
 load_gif :: proc(t: ^testing.T, ff: ^mdat.File_Format) -> bool {
-	err := sql.read_file_format(DB_PATH, 1, ff)
-	defer sql.destroy_load_error(&err)
-	return testing.expectf(t, err.kind == .None, "loading format: %v (%v, table %s): %s", err.kind, err.code, err.table, err.message)
+	return load_ksy(t, KSY_PATH, ff)
 }
 
 // Loads the .ksy schema at path. Fails the test and returns false on error.
@@ -41,8 +35,6 @@ load_ksy :: proc(t: ^testing.T, path: string, ff: ^mdat.File_Format) -> bool {
 
 load_gif_from :: proc(t: ^testing.T, source: Schema_Source, ff: ^mdat.File_Format) -> bool {
 	switch source {
-	case .SQLite:
-		return load_gif(t, ff)
 	case .Ported:
 		return load_ksy(t, KSY_PATH, ff)
 	case .Kaitai:
@@ -73,7 +65,7 @@ destroy_decoded :: proc(d: ^Decoded) {
 }
 
 // A decoded set instance and the set it was read as, so that tests can
-// look its fields up by node id.
+// look its fields up by node id or name.
 Set_Instance :: struct {
 	instance: ^fld.Instance,
 	set:      ^mdat.Node,
@@ -90,9 +82,14 @@ root_instance :: proc(ff: ^mdat.File_Format, d: ^Decoded) -> Set_Instance {
 	return instance_of(d.tree.root[0], ff.root)
 }
 
-// The values of the field or bit field of s whose node id is id; nil when
-// the set has none.
-field_values :: proc(s: Set_Instance, id: int) -> []fld.Value {
+// The values of a field of s: by node id (a field or bit field) or by
+// .ksy id (a field). nil when the set has none.
+field_values :: proc {
+	field_values_by_id,
+	field_values_by_name,
+}
+
+field_values_by_id :: proc(s: Set_Instance, id: int) -> []fld.Value {
 	slot := 0
 	for child in s.set.children {
 		if child.id == id do return s.instance.slots[slot][:]
@@ -104,10 +101,29 @@ field_values :: proc(s: Set_Instance, id: int) -> []fld.Value {
 	return nil
 }
 
-// Instance index of the set field of s whose node id is id.
-field_instance :: proc(s: Set_Instance, id: int, index := 0) -> Set_Instance {
+field_values_by_name :: proc(s: Set_Instance, name: string) -> []fld.Value {
+	for child in s.set.children {
+		if child.ref_name == name do return field_values_by_id(s, child.id)
+	}
+	return nil
+}
+
+// Instance index of a set field of s, by node id or by .ksy id.
+field_instance :: proc {
+	field_instance_by_id,
+	field_instance_by_name,
+}
+
+field_instance_by_id :: proc(s: Set_Instance, id: int, index := 0) -> Set_Instance {
 	for child in s.set.children {
 		if child.id == id do return instance_of(field_values(s, id)[index], child)
+	}
+	panic("field_instance: no such set field")
+}
+
+field_instance_by_name :: proc(s: Set_Instance, name: string, index := 0) -> Set_Instance {
+	for child in s.set.children {
+		if child.ref_name == name do return instance_of(field_values(s, child.id)[index], child)
 	}
 	panic("field_instance: no such set field")
 }

@@ -12,8 +12,8 @@ import "core:time"
 // resulting diff before committing it.
 GOLDEN_RECORD :: #config(GOLDEN_RECORD, false)
 
-// The dumps of gif.ksy; those of the SQLite schema and its port are in
-// gif89a/.
+// The dumps of gif.ksy; those of gif89a.ksy, the port of the SQLite
+// schema, are in gif89a/.
 GOLDEN_DIR :: "tests/golden"
 
 // Bytes of context shown either side of the first difference.
@@ -21,8 +21,7 @@ GOLDEN_CONTEXT :: 60
 
 // Dumps a sample as text and as JSON from each schema, and compares each,
 // byte for byte, with <file name>.tree and .json: in tests/golden/ for
-// gif.ksy, in tests/golden/gif89a/ for the SQLite schema and its port.
-// Recording writes the dumps of gif.ksy and of the SQLite schema.
+// gif.ksy, in tests/golden/gif89a/ for gif89a.ksy.
 @(private = "file")
 check_golden :: proc(t: ^testing.T, s: Sample) {
 	testing.set_fail_timeout(t, 30 * time.Second)
@@ -45,7 +44,6 @@ check_golden :: proc(t: ^testing.T, s: Sample) {
 @(private = "file")
 compare_golden :: proc(t: ^testing.T, golden_path: string, got: string, source: Schema_Source) {
 	when GOLDEN_RECORD {
-		if source == .Ported do return
 		err := os.write_entire_file(golden_path, got)
 		testing.expectf(t, err == nil, "%s: write failed: %v", golden_path, err)
 	} else {

@@ -262,13 +262,9 @@ read_scalar :: proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.V
 		n: int
 		n, err = byte_length(d, node.length, index)
 		if err != .None do return nil, fail(d, err, start)
-		if node.drop_nul {
-			value, err = to_value(dat.read_string(&d.r, n, d.allocator))
-		} else {
-			src: []byte
-			src, err = dat.read_bytes(&d.r, n)
-			if err == .None do value = fld.Value(string(slice.clone(src, d.allocator)))
-		}
+		src: []byte
+		src, err = dat.read_bytes(&d.r, n)
+		if err == .None do value = fld.Value(string(slice.clone(src, d.allocator)))
 	case .Blob:
 		n: int
 		n, err = byte_length(d, node.length, index)

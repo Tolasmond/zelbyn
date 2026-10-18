@@ -102,9 +102,6 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, rep: Repeat) -> (v: Eval_Value, err: d
 		append(&d.frames, base.(^fld.Instance))
 		defer pop(&d.frames)
 		return eval(d, x.instance.expr, {index = -1})
-	case mdata.Peek:
-		pos := eval(d, x.pos, rep) or_return
-		return dat.peek_integer_at(&d.r, pos.(int), x.type, x.order)
 	case mdata.Name, mdata.Member, mdata.Enum_Constant:
 		panic("eval: unresolved expression")
 	}

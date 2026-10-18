@@ -2,7 +2,6 @@ package tests
 
 import dat "../gnrcrdr/data"
 import dmp "../gnrcrdr/dump"
-import expr "../gnrcrdr/expression"
 import fld "../gnrcrdr/field"
 import mdat "../gnrcrdr/metadata"
 import "core:mem/virtual"
@@ -10,21 +9,21 @@ import "core:slice"
 import "core:strings"
 import "core:testing"
 
-// A node's order is the byte order of its values, and a peek's of the
-// integer it peeks.
+// A node's order is the byte order of its values, and expressions see the
+// value as read in that order.
 @(test)
 decode_byte_order :: proc(t: ^testing.T) {
 	ff: mdat.File_Format
 	defer mdat.destroy_file_format(&ff)
 	a := virtual.arena_allocator(&ff.arena)
 
-	// n: u2be; le: u2le; data: peek(u2be, 0) bytes
+	// n: u2be; le: u2le; data: n bytes
 	n := plan_node(2, "n", .UInt16, a)
 	n.order = .Big
 	le := plan_node(3, "le", .UInt16, a)
 	data := plan_node(4, "data", .Blob, a)
-	data.length = mdat.Rule_Length{expr = expr.peek(.UInt16, .Big, expr.int_literal(0, a), a)}
 	ff.root = plan_node(1, "r", .Set, a, n, le, data)
+	data.length = mdat.Rule_Length{expr = must_compile(t, &ff, "n", ff.root)}
 
 	d: Decoded
 	defer destroy_decoded(&d)
@@ -36,7 +35,6 @@ decode_byte_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, field_values(r, 2)[0].(u16), 2)
 	testing.expect_value(t, field_values(r, 3)[0].(u16), 0x1234)
 	testing.expect_value(t, len(field_values(r, 4)[0].([]byte)), 2)
-	testing.expect_value(t, expr.to_string(data.length.(mdat.Rule_Length).expr, context.temp_allocator), "peek(u2be, 0)")
 }
 
 // One field f of type, with count elements, a fixed length for String and

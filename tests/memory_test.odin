@@ -2,8 +2,8 @@ package tests
 
 import dat "../gnrcrdr/data"
 import fld "../gnrcrdr/field"
+import ksy "../gnrcrdr/ksy"
 import mdat "../gnrcrdr/metadata"
-import sql "../gnrcrdr/sqlite"
 import "core:log"
 import "core:mem"
 import "core:os"
@@ -132,13 +132,13 @@ value_tree_outlives_schema_and_input :: proc(t: ^testing.T) {
 	}
 
 	// the slots of the fields looked at below, found while the schema exists
-	signature, version, blocks := slot_by_id(ff.root, 5001), slot_by_id(ff.root, 5002), slot_by_id(ff.root, 5017)
-	path := [?]int{5017, 5018, 5030, 5032, 5052} // blocks, extensions, comment, its data, the bytes
+	signature, version, blocks := slot_by_name(ff.root, "signature"), slot_by_name(ff.root, "version"), slot_by_name(ff.root, "blocks")
+	path := [?]string{"blocks", "extensions", "comment_extension", "comment_data", "data_sub_block_values"}
 	slots: [len(path)]int
 	set := ff.root
-	for id, i in path {
-		slots[i] = slot_by_id(set, id)
-		if i + 1 < len(path) do set = set.children[child_index(set, id)]
+	for name, i in path {
+		slots[i] = slot_by_name(set, name)
+		if i + 1 < len(path) do set = set.children[child_index(set, name)]
 	}
 
 	// clobber and free the input and the schema before looking at the tree
@@ -162,19 +162,19 @@ value_tree_outlives_schema_and_input :: proc(t: ^testing.T) {
 	testing.expect_value(t, string(blob), "abc")
 }
 
-// The index in set's children of the child whose node id is id.
+// The index in set's children of the child whose .ksy id is name.
 @(private = "file")
-child_index :: proc(set: ^mdat.Node, id: int) -> int {
+child_index :: proc(set: ^mdat.Node, name: string) -> int {
 	for child, i in set.children {
-		if child.id == id do return i
+		if child.ref_name == name do return i
 	}
 	panic("child_index: no such child")
 }
 
-// The slot in an instance of set of the child whose node id is id.
+// The slot in an instance of set of the child whose .ksy id is name.
 @(private = "file")
-slot_by_id :: proc(set: ^mdat.Node, id: int) -> int {
-	return mdat.slot_of(set, child_index(set, id))
+slot_by_name :: proc(set: ^mdat.Node, name: string) -> int {
+	return mdat.slot_of(set, child_index(set, name))
 }
 
 @(test)
@@ -224,40 +224,47 @@ value_tree_reuse_after_destroy :: proc(t: ^testing.T) {
 }
 
 @(test)
-schema_load_uses_only_arena :: proc(t: ^testing.T) {
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+schema_compile_uses_only_arena :: proc(t: ^testing.T) {
+	for path in ([?]string{KSY_PATH, GIF_KSY_PATH}) {
+		src, read_err := os.read_entire_file(path, context.allocator)
+		if !testing.expectf(t, read_err == nil, "reading %s: %v", path, read_err) do continue
+		defer delete(src)
 
-	err: sql.Load_Error
-	defer sql.destroy_load_error(&err)
+		ff: mdat.File_Format
+		defer mdat.destroy_file_format(&ff)
 
-	track: mem.Tracking_Allocator
-	mem.tracking_allocator_init(&track, context.allocator)
-	defer mem.tracking_allocator_destroy(&track)
-	{
-		context.allocator = mem.tracking_allocator(&track)
-		context.logger = log.nil_logger()
-		err = sql.read_file_format(DB_PATH, 1, &ff)
+		err: ksy.Error
+		defer ksy.destroy_error(&err)
+
+		track: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&track, context.allocator)
+		defer mem.tracking_allocator_destroy(&track)
+		{
+			context.allocator = mem.tracking_allocator(&track)
+			context.logger = log.nil_logger()
+			err = ksy.compile(string(src), &ff)
+		}
+
+		testing.expectf(t, err.kind == .None, "%s: %v at %v:%v: %s", path, err.kind, err.line, err.column, err.message)
+		testing.expectf(t, track.total_allocation_count == 0, "%s: %v heap allocations, want 0", path, track.total_allocation_count)
+		testing.expectf(t, ff.arena.total_used > 0, "%s: arena unused", path)
 	}
-
-	testing.expectf(t, err.kind == .None, "%v (%v, table %s): %s", err.kind, err.code, err.table, err.message)
-	testing.expect_value(t, track.total_allocation_count, 0)
-	testing.expect(t, ff.arena.total_used > 0, "arena unused")
 }
 
 @(test)
 schema_error_allocates_only_message :: proc(t: ^testing.T) {
 	Case :: struct {
-		db_path:   string,
-		format_id: int,
-		kind:      sql.Load_Error_Kind,
+		path: string, // read with read_file_format; when empty, src is compiled
+		src:  string,
+		kind: ksy.Error_Kind,
+		live: int, // allocations left with the error: the message, if it has one
 	}
 
-	for c in ([]Case{{DB_PATH, 999, .Format_Not_Found}, {"data/does_not_exist.sqlite3", 1, .Open_Failed}}) {
+	for c in ([]Case{{"", "meta:\n  id: [\n", .Syntax, 1}, {"", "meta:\n  id: x\nseq:\n  - id: a\n    type: nope\n", .Invalid, 1}, {"formats/does_not_exist.ksy", "", .Read_Failed, 0}}) {
 		ff: mdat.File_Format
 
 		// recorded inside the block, asserted after it: the message is freed inside
-		kind: sql.Load_Error_Kind
+		kind: ksy.Error_Kind
 		live_with_error, live_after: int
 
 		track: mem.Tracking_Allocator
@@ -269,18 +276,19 @@ schema_error_allocates_only_message :: proc(t: ^testing.T) {
 			context.allocator = mem.tracking_allocator(&track)
 			context.logger = log.nil_logger()
 
-			err := sql.read_file_format(c.db_path, c.format_id, &ff)
+			err := c.path == "" ? ksy.compile(c.src, &ff) : ksy.read_file_format(c.path, &ff)
 			kind = err.kind
 			live_with_error = len(track.allocation_map)
-			sql.destroy_load_error(&err)
+			ksy.destroy_error(&err)
 			mdat.destroy_file_format(&ff)
 			live_after = len(track.allocation_map)
 		}
 
-		testing.expectf(t, kind == c.kind, "%s, format %v: %v, want %v", c.db_path, c.format_id, kind, c.kind)
-		testing.expectf(t, live_with_error == 1, "%s, format %v: %v live allocations with the error, want 1 (the message)", c.db_path, c.format_id, live_with_error)
-		testing.expectf(t, live_after == 0, "%s, format %v: %v live allocations after cleanup, want 0", c.db_path, c.format_id, live_after)
-		testing.expectf(t, len(track.bad_free_array) == 0, "%s, format %v: %v bad frees", c.db_path, c.format_id, len(track.bad_free_array))
+		what := c.path == "" ? c.src : c.path
+		testing.expectf(t, kind == c.kind, "%q: %v, want %v", what, kind, c.kind)
+		testing.expectf(t, live_with_error == c.live, "%q: %v live allocations with the error, want %v", what, live_with_error, c.live)
+		testing.expectf(t, live_after == 0, "%q: %v live allocations after cleanup, want 0", what, live_after)
+		testing.expectf(t, len(track.bad_free_array) == 0, "%q: %v bad frees", what, len(track.bad_free_array))
 	}
 }
 
