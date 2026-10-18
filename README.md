@@ -140,13 +140,33 @@ git diff --stat tests/golden
 
 ### Benchmark
 
-`tools/bench` measures decoding in process: for each sample, the size of the decoded tree and the median time to decode it, and to decode it and write the JSON dump. Build it with `-o:speed`:
+gnrcrdr is measured the way a terminal tool runs: cold, in a fresh process for every measurement, with nothing shared between runs (decision record §10). `tools/bench/bench.py` builds gnrcrdr and the one-shot program in `tools/bench` with `-o:speed`, then runs them 200 times per sample, interleaving samples and programs:
 
 ```
-odin run tools/bench -o:speed
+python3 tools/bench/bench.py
 ```
 
-It uses `formats/gif.ksy` unless given another schema (`odin run tools/bench -o:speed -- formats/gif89a.ksy`). Run it before and after a change meant to make decoding faster or the tree smaller, and give both figures in the commit message.
+For each file it prints medians of:
+- the input size, the tree size (the bytes the tree's arena handed out), and the page faults taken during the decode (not counted on Windows);
+- the time to compile the schema, read the file, decode it and write the JSON dump to memory, each timed inside one process;
+- the whole-process time of `gnrcrdr <schema> <file> --dump json`, with its output discarded.
+
+It also prints the time to start a process that exits at once, which is part of every whole-process time. Options: `--runs N`, `--schema S` (default `formats/gif.ksy`), and the files (default the samples in `data/`).
+
+Run it before and after a change meant to make decoding faster or the tree smaller, in the same session, and give both sets of figures in the commit message. A sampling profiler may loop over one file to show where time goes, but its percentages leave out the cost of touching memory for the first time, so the figures come from this benchmark.
+
+#### Kaitai Struct C++ reference
+
+With `--cpp`, the benchmark also runs the official Kaitai Struct C++ runtime, with the parser the official compiler generates from the same schema. It prints the C++ decode time and page faults, the ratio of gnrcrdr's decode time to the C++ one, and the C++ whole-process time (reading and decoding, with no output). Build the reference once. It needs Node.js, PyYAML, a C++11 compiler (`$CXX`, default `g++`) and a clone of the runtime at tag 0.11, kept outside this repository:
+
+```
+npm ci --prefix tools/kaitai_compare
+git clone --depth 1 --branch 0.11 https://github.com/kaitai-io/kaitai_struct_cpp_stl_runtime ../kaitai_struct_cpp_stl_runtime
+python3 tools/bench/cpp/build.py ../kaitai_struct_cpp_stl_runtime
+python3 tools/bench/bench.py --cpp tools/bench/cpp/build/oneshot_cpp
+```
+
+The generated parser and the binary go to `tools/bench/cpp/build/`, which is not committed. The C++ decode builds a `kaitai::kstream` on the file's bytes and parses it. Strings are kept as bytes, as gnrcrdr keeps them, and on Linux libstdc++ is linked statically. To benchmark another schema, rebuild the reference with `--schema`.
 
 ### Kaitai runtime check
 

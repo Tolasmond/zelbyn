@@ -8,3 +8,4 @@ tests.bin
 tests.exe
 tools/kaitai_compare/node_modules/
 __pycache__/
+tools/bench/cpp/build/
