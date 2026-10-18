@@ -1,7 +1,6 @@
 package reader
 
 import dat "../data"
-import mdata "../metadata"
 import "core:mem"
 import "core:os"
 import "core:strings"
@@ -14,14 +13,13 @@ Parse_Error :: struct {
 }
 
 Path_Segment :: struct {
-	name:  string, // borrowed from metadata
+	name:  string, // borrowed from the plan
 	index: int,
 }
 
 @(private)
 Decoder :: struct {
 	r:         dat.Reader,
-	metadata:  ^mdata.Field_Metadata_Provider,
 	allocator: mem.Allocator, // the value tree's arena; also holds path
 	path:      [dynamic]Path_Segment,
 	err:       Parse_Error,

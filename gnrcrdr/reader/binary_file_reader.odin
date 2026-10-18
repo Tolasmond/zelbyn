@@ -23,13 +23,12 @@ read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Val
 	assert(tree.arena.curr_block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
 	allocator := virtual.arena_allocator(&tree.arena)
 	tree.root = make([dynamic]fld.Value, allocator)
-	fld.init_field_value_array(&tree.root, &format.root_metadata_node, allocator)
 
-	d := Decoder{metadata = &format.metadata, allocator = allocator}
+	d := Decoder{allocator = allocator}
 	d.path = make([dynamic]Path_Segment, allocator)
 	dat.reader_init(&d.r, data, .Little)
 
-	rerr := read_set(&d, &tree.root, &format.root_metadata_node)
+	rerr := read_set(&d, &tree.root, format.root)
 	if rerr != .None && d.err.kind == .None {
 		fail(&d, rerr, d.r.pos)
 	}
@@ -37,67 +36,56 @@ read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Val
 	return d.r.pos, d.err
 }
 
+// Appends every instance of set node to field.
 @(private = "file", require_results)
-read_set :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
-	count, err := fld.adjust_count(field, node, d.metadata, &d.r, d.allocator)
-	if err != .None do return fail(d, err, d.r.pos)
+read_set :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Node) -> dat.Read_Error {
+	count: int
+	switch c in node.count {
+	case mdata.Fixed_Count:
+		count = c.n
+	case mdata.Rule_Count:
+		n, err := eval_rule(&d.r, c.rule, d.allocator)
+		if err == .None do err = check_count(n, c.max)
+		if err != .None do return fail(d, err, d.r.pos)
+		count = n
+	case mdata.Marker_Count:
+		count = markers_match(&d.r, c.markers) ? 1 : 0
+	case mdata.Repeat_Count:
+		return read_repeat(d, field, node, c)
+	}
 
 	for set_index in 0 ..< count {
 		// on error the segment is left pushed; fail has already copied the path
-		append(&d.path, Path_Segment{node.metadata.name, set_index})
-		read_set_instance(d, field, set_index, node) or_return
+		append(&d.path, Path_Segment{node.name, set_index})
+		read_set_instance(d, field, node) or_return
 		pop(&d.path)
 	}
 
 	return .None
 }
 
-// Reads instances of a grow-as-needed set until its continuator is absent or
-// its terminator is found. The terminator is required, the repeat count is
-// limited by MaxArrayLength, and every instance must consume input.
+// Reads instances of a repeated set while its continuator is present or
+// until its terminator is found. The terminator is required, the repeat
+// count is limited, and every instance must consume input.
 @(private = "file", require_results)
-read_growing_set :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
-	metadata := d.metadata
-
-	set_helper_rec := metadata.set_helper_map[node.metadata.id]
-	if set_helper_rec == nil do return fail(d, .Invalid_Schema, d.r.pos)
-
-	length_id, length_id_exists := set_helper_rec.length_id.?
-	if !length_id_exists do return fail(d, .Invalid_Schema, d.r.pos)
-
-	length_rec := metadata.set_length_map[length_id]
-	if length_rec == nil do return fail(d, .Invalid_Schema, d.r.pos)
-
-	data_type_rec := metadata.data_type_map[length_rec.data_type_id]
-	if data_type_rec == nil do return fail(d, .Invalid_Schema, d.r.pos)
-
-	data_type := dat.Data_Type(data_type_rec.type)
-
-	continuator, continuator_exists := length_rec.continuator.?
-	terminator, terminator_exists := length_rec.terminator.?
-	if !continuator_exists && !terminator_exists do return fail(d, .Invalid_Schema, d.r.pos)
-
+read_repeat :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Node, repeat: mdata.Repeat_Count) -> dat.Read_Error {
 	for {
-		value, peek_err := dat.peek_integer_at(&d.r, d.r.pos, data_type)
+		value, peek_err := dat.peek_integer_at(&d.r, d.r.pos, repeat.type)
 
-		if continuator_exists {
-			if peek_err != .None || value != continuator do return .None
-		} else {
+		if repeat.until {
 			if peek_err != .None do return fail(d, .Unexpected_EOF, d.r.pos)
-			if value == terminator do return .None
+			if value == repeat.value do return .None
+		} else {
+			if peek_err != .None || value != repeat.value do return .None
 		}
 
-		if e := fld.check_count(len(set_field) + 1, node.metadata.data_type.max_array_length); e != .None {
+		if e := check_count(len(field) + 1, repeat.max); e != .None {
 			return fail(d, e, d.r.pos)
 		}
 
-		append(set_field, make(map[int][dynamic]fld.Value, d.allocator))
-		set_index := len(set_field) - 1
-		fld.initialize_set_map(&set_field[set_index].(map[int][dynamic]fld.Value), node, d.allocator)
-
 		start := d.r.pos
-		append(&d.path, Path_Segment{node.metadata.name, set_index})
-		read_set_instance(d, set_field, set_index, node) or_return
+		append(&d.path, Path_Segment{node.name, len(field)})
+		read_set_instance(d, field, node) or_return
 
 		if d.r.pos == start do return fail(d, .No_Progress, start)
 
@@ -105,42 +93,39 @@ read_growing_set :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mda
 	}
 }
 
+// Appends one instance of set node to field and reads its children into it.
 @(private = "file", require_results)
-read_set_instance :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, set_index: int, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
-	parent_map := &set_field[set_index].(map[int][dynamic]fld.Value)
+read_set_instance :: proc(d: ^Decoder, field: ^[dynamic]fld.Value, node: ^mdata.Node) -> dat.Read_Error {
+	append(field, make(map[int][dynamic]fld.Value, len(node.children), d.allocator))
+	instance := &field[len(field) - 1].(map[int][dynamic]fld.Value)
 
-	for child_node in node.children {
-		child_metadata := child_node.metadata
+	for child in node.children {
+		values := map_insert(instance, child.id, make([dynamic]fld.Value, d.allocator))
 
-		if dat.Data_Type(child_metadata.data_type.type) == .Set {
-			if child_metadata.data_type.is_grow_as_needed == 1 {
-				read_growing_set(d, &parent_map[child_metadata.id], child_node) or_return
-			} else {
-				read_set(d, &parent_map[child_metadata.id], child_node) or_return
-			}
-
+		if child.type == .Set {
+			read_set(d, values, child) or_return
 		} else {
-			read_field(d, &parent_map[child_metadata.id], child_node) or_return
+			read_field(d, values, child) or_return
 		}
 	}
 
 	return .None
 }
 
+// Appends every element of a field that is not a set to values.
 @(private = "file", require_results)
-read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Field_Metadata_Tree_Node) -> dat.Read_Error {
-	count := fld.get_count(set_field, nil)
+read_field :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, node: ^mdata.Node) -> dat.Read_Error {
+	// the plan gives every field that is not a set a fixed count
+	count := node.count.(mdata.Fixed_Count).n
 
 	for i in 0 ..< count {
-		append(&d.path, Path_Segment{node.metadata.name, i})
+		append(&d.path, Path_Segment{node.name, i})
 
 		start := d.r.pos
 		value: fld.Value
 		err: dat.Read_Error
 
-		data_type := dat.Data_Type(node.metadata.data_type.type)
-
-		switch data_type {
+		switch node.type {
 		case .Int8:
 			value, err = to_value(dat.read(&d.r, i8))
 		case .UInt8:
@@ -162,24 +147,25 @@ read_field :: proc(d: ^Decoder, set_field: ^[dynamic]fld.Value, node: ^mdata.Fie
 		case .Float64:
 			value, err = to_value(dat.read(&d.r, f64))
 		case .String:
-			n, ok := node.metadata.data_type.max_buffer_length.?
-			if !ok do return fail(d, .Invalid_Schema, start)
+			n: int
+			n, err = byte_length(&d.r, node.length, d.allocator)
+			if err != .None do return fail(d, err, start)
 			value, err = to_value(dat.read_string(&d.r, n, d.allocator))
 		case .Blob:
-			buffer_length: int
-			buffer_length, err = fld.get_buffer_length(node, d.metadata, &d.r)
+			n: int
+			n, err = byte_length(&d.r, node.length, d.allocator)
 			if err != .None do return fail(d, err, start)
 			src: []byte
-			src, err = dat.read_bytes(&d.r, buffer_length)
+			src, err = dat.read_bytes(&d.r, n)
 			if err != .None do return fail(d, err, start)
 			value = fld.Value(slice.clone(src, d.allocator))
 		case .Set:
-			return fail(d, .Invalid_Schema, start)
+			panic("read_field: called for a set")
 		}
 
 		if err != .None do return fail(d, err, start)
 
-		fld.set_value(node, set_field, nil, i, value)
+		append(values, value)
 
 		pop(&d.path)
 	}
