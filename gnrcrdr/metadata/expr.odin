@@ -43,6 +43,8 @@ Expr_Variant :: union {
 	Io_Size,
 	Io_Eof,
 	Repeat_Index,
+	Repeat_Element,
+	Value_Ref,
 	Peek,
 }
 
@@ -141,6 +143,17 @@ Io_Eof :: struct {}
 // _index: the index of the element being read.
 Repeat_Index :: struct {}
 
+// _ in repeat-until: the element of node just read.
+Repeat_Element :: struct {
+	node: ^Node,
+}
+
+// The value instance instance, evaluated for the set instance base.
+Value_Ref :: struct {
+	base:     ^Expr,
+	instance: ^Value_Instance,
+}
+
 // The integer of type, in order, at position pos (from the start of the
 // input), read without moving the reader. No .ksy syntax yet: front ends
 // build it.
@@ -150,16 +163,16 @@ Peek :: struct {
 	pos:   ^Expr,
 }
 
-// True when the field is read once in each instance of its parent, so that
-// a reference to it gives its value rather than an array: a fixed count of
-// 1, or a marker count of 0 or 1.
+// True when the field is read at most once in each instance of its parent,
+// so that a reference to it gives its value rather than an array: a fixed
+// count of 1, or a marker count of 0 or 1 (either with or without a cond).
 is_single :: proc(node: ^Node) -> bool {
 	switch c in node.count {
 	case Fixed_Count:
 		return c.n == 1
 	case Marker_Count:
 		return true
-	case Rule_Count, Repeat_Count:
+	case Rule_Count, Repeat_Count, Eos_Count, Until_Count:
 		return false
 	}
 	return false

@@ -92,7 +92,7 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	{"a::b::c", .Unsupported, 0, "a::b::c"},
 	{"_io", .Unsupported, 0, "only _io.pos, _io.size and _io.eof"},
 	{"_io.foo", .Unsupported, 4, "_io.foo is not supported"},
-	{"_", .Unsupported, 0, "repeat-until"},
+	{"_", .Invalid, 0, "_ is only defined in repeat-until"},
 	{"hdr.n.size", .Unsupported, 6, "an integer has no member size"},
 	{"items.v", .Unsupported, 6, "an array has no member v"},
 	{"hdr._parent.a", .Unsupported, 4, "._parent is only supported after _parent"},

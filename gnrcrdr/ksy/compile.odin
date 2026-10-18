@@ -19,19 +19,20 @@ import "core:strings"
 //
 // Supported:
 //   - meta: id, endian, bit-endian, encoding, and title, file-extension,
-//     xref and license (ignored); seq, types, enums and doc, doc-ref
-//   - attributes: id, type, size, contents, valid, repeat: expr with
-//     repeat-expr, encoding, doc, doc-ref
+//     xref and license (ignored); seq, types, instances, enums and doc,
+//     doc-ref
+//   - attributes: id, type, size, contents, if, enum, valid, repeat (expr,
+//     eos, until) with repeat-expr and repeat-until, encoding, doc, doc-ref
 //   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), str with
-//     size, byte arrays (size without type) and user types
+//     size, byte arrays (size without type), user types (with size, read
+//     from a substream), and switch-on whose cases are user types
+//   - value instances
 //   - enums whose values are names (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
-// Not supported yet (Unsupported): if, enum on an attribute, repeat: eos
-// and until, terminator, strz, size-eos, bit types (b1-b64), switch-on,
-// instances, size on a user type (substreams), a count other than a
-// literal on a field that is not a user type, and any valid constant that
-// is not an integer or string literal.
+// Not supported yet (Unsupported): terminator, strz, size-eos, bit types
+// (b1-b64), instances other than value instances, size on a switch-on
+// field, and any valid constant that is not an integer or string literal.
 
 Error_Kind :: enum {
 	None,
@@ -89,6 +90,7 @@ compile :: proc(src: string, file_format: ^mdata.File_Format) -> Error {
 	defer virtual.arena_destroy(&scratch)
 
 	c := Compiler{allocator = virtual.arena_allocator(&file_format.arena), scratch = virtual.arena_allocator(&scratch)}
+	c.instances = make(map[^mdata.Value_Instance]Instance_Source, c.scratch)
 	if doc.root == nil {
 		fail(&c, .Invalid, nil, "the schema is empty")
 	} else {
@@ -104,7 +106,18 @@ Compiler :: struct {
 	next_id:   int,
 	endian:    Maybe(endian.Byte_Order), // meta endian
 	encoding:  string,                   // meta encoding; "" when absent
+	instances: map[^mdata.Value_Instance]Instance_Source, // in scratch
 	err:       Error,
+}
+
+// Where a value instance of a set comes from, to compile it when an
+// expression first refers to it.
+@(private = "file")
+Instance_Source :: struct {
+	value:     ^yml.Node, // its value: key
+	td:        ^Type_Def,
+	set:       ^mdata.Node,
+	compiling: bool,
 }
 
 // A type: the top level, or an entry of types. Its attributes are compiled
@@ -115,6 +128,7 @@ Type_Def :: struct {
 	spec:        ^yml.Node,
 	parent:      ^Type_Def, // the type it is declared in; nil at the top level
 	types:       []^Type_Def,
+	instances:   []yml.Entry, // the entries of instances, each checked
 	enums:       []expr.Enum,
 	in_progress: bool, // its attributes are being compiled
 }
@@ -201,19 +215,33 @@ META_KEYS :: Keys {
 }
 
 @(private = "file")
-TYPE_ALLOWED :: []string{"seq", "types", "enums", "doc", "doc-ref"}
+TYPE_ALLOWED :: []string{"seq", "types", "instances", "enums", "doc", "doc-ref"}
 
 @(private = "file")
-TOP_ALLOWED :: []string{"meta", "seq", "types", "enums", "doc", "doc-ref"}
+TOP_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "doc-ref"}
 
 @(private = "file")
-TYPE_UNSUPPORTED :: []string{"instances", "params", "to-string"}
+TYPE_UNSUPPORTED :: []string{"params", "to-string"}
 
 @(private = "file")
-ATTR_ALLOWED :: []string{"id", "type", "size", "contents", "valid", "repeat", "repeat-expr", "encoding", "doc", "doc-ref"}
+ATTR_ALLOWED :: []string{"id", "type", "size", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"}
 
 @(private = "file")
-ATTR_UNSUPPORTED :: []string{"if", "enum", "repeat-until", "terminator", "consume", "include", "eos-error", "pad-right", "size-eos", "process", "io", "pos", "value", "parent"}
+ATTR_UNSUPPORTED :: []string{"terminator", "consume", "include", "eos-error", "pad-right", "size-eos", "process", "io", "pos", "value", "parent"}
+
+// The keys of an instance; only value instances are supported, so the keys
+// of the others are Unsupported.
+@(private = "file")
+INSTANCE_KEYS :: Keys {
+	allowed     = {"value", "doc", "doc-ref"},
+	unsupported = {"pos", "io", "type", "size", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "terminator", "consume", "include", "eos-error", "pad-right", "size-eos", "process"},
+}
+
+@(private = "file")
+SWITCH_KEYS :: Keys {
+	what    = "switch-on",
+	allowed = {"switch-on", "cases"},
+}
 
 @(private = "file")
 is_identifier :: proc(s: string) -> bool {
@@ -322,7 +350,8 @@ build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_De
 	if parent != nil {
 		expect_map(c, spec, fmt.tprintf("type %s", name)) or_return
 		if k := get_key(spec, "meta"); k != nil do return nil, fail(c, .Unsupported, k, "type %s: meta in a type is not supported", name)
-		check_keys(c, spec, {what = fmt.tprintf("type %s", name), allowed = TYPE_ALLOWED, unsupported = TYPE_UNSUPPORTED}) or_return
+		// -orig-id on a type documents its original name; nothing shows it
+		check_keys(c, spec, {what = fmt.tprintf("type %s", name), allowed = TYPE_ALLOWED, unsupported = TYPE_UNSUPPORTED, extensions = {"-orig-id"}}) or_return
 	}
 
 	if seq := get(spec, "seq"); seq != nil {
@@ -333,6 +362,19 @@ build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_De
 			if id := get(attr, "id"); id != nil && id.kind == .Scalar do what = fmt.tprintf("attribute %s", id.text)
 			check_keys(c, attr, {what = what, allowed = ATTR_ALLOWED, unsupported = ATTR_UNSUPPORTED, extensions = EXTENSIONS}) or_return
 		}
+	}
+
+	if instances := get(spec, "instances"); instances != nil {
+		expect_map(c, instances, "instances") or_return
+		for e in instances.entries {
+			inst_name := identifier(c, e.key, "instance name") or_return
+			expect_map(c, e.value, fmt.tprintf("instance %s", inst_name)) or_return
+			keys := INSTANCE_KEYS
+			keys.what = fmt.tprintf("instance %s", inst_name)
+			check_keys(c, e.value, keys) or_return
+			if get(e.value, "value") == nil do return nil, fail(c, .Unsupported, e.key, "instance %s: only value instances are supported", inst_name)
+		}
+		td.instances = instances.entries
 	}
 
 	if enums := get(spec, "enums"); enums != nil {
@@ -400,27 +442,76 @@ visible_enums :: proc(c: ^Compiler, td: ^Type_Def) -> []expr.Enum {
 	return list[:]
 }
 
-// Compiles the attributes of td as the children of set, an instance of
-// td. chain is the scope: the sets enclosing set, outermost first, then
-// set. Each attribute's expressions can refer to the attributes before it.
+// Compiles the attributes and value instances of td as those of set, an
+// instance of td. chain is the scope: the sets enclosing set, outermost
+// first, then set. Each attribute's expressions can refer to the
+// attributes before it, and to any value instance whose expression refers
+// only to those.
 @(private = "file")
 compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^mdata.Node) -> bool {
 	if td.in_progress do return fail(c, .Unsupported, td.spec, "type %s contains itself; recursive types are not supported", td.name)
 	td.in_progress = true
 	defer td.in_progress = false
 
-	seq := get(td.spec, "seq")
-	if seq == nil do return true
+	ids := make(map[string]^yml.Node, c.scratch) // of the attributes, bit fields and instances
 
-	children := make([dynamic]^mdata.Node, c.allocator)
-	ids := make(map[string]^yml.Node, c.scratch) // of the attributes and bit fields
-	scope := expr.Scope{types = chain, enums = visible_enums(c, td)}
-
-	for attr in seq.items {
-		child := compile_attr(c, td, attr, scope, &ids) or_return
-		append(&children, child)
-		set.children = children[:]
+	// each instance is compiled when an expression first refers to it, or
+	// after the attributes
+	instances := make([]^mdata.Value_Instance, len(td.instances), c.allocator)
+	for e, i in td.instances {
+		instances[i] = new(mdata.Value_Instance, c.allocator)
+		instances[i].name = strings.clone(e.key.text, c.allocator)
+		c.instances[instances[i]] = {value = get(e.value, "value"), td = td, set = set}
 	}
+	set.instances = instances
+
+	scope := scope_of(c, td, chain)
+	if seq := get(td.spec, "seq"); seq != nil {
+		children := make([dynamic]^mdata.Node, c.allocator)
+		for attr in seq.items {
+			child := compile_attr(c, td, attr, scope, &ids) or_return
+			append(&children, child)
+			set.children = children[:]
+		}
+	}
+
+	for e, i in td.instances {
+		claim_id(c, &ids, e.key.text, e.key) or_return
+		if instances[i].expr == nil do compile_instance(c, set, instances[i]) or_return
+	}
+	return true
+}
+
+// The scope of expressions in td, whose instance is the last of chain.
+@(private = "file")
+scope_of :: proc(c: ^Compiler, td: ^Type_Def, chain: []^mdata.Node) -> expr.Scope {
+	return {types = chain, enums = visible_enums(c, td), compile_instance = compile_instance_callback, data = c}
+}
+
+@(private = "file")
+compile_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^mdata.Value_Instance) -> bool {
+	return compile_instance((^Compiler)(data), set, inst)
+}
+
+// Compiles the expression of inst, a value instance of set. It can use the
+// fields of set compiled so far and its other value instances.
+@(private = "file")
+compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Instance) -> bool {
+	src := &c.instances[inst]
+	if src.compiling do return fail(c, .Invalid, src.value, "value instance %s refers to itself", inst.name)
+	src.compiling = true
+	defer src.compiling = false
+
+	types := make([]^mdata.Node, 1, c.scratch)
+	types[0] = set
+	scope := scope_of(c, src.td, types)
+	scope.instance = true
+
+	e := compile_expr(c, src.value, "value", scope, .Unresolved) or_return
+	if e.type != .Int && e.type != .Bool {
+		return fail(c, .Unsupported, src.value, "value instance %s: only integer and boolean values are supported", inst.name)
+	}
+	inst.expr = e
 	return true
 }
 
@@ -502,7 +593,7 @@ is_bit_type :: proc(name: string) -> bool {
 @(private = "file")
 compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.Scope, ids: ^map[string]^yml.Node) -> (node: ^mdata.Node, ok: bool) {
 	id_node := get(attr, "id")
-	if id_node == nil do return nil, fail(c, .Invalid, attr, "an attribute in type %s has no id", td.name)
+	if id_node == nil do return nil, fail(c, .Unsupported, attr, "an attribute in type %s has no id; attributes without one are not supported", td.name)
 	id := identifier(c, id_node, "id") or_return
 	claim_id(c, ids, id, id_node) or_return
 
@@ -514,6 +605,7 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 	size := get(attr, "size")
 	valid := get(attr, "valid")
 	user: ^Type_Def
+	switch_node: ^yml.Node
 
 	switch {
 	case contents != nil:
@@ -527,8 +619,10 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 	case type_node == nil:
 		if size == nil do return nil, fail(c, .Invalid, attr, "%s needs a type, a size or contents", id)
 		node.type = .Blob
-	case type_node.kind == .Map && get(type_node, "switch-on") != nil:
-		return nil, fail(c, .Unsupported, type_node, "%s: switch-on is not supported", id)
+	case type_node.kind == .Map:
+		node.type = .Set
+		switch_node = type_node
+		if size != nil do return nil, fail(c, .Unsupported, get_key(attr, "size"), "%s: size on a switch-on field is not supported", id)
 	case:
 		type_name := expect_scalar(c, type_node, "type") or_return
 		sizes := TYPE_SIZE
@@ -549,7 +643,6 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 			user = find_type(td, type_name)
 			if user == nil do return nil, fail(c, .Invalid, type_node, "%s: unknown type %s", id, type_name)
 			node.type = .Set
-			if size != nil do return nil, fail(c, .Unsupported, get_key(attr, "size"), "%s: size on a user type (a substream) is not supported", id)
 		}
 	}
 
@@ -560,12 +653,30 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 		return nil, fail(c, .Invalid, type_node, "%s: str needs an encoding, or meta encoding", id)
 	}
 
-	node.count = compile_count(c, attr, id, node, scope) or_return
+	if n := get(attr, "enum"); n != nil {
+		if node.type not_in INTEGER_TYPES do return nil, fail(c, .Invalid, get_key(attr, "enum"), "%s: enum applies only to integer types", id)
+		enum_name := expect_scalar(c, n, "enum") or_return
+		if strings.contains(enum_name, "::") do return nil, fail(c, .Unsupported, n, "%s: an enum of another type (%s) is not supported", id, enum_name)
+		// the field keeps its integer, which the enum's constants are
+		found := false
+		for e in scope.enums {
+			if e.name == enum_name do found = true
+		}
+		if !found do return nil, fail(c, .Invalid, n, "%s: no enum %s", id, enum_name)
+	}
+
+	if n := get(attr, "if"); n != nil {
+		node.cond = compile_expr(c, n, "if", scope, .Bool) or_return
+	}
+
+	node.count = compile_count(c, attr, id, scope) or_return
+
+	// size, switch-on and the bit fields are evaluated for each element
+	element_scope := scope
+	element_scope.in_repeat = !mdata.is_single(node)
 
 	if size != nil {
-		length_scope := scope
-		length_scope.in_repeat = !mdata.is_single(node)
-		node.length = compile_length(c, size, id, length_scope) or_return
+		node.length = compile_length(c, size, id, element_scope) or_return
 	}
 
 	if valid != nil {
@@ -577,21 +688,102 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 	}
 
 	if user != nil {
-		chain := make([]^mdata.Node, len(scope.types) + 1, c.scratch)
-		copy(chain, scope.types)
-		chain[len(scope.types)] = node
-		compile_fields(c, user, node, chain) or_return
+		compile_fields(c, user, node, chain_with(c, scope.types, node)) or_return
+	}
+	if switch_node != nil {
+		compile_switch(c, td, switch_node, id, node, element_scope) or_return
+	}
+
+	// repeat-until refers to the element just read, so it is compiled after
+	// the element's fields
+	if _, is_until := node.count.(mdata.Until_Count); is_until {
+		until_scope := scope
+		until_scope.element = node
+		node.count = mdata.Until_Count{compile_expr(c, get(attr, "repeat-until"), "repeat-until", until_scope, .Bool) or_return}
 	}
 	return node, true
 }
 
-// The count from repeat and repeat-expr, or from -peek, -while-peek or
-// -until-peek. A field that is not a user type can only have a literal
-// count.
+// types followed by node.
 @(private = "file")
-compile_count :: proc(c: ^Compiler, attr: ^yml.Node, id: string, node: ^mdata.Node, scope: expr.Scope) -> (count: mdata.Count, ok: bool) {
+chain_with :: proc(c: ^Compiler, types: []^mdata.Node, node: ^mdata.Node) -> []^mdata.Node {
+	chain := make([]^mdata.Node, len(types) + 1, c.scratch)
+	copy(chain, types)
+	chain[len(types)] = node
+	return chain
+}
+
+// type: switch-on and cases, on node, a set. Each case is a user type,
+// compiled as a set with node's names; a case value is an integer or enum
+// constant, or _ for the default.
+@(private = "file")
+compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, node: ^mdata.Node, scope: expr.Scope) -> bool {
+	keys := SWITCH_KEYS
+	keys.what = fmt.tprintf("%s: type", id)
+	check_keys(c, n, keys) or_return
+	on := get(n, "switch-on")
+	if on == nil do return fail(c, .Invalid, n, "%s: a type mapping needs switch-on", id)
+	cases := get(n, "cases")
+	if cases == nil do return fail(c, .Invalid, n, "%s: switch-on needs cases", id)
+	expect_map(c, cases, "cases") or_return
+
+	sw := new(mdata.Switch, c.allocator)
+	sw.on = compile_expr(c, on, "switch-on", scope, .Int) or_return
+
+	list := make([dynamic]mdata.Switch_Case, c.allocator)
+	seen := make(map[int]^yml.Node, c.scratch)
+	default_key: ^yml.Node
+	for e in cases.entries {
+		is_default := e.key.text == "_" && e.key.style == .Plain
+		value: int
+		if is_default {
+			default_key = e.key
+		} else {
+			key := compile_expr(c, e.key, "a case", scope, .Int) or_return
+			lit, is_literal := key.variant.(mdata.Int_Literal)
+			if !is_literal do return fail(c, .Unsupported, e.key, "%s: a case must be an integer or an enum constant", id)
+			value = lit.value
+			if prev, dup := seen[value]; dup do return fail(c, .Invalid, e.key, "%s: case %v is already given (line %v, column %v)", id, value, prev.line, prev.column)
+			seen[value] = e.key
+		}
+
+		type_name := expect_scalar(c, e.value, "a case type") or_return
+		user := find_type(td, type_name)
+		if user == nil {
+			if _, _, is_primitive := primitive(type_name); is_primitive || type_name == "str" || type_name == "strz" || is_bit_type(type_name) {
+				return fail(c, .Unsupported, e.value, "%s: a case of type %s is not supported; only user types are", id, type_name)
+			}
+			return fail(c, .Invalid, e.value, "%s: unknown type %s", id, type_name)
+		}
+
+		case_node := new_node(c, node.name, node.ref_name)
+		case_node.type = .Set
+		case_node.count = mdata.Fixed_Count{1}
+		compile_fields(c, user, case_node, chain_with(c, scope.types, case_node)) or_return
+
+		if is_default {
+			sw.default = case_node
+		} else {
+			append(&list, mdata.Switch_Case{value, case_node})
+		}
+	}
+	sw.cases = list[:]
+
+	if default_key == nil && !mdata.is_single(node) {
+		return fail(c, .Unsupported, on, "%s: a repeated switch-on without a _ case is not supported", id)
+	}
+	node.switch_on = sw
+	return true
+}
+
+// The count from repeat (with repeat-expr or repeat-until), or from -peek,
+// -while-peek or -until-peek. A repeat-until count is returned without
+// its expression, which compile_attr compiles.
+@(private = "file")
+compile_count :: proc(c: ^Compiler, attr: ^yml.Node, id: string, scope: expr.Scope) -> (count: mdata.Count, ok: bool) {
 	repeat := get(attr, "repeat")
 	repeat_expr := get(attr, "repeat-expr")
+	repeat_until := get(attr, "repeat-until")
 
 	peek_key: ^yml.Node
 	for k in ([]string{"-peek", "-while-peek", "-until-peek"}) {
@@ -599,48 +791,52 @@ compile_count :: proc(c: ^Compiler, attr: ^yml.Node, id: string, node: ^mdata.No
 		if key == nil do continue
 		if peek_key != nil do return nil, fail(c, .Invalid, key, "%s: %s cannot be combined with %s", id, k, peek_key.text)
 		if repeat != nil do return nil, fail(c, .Invalid, key, "%s: %s cannot be combined with repeat", id, k)
-		if node.type != .Set do return nil, fail(c, .Unsupported, key, "%s: %s on a field that is not a user type is not supported", id, k)
 		peek_key = key
 	}
 
-	if repeat == nil {
-		if repeat_expr != nil do return nil, fail(c, .Invalid, get_key(attr, "repeat-expr"), "%s: repeat-expr needs repeat: expr", id)
-		if peek_key == nil do return mdata.Fixed_Count{1}, true
-
-		value := get(attr, peek_key.text)
-		bytes := byte_list(c, value, peek_key.text) or_return
-		if len(bytes) == 0 do return nil, fail(c, .Invalid, value, "%s: %s needs at least one byte", id, peek_key.text)
-
-		if peek_key.text == "-peek" {
-			markers := make([]mdata.Marker, len(bytes), c.allocator)
-			for b, i in bytes {
-				markers[i] = {offset = i, type = .UInt8, value = int(b), order = .Little}
-			}
-			return mdata.Marker_Count{markers}, true
+	kind := ""
+	if repeat != nil {
+		kind = expect_scalar(c, repeat, "repeat") or_return
+		switch kind {
+		case "expr", "eos", "until":
+		case:
+			return nil, fail(c, .Invalid, repeat, "%s: repeat must be expr, eos or until, not %q", id, kind)
 		}
-		if len(bytes) > 1 do return nil, fail(c, .Unsupported, value, "%s: %s with more than one byte is not supported", id, peek_key.text)
-		return mdata.Repeat_Count{type = .UInt8, value = int(bytes[0]), until = peek_key.text == "-until-peek", order = .Little}, true
 	}
+	if repeat_expr != nil && kind != "expr" do return nil, fail(c, .Invalid, get_key(attr, "repeat-expr"), "%s: repeat-expr needs repeat: expr", id)
+	if repeat_until != nil && kind != "until" do return nil, fail(c, .Invalid, get_key(attr, "repeat-until"), "%s: repeat-until needs repeat: until", id)
 
-	kind := expect_scalar(c, repeat, "repeat") or_return
 	switch kind {
+	case "eos":
+		return mdata.Eos_Count{}, true
+	case "until":
+		if repeat_until == nil do return nil, fail(c, .Invalid, get_key(attr, "repeat"), "%s: repeat: until needs repeat-until", id)
+		return mdata.Until_Count{}, true
 	case "expr":
-	case "eos", "until":
-		return nil, fail(c, .Unsupported, repeat, "%s: repeat: %s is not supported", id, kind)
-	case:
-		return nil, fail(c, .Invalid, repeat, "%s: repeat must be expr, eos or until, not %q", id, kind)
+		if repeat_expr == nil do return nil, fail(c, .Invalid, get_key(attr, "repeat"), "%s: repeat: expr needs repeat-expr", id)
+		e := compile_expr(c, repeat_expr, "repeat-expr", scope, .Int) or_return
+		if lit, is_literal := e.variant.(mdata.Int_Literal); is_literal {
+			if lit.value < 0 do return nil, fail(c, .Invalid, repeat_expr, "%s: repeat-expr is negative", id)
+			return mdata.Fixed_Count{lit.value}, true
+		}
+		return mdata.Rule_Count{expr = e}, true
 	}
-	if repeat_expr == nil do return nil, fail(c, .Invalid, get_key(attr, "repeat"), "%s: repeat: expr needs repeat-expr", id)
 
-	e := compile_expr(c, repeat_expr, "repeat-expr", scope, .Int) or_return
-	if lit, is_literal := e.variant.(mdata.Int_Literal); is_literal {
-		if lit.value < 0 do return nil, fail(c, .Invalid, repeat_expr, "%s: repeat-expr is negative", id)
-		return mdata.Fixed_Count{lit.value}, true
+	if peek_key == nil do return mdata.Fixed_Count{1}, true
+
+	value := get(attr, peek_key.text)
+	bytes := byte_list(c, value, peek_key.text) or_return
+	if len(bytes) == 0 do return nil, fail(c, .Invalid, value, "%s: %s needs at least one byte", id, peek_key.text)
+
+	if peek_key.text == "-peek" {
+		markers := make([]mdata.Marker, len(bytes), c.allocator)
+		for b, i in bytes {
+			markers[i] = {offset = i, type = .UInt8, value = int(b), order = .Little}
+		}
+		return mdata.Marker_Count{markers}, true
 	}
-	if node.type != .Set {
-		return nil, fail(c, .Unsupported, repeat_expr, "%s: a repeat-expr other than a literal is only supported on a user type", id)
-	}
-	return mdata.Rule_Count{expr = e}, true
+	if len(bytes) > 1 do return nil, fail(c, .Unsupported, value, "%s: %s with more than one byte is not supported", id, peek_key.text)
+	return mdata.Repeat_Count{type = .UInt8, value = int(bytes[0]), until = peek_key.text == "-until-peek", order = .Little}, true
 }
 
 @(private = "file")

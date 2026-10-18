@@ -11,8 +11,16 @@ import "core:mem"
 // first. Names refer to fields of the last type.
 Scope :: struct {
 	types:     []^mdata.Node,
-	in_repeat: bool,   // the expression is evaluated for each element of a repeated field, so _index is defined
-	enums:     []Enum, // the enums enum constants may name; the first with a name is used
+	in_repeat: bool,        // the expression is evaluated for each element of a repeated field, so _index is defined
+	element:   ^mdata.Node, // repeat-until: the field whose element _ is; nil elsewhere
+	enums:     []Enum,      // the enums enum constants may name; the first with a name is used
+	instance:  bool,        // a value instance's expression: it can use only the fields and value instances of the last type
+
+	// Called when an expression refers to a value instance whose expr is
+	// nil, to compile it; on failure the callback reports its own error.
+	// When nil, such a reference is an error.
+	compile_instance: proc(data: rawptr, set: ^mdata.Node, instance: ^mdata.Value_Instance) -> bool,
+	data:             rawptr,
 }
 
 // A schema's enum: its values, by name. An enum constant (name::value) is
@@ -27,14 +35,15 @@ Enum_Value :: struct {
 	value: int,
 }
 
-// Parses text and resolves it in scope. The result must have type want.
+// Parses text and resolves it in scope. The result must have type want,
+// unless want is .Unresolved.
 @(require_results)
 compile :: proc(text: string, scope: Scope, want: mdata.Expr_Type, allocator: mem.Allocator) -> (e: ^mdata.Expr, err: Error) {
 	e, err = parse(text, allocator)
 	if err.kind != .None do return nil, err
 
 	r := Resolver{scope = scope, allocator = allocator}
-	if resolve(&r, e) && e.type != want {
+	if resolve(&r, e) && want != .Unresolved && e.type != want {
 		fail(&r, .Invalid, e.offset, "expected %s, found %s", type_name(want), type_name(e.type))
 	}
 	if r.err.kind != .None do return nil, r.err
@@ -107,7 +116,7 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		return resolve_member(r, e, x)
 	case mdata.Enum_Constant:
 		return resolve_enum_constant(r, e, x)
-	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Peek:
+	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref, mdata.Peek:
 		assert(e.type != .Unresolved, "resolve: a resolved variant without a type")
 	case:
 		panic("resolve: empty expression")
@@ -167,6 +176,10 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 	types := r.scope.types
 	assert(len(types) > 0, "resolve: empty scope")
 
+	if r.scope.instance && len(name) > 0 && name[0] == '_' {
+		return fail(r, .Unsupported, e.offset, "%s in a value instance is not supported; it can use only the fields and value instances of its type", name)
+	}
+
 	switch name {
 	case "_root":
 		e.variant = mdata.Instance{root = true, node = types[0]}
@@ -182,7 +195,9 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 	case "_io":
 		return fail(r, .Unsupported, e.offset, "only _io.pos, _io.size and _io.eof are supported")
 	case "_":
-		return fail(r, .Unsupported, e.offset, "_ is only defined in repeat-until, which is not supported yet")
+		if r.scope.element == nil do return fail(r, .Invalid, e.offset, "_ is only defined in repeat-until")
+		e.type = value_type(r, e, r.scope.element, "_") or_return
+		e.variant = mdata.Repeat_Element{r.scope.element}
 	case:
 		base := new(mdata.Expr, r.allocator)
 		base^ = {type = .Struct, offset = e.offset, variant = mdata.Instance{node = types[len(types) - 1]}}
@@ -191,7 +206,8 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 	return true
 }
 
-// Makes e a reference to the field called name in the set instance base.
+// Makes e a reference to the field or value instance called name in the
+// set instance base.
 @(private = "file")
 resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: string) -> bool {
 	set := struct_node(base)
@@ -202,24 +218,48 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 			break
 		}
 	}
-	if field == nil do return fail(r, .Invalid, e.offset, "%s has no field %s", set.ref_name, name)
+	if field == nil {
+		for inst in set.instances {
+			if inst.name == name do return resolve_value_ref(r, e, base, set, inst)
+		}
+		return fail(r, .Invalid, e.offset, "%s has no field %s", set.ref_name, name)
+	}
 
 	if !mdata.is_single(field) {
+		if field.switch_on != nil do return fail(r, .Unsupported, e.offset, "%s is a switch-on field; it cannot be used in expressions", name)
 		e.type = .Array
 	} else {
-		#partial switch field.type {
-		case .Int8, .UInt8, .Int16, .UInt16, .Int32, .UInt32, .Int64, .UInt64:
-			e.type = .Int
-		case .Blob:
-			e.type = .Bytes
-		case .Set:
-			e.type = .Struct
-		case:
-			return fail(r, .Unsupported, e.offset, "%s is a %v; only integer, blob and set fields can be used in expressions", name, field.type)
-		}
+		e.type = value_type(r, e, field, name) or_return
 	}
 
 	e.variant = mdata.Field_Ref{base = base, node = field}
+	return true
+}
+
+// The type of one value of field.
+@(private = "file")
+value_type :: proc(r: ^Resolver, e: ^mdata.Expr, field: ^mdata.Node, name: string) -> (t: mdata.Expr_Type, ok: bool) {
+	#partial switch field.type {
+	case .Int8, .UInt8, .Int16, .UInt16, .Int32, .UInt32, .Int64, .UInt64:
+		return .Int, true
+	case .Blob:
+		return .Bytes, true
+	case .Set:
+		if field.switch_on != nil do return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a switch-on field; it cannot be used in expressions", name)
+		return .Struct, true
+	}
+	return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a %v; only integer, blob and set fields can be used in expressions", name, field.type)
+}
+
+@(private = "file")
+resolve_value_ref :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, set: ^mdata.Node, inst: ^mdata.Value_Instance) -> bool {
+	if inst.expr == nil {
+		if r.scope.compile_instance == nil do return fail(r, .Invalid, e.offset, "value instance %s cannot be used here", inst.name)
+		if !r.scope.compile_instance(r.scope.data, set, inst) do return fail(r, .Invalid, e.offset, "value instance %s is not valid", inst.name)
+		assert(inst.expr != nil, "resolve: compile_instance left the instance uncompiled")
+	}
+	e.variant = mdata.Value_Ref{base = base, instance = inst}
+	e.type = inst.expr.type
 	return true
 }
 
@@ -231,13 +271,15 @@ struct_node :: proc(e: ^mdata.Expr) -> ^mdata.Node {
 		return x.node
 	case mdata.Field_Ref:
 		return x.node
+	case mdata.Repeat_Element:
+		return x.node
 	}
 	panic("struct_node: not a set")
 }
 
 @(private = "file")
 resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
-	if name, is_name := m.operand.variant.(mdata.Name); is_name && name.name == "_io" {
+	if name, is_name := m.operand.variant.(mdata.Name); is_name && name.name == "_io" && !r.scope.instance {
 		switch m.name {
 		case "pos":
 			e.variant = mdata.Io_Pos{}

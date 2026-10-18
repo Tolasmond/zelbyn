@@ -103,11 +103,9 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 			}
 		}
 	case mdata.Field_Ref:
-		write(b, x.base)
-		if inst, is_instance := x.base.variant.(mdata.Instance); !is_instance || inst.root || inst.up > 0 {
-			strings.write_byte(b, '.')
-		}
-		strings.write_string(b, x.node.ref_name)
+		write_member(b, x.base, x.node.ref_name)
+	case mdata.Value_Ref:
+		write_member(b, x.base, x.instance.name)
 	case mdata.Size:
 		write(b, x.operand)
 		strings.write_string(b, ".size")
@@ -119,6 +117,8 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 		strings.write_string(b, "_io.eof")
 	case mdata.Repeat_Index:
 		strings.write_string(b, "_index")
+	case mdata.Repeat_Element:
+		strings.write_string(b, "_")
 	case mdata.Peek:
 		strings.write_string(b, "peek(")
 		strings.write_string(b, KAITAI_TYPE[x.type])
@@ -127,4 +127,14 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 		write(b, x.pos)
 		strings.write_byte(b, ')')
 	}
+}
+
+// base.name, or name alone when base is the instance being decoded.
+@(private = "file")
+write_member :: proc(b: ^strings.Builder, base: ^mdata.Expr, name: string) {
+	write(b, base)
+	if inst, is_instance := base.variant.(mdata.Instance); !is_instance || inst.root || inst.up > 0 {
+		strings.write_byte(b, '.')
+	}
+	strings.write_string(b, name)
 }

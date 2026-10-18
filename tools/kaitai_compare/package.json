@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "description": "Test-time only: the official Kaitai Struct compiler and JavaScript runtime, for compare.py.",
+  "dependencies": {
+    "kaitai-struct": "0.11.0",
+    "kaitai-struct-compiler": "0.11.0"
+  }
+}

@@ -12,17 +12,20 @@ import "core:time"
 // resulting diff before committing it.
 GOLDEN_RECORD :: #config(GOLDEN_RECORD, false)
 
+// The dumps of gif.ksy; those of the SQLite schema and its port are in
+// gif89a/.
 GOLDEN_DIR :: "tests/golden"
 
 // Bytes of context shown either side of the first difference.
 GOLDEN_CONTEXT :: 60
 
-// Dumps a sample as text and as JSON, from the SQLite schema and from its
-// .ksy port, and compares each, byte for byte, with tests/golden/<file
-// name>.tree and .json. Recording writes the SQLite schema's dumps.
+// Dumps a sample as text and as JSON from each schema, and compares each,
+// byte for byte, with <file name>.tree and .json: in tests/golden/ for
+// gif.ksy, in tests/golden/gif89a/ for the SQLite schema and its port.
+// Recording writes the dumps of gif.ksy and of the SQLite schema.
 @(private = "file")
 check_golden :: proc(t: ^testing.T, s: Sample) {
-	testing.set_fail_timeout(t, 20 * time.Second)
+	testing.set_fail_timeout(t, 30 * time.Second)
 
 	for source in Schema_Source {
 		for as_json in ([?]bool{false, true}) {
@@ -30,7 +33,8 @@ check_golden :: proc(t: ^testing.T, s: Sample) {
 			defer strings.builder_destroy(&b)
 			if !dump_sample(t, s.path, as_json, &b, source) do continue
 
-			golden_path := fmt.aprintf("%s/%s.%s", GOLDEN_DIR, filepath.base(s.path), as_json ? "json" : "tree")
+			dir := source == .Kaitai ? GOLDEN_DIR : GOLDEN_DIR + "/gif89a"
+			golden_path := fmt.aprintf("%s/%s.%s", dir, filepath.base(s.path), as_json ? "json" : "tree")
 			defer delete(golden_path)
 
 			compare_golden(t, golden_path, strings.to_string(b), source)
@@ -41,7 +45,7 @@ check_golden :: proc(t: ^testing.T, s: Sample) {
 @(private = "file")
 compare_golden :: proc(t: ^testing.T, golden_path: string, got: string, source: Schema_Source) {
 	when GOLDEN_RECORD {
-		if source != .SQLite do return
+		if source == .Ported do return
 		err := os.write_entire_file(golden_path, got)
 		testing.expectf(t, err == nil, "%s: write failed: %v", golden_path, err)
 	} else {

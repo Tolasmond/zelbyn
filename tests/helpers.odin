@@ -14,10 +14,15 @@ DB_PATH :: "data/Gif89aMetadata.sqlite3"
 // The SQLite GIF schema ported to .ksy (step 5); it gives the same dumps.
 KSY_PATH :: "formats/gif89a.ksy"
 
-// The front ends that compile a GIF89a schema.
+// gif.ksy from kaitai_struct_formats, unchanged (step 6).
+GIF_KSY_PATH :: "formats/gif.ksy"
+
+// The GIF schemas: the SQLite one and its .ksy port, which give the same
+// dumps, and gif.ksy.
 Schema_Source :: enum {
 	SQLite,
-	Ksy,
+	Ported,
+	Kaitai,
 }
 
 // Loads the GIF89a format (id 1). Fails the test and returns false on error.
@@ -27,19 +32,21 @@ load_gif :: proc(t: ^testing.T, ff: ^mdat.File_Format) -> bool {
 	return testing.expectf(t, err.kind == .None, "loading format: %v (%v, table %s): %s", err.kind, err.code, err.table, err.message)
 }
 
-// Loads formats/gif89a.ksy. Fails the test and returns false on error.
-load_gif_ksy :: proc(t: ^testing.T, ff: ^mdat.File_Format) -> bool {
-	err := ksy.read_file_format(KSY_PATH, ff)
+// Loads the .ksy schema at path. Fails the test and returns false on error.
+load_ksy :: proc(t: ^testing.T, path: string, ff: ^mdat.File_Format) -> bool {
+	err := ksy.read_file_format(path, ff)
 	defer ksy.destroy_error(&err)
-	return testing.expectf(t, err.kind == .None, "loading %s: %v at %v:%v: %s", KSY_PATH, err.kind, err.line, err.column, err.message)
+	return testing.expectf(t, err.kind == .None, "loading %s: %v at %v:%v: %s", path, err.kind, err.line, err.column, err.message)
 }
 
 load_gif_from :: proc(t: ^testing.T, source: Schema_Source, ff: ^mdat.File_Format) -> bool {
 	switch source {
 	case .SQLite:
 		return load_gif(t, ff)
-	case .Ksy:
-		return load_gif_ksy(t, ff)
+	case .Ported:
+		return load_ksy(t, KSY_PATH, ff)
+	case .Kaitai:
+		return load_ksy(t, GIF_KSY_PATH, ff)
 	}
 	return false
 }
