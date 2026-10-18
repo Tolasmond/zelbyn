@@ -29,10 +29,12 @@ Instance :: struct {
 // Instance.choice for the _ case of a switch-on field.
 DEFAULT_CASE :: -1
 
-// A decoded value tree. Every instance, array, string and blob reachable from root
-// is allocated in arena, so the tree is freed with one destroy_value_tree and
-// never references the input bytes or the schema. Do not copy a Value_Tree
-// after decoding into it: its containers refer to &arena.
+// A decoded value tree. Every instance and array reachable from root is
+// allocated in arena, so the tree is freed with one destroy_value_tree, and
+// it never references the schema. Strings and blobs are views of the input:
+// reader.read puts the input in arena too, so that tree owns it, while
+// reader.read_from_bytes borrows the caller's bytes. Do not copy a
+// Value_Tree after decoding into it: its containers refer to &arena.
 Value_Tree :: struct {
 	root:  [dynamic]Value,
 	arena: Tree_Arena,

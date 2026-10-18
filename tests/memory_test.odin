@@ -7,6 +7,7 @@ import mdat "../gnrcrdr/metadata"
 import "core:log"
 import "core:mem"
 import "core:os"
+import "core:strings"
 import "core:testing"
 import "core:time"
 
@@ -41,8 +42,9 @@ decode_uses_only_arena :: proc(t: ^testing.T) {
 	}
 }
 
+// read puts the file in the tree's arena, so it allocates nothing else.
 @(test)
-read_allocates_only_file_buffer :: proc(t: ^testing.T) {
+read_uses_only_arena :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
 	ff: mdat.File_Format
 	defer mdat.destroy_file_format(&ff)
@@ -61,9 +63,8 @@ read_allocates_only_file_buffer :: proc(t: ^testing.T) {
 	}
 
 	testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path)
-	testing.expect_value(t, len(track.allocation_map), 0)
-	testing.expect_value(t, track.current_memory_allocated, 0)
-	testing.expect_value(t, track.total_allocation_count, 1) // the file buffer, already freed
+	testing.expect_value(t, track.total_allocation_count, 0)
+	testing.expectf(t, d.tree.arena.block != nil && d.tree.arena.block.used > uint(SAMPLE_855.file_size), "the arena does not hold the file")
 }
 
 @(test)
@@ -108,8 +109,55 @@ decode_error_allocates_only_path :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(track.allocation_map), 0)
 }
 
+// The GIF that the tests below decode: a comment "abc", then the trailer.
+@(private = "file")
+comment_gif :: proc() -> [dynamic]byte {
+	return with_header({0x21, 0xFE, 0x03, 'a', 'b', 'c', 0x00, 0x3B})
+}
+
+// The slots of the fields of comment_gif that check_comment_gif looks at,
+// found while the schema exists.
+@(private = "file")
+Comment_Slots :: struct {
+	signature, version, blocks: int,
+	path:                       [5]int, // blocks, extensions, comment, its data, the bytes
+}
+
+@(private = "file")
+comment_slots :: proc(ff: ^mdat.File_Format) -> (s: Comment_Slots) {
+	s.signature, s.version, s.blocks = slot_by_name(ff.root, "signature"), slot_by_name(ff.root, "version"), slot_by_name(ff.root, "blocks")
+	path := [len(s.path)]string{"blocks", "extensions", "comment_extension", "comment_data", "data_sub_block_values"}
+	set := ff.root
+	for name, i in path {
+		s.path[i] = slot_by_name(set, name)
+		if i + 1 < len(path) do set = set.children[child_index(set, name)]
+	}
+	return
+}
+
+// Checks the tree of comment_gif without the schema; returns its blob.
+@(private = "file")
+check_comment_gif :: proc(t: ^testing.T, d: ^Decoded, s: Comment_Slots) -> (blob: []byte) {
+	if !testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path) do return
+
+	g := d.tree.root[0].(^fld.Instance)
+	testing.expect_value(t, g.slots[s.signature][0].(string), "GIF")
+	testing.expect_value(t, g.slots[s.version][0].(string), "89a")
+
+	if !testing.expect_value(t, len(g.slots[s.blocks]), 1) do return
+	instance := g
+	for i in 0 ..< len(s.path) - 1 {
+		instance = instance.slots[s.path[i]][0].(^fld.Instance)
+	}
+	blob = instance.slots[s.path[len(s.path) - 1]][0].([]byte)
+	testing.expect_value(t, string(blob), "abc")
+	return
+}
+
+// A tree from read_from_bytes needs no schema, and its blobs are views of
+// the bytes it borrows.
 @(test)
-value_tree_outlives_schema_and_input :: proc(t: ^testing.T) {
+value_tree_outlives_schema :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
 	ff: mdat.File_Format
 	if !load_gif(t, &ff) {
@@ -117,7 +165,8 @@ value_tree_outlives_schema_and_input :: proc(t: ^testing.T) {
 		return
 	}
 
-	data := with_header({0x21, 0xFE, 0x03, 'a', 'b', 'c', 0x00, 0x3B})
+	data := comment_gif()
+	defer delete(data)
 
 	d: Decoded
 	defer destroy_decoded(&d)
@@ -130,36 +179,64 @@ value_tree_outlives_schema_and_input :: proc(t: ^testing.T) {
 		context.logger = log.nil_logger()
 		decode_bytes(&ff, data[:], &d)
 	}
+	testing.expect_value(t, track.total_allocation_count, 0)
 
-	// the slots of the fields looked at below, found while the schema exists
-	signature, version, blocks := slot_by_name(ff.root, "signature"), slot_by_name(ff.root, "version"), slot_by_name(ff.root, "blocks")
-	path := [?]string{"blocks", "extensions", "comment_extension", "comment_data", "data_sub_block_values"}
-	slots: [len(path)]int
-	set := ff.root
-	for name, i in path {
-		slots[i] = slot_by_name(set, name)
-		if i + 1 < len(path) do set = set.children[child_index(set, name)]
-	}
-
-	// clobber and free the input and the schema before looking at the tree
-	for &b in data do b = 0xAA
-	delete(data)
+	slots := comment_slots(&ff)
 	mdat.destroy_file_format(&ff)
 
-	testing.expect_value(t, track.total_allocation_count, 0)
-	if !testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path) do return
+	blob := check_comment_gif(t, &d, slots)
+	start, end := uintptr(raw_data(data)), uintptr(raw_data(data)) + uintptr(len(data))
+	testing.expect(t, len(blob) > 0 && uintptr(raw_data(blob)) >= start && uintptr(raw_data(blob)) + uintptr(len(blob)) <= end, "the blob is not a view of the input")
+}
 
-	g := d.tree.root[0].(^fld.Instance)
-	testing.expect_value(t, g.slots[signature][0].(string), "GIF")
-	testing.expect_value(t, g.slots[version][0].(string), "89a")
-
-	if !testing.expect_value(t, len(g.slots[blocks]), 1) do return
-	instance := g
-	for slot in slots[:len(slots) - 1] {
-		instance = instance.slots[slot][0].(^fld.Instance)
+// A tree from read owns its input: it needs neither the schema nor the
+// file, which is deleted before the tree is looked at.
+@(test)
+value_tree_from_read_outlives_file :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdat.File_Format
+	if !load_gif(t, &ff) {
+		mdat.destroy_file_format(&ff)
+		return
 	}
-	blob := instance.slots[slots[len(slots) - 1]][0].([]byte)
-	testing.expect_value(t, string(blob), "abc")
+
+	data := comment_gif()
+	f, create_err := os.create_temp_file("", "gnrcrdr_test_*.gif")
+	if !testing.expectf(t, create_err == nil, "creating a temporary file: %v", create_err) {
+		delete(data)
+		mdat.destroy_file_format(&ff)
+		return
+	}
+	path := strings.clone(os.name(f))
+	defer delete(path)
+	_, write_err := os.write(f, data[:])
+	os.close(f)
+	delete(data)
+	if !testing.expectf(t, write_err == nil, "writing %s: %v", path, write_err) {
+		_ = os.remove(path)
+		mdat.destroy_file_format(&ff)
+		return
+	}
+
+	d: Decoded
+	defer destroy_decoded(&d)
+
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	{
+		context.allocator = mem.tracking_allocator(&track)
+		context.logger = log.nil_logger()
+		decode_file(&ff, path, &d)
+	}
+	testing.expect_value(t, track.total_allocation_count, 0)
+
+	slots := comment_slots(&ff)
+	mdat.destroy_file_format(&ff)
+	remove_err := os.remove(path)
+	testing.expectf(t, remove_err == nil, "removing %s: %v", path, remove_err)
+
+	check_comment_gif(t, &d, slots)
 }
 
 // The index in set's children of the child whose .ksy id is name.
