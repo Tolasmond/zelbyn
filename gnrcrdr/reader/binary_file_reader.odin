@@ -3,7 +3,6 @@ package reader
 import dat "../data"
 import fld "../field"
 import mdata "../metadata"
-import "core:mem/virtual"
 import "core:os"
 import "core:slice"
 
@@ -20,8 +19,11 @@ read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree) ->
 // Decodes data into tree, which must be zero or destroyed. Strings and blobs are copied into the tree's arena, so the tree references neither data nor the schema.
 @(require_results)
 read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
-	assert(tree.arena.curr_block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
-	allocator := virtual.arena_allocator(&tree.arena)
+	assert(tree.arena.block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
+	// one block, reserved and committed as it is used, holds every sample's
+	// tree (at most about 6 times its input)
+	fld.tree_arena_init(&tree.arena, max(16 * uint(len(data)), fld.TREE_ARENA_BLOCK_SIZE))
+	allocator := fld.tree_arena_allocator(&tree.arena)
 	tree.root = make([dynamic]fld.Value, allocator)
 
 	d := Decoder{allocator = allocator}
@@ -83,6 +85,12 @@ read_values :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, instance: ^map[int
 		}
 	}
 
+	// a known count is allocated once: appending to an empty array would
+	// reserve room for 8 values, and grow by copying
+	reserve(values, len(values) + count)
+	for bit in node.bits {
+		reserve(&instance[bit.id], count)
+	}
 	for i in 0 ..< count {
 		read_element(d, values, instance, node, i) or_return
 	}

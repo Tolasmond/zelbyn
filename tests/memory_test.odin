@@ -37,7 +37,7 @@ decode_uses_only_arena :: proc(t: ^testing.T) {
 		testing.expectf(t, d.err.kind == .None, "%s: %v at 0x%08X in %s", s.path, d.err.kind, d.err.offset, d.err.path)
 		testing.expectf(t, d.consumed == s.consumed, "%s: consumed %v, want %v", s.path, d.consumed, s.consumed)
 		testing.expectf(t, track.total_allocation_count == 0, "%s: %v heap allocations, want 0", s.path, track.total_allocation_count)
-		testing.expectf(t, d.tree.arena.total_used > 0, "%s: arena unused", s.path)
+		testing.expectf(t, d.tree.arena.block != nil && d.tree.arena.block.used > 0, "%s: arena unused", s.path)
 	}
 }
 
@@ -184,7 +184,7 @@ value_tree_reuse_after_destroy :: proc(t: ^testing.T) {
 
 		fld.destroy_value_tree(&d.tree)
 		fld.destroy_value_tree(&d.tree)
-		reset_ok = d.tree.root == nil && d.tree.arena.curr_block == nil
+		reset_ok = d.tree.root == nil && d.tree.arena == {}
 
 		decode_bytes(&ff, data[:], &d)
 		second_kind = d.err.kind

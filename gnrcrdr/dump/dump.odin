@@ -170,7 +170,7 @@ write_json_scalar :: proc(w: io.Writer, v: fld.Value) -> io.Error {
 		return write_json_string(w, x)
 	case []byte:
 		io.write_byte(w, '"') or_return
-		for b in x do write_hex_byte(w, b) or_return
+		write_hex(w, x) or_return
 		io.write_byte(w, '"') or_return
 		return .None
 	}
@@ -178,8 +178,41 @@ write_json_scalar :: proc(w: io.Writer, v: fld.Value) -> io.Error {
 	return write_value(w, v)
 }
 
+// Writes bytes as lowercase hex, a chunk at a time: one write per byte
+// costs more than encoding.
+@(private = "file", require_results)
+write_hex :: proc(w: io.Writer, bytes: []byte) -> io.Error {
+	digits := "0123456789abcdef"
+	buf: [1024]byte
+	for rest := bytes; len(rest) > 0; {
+		chunk := rest[:min(len(rest), len(buf) / 2)]
+		for b, i in chunk {
+			buf[2 * i] = digits[b >> 4]
+			buf[2 * i + 1] = digits[b & 0xf]
+		}
+		io.write(w, buf[:2 * len(chunk)]) or_return
+		rest = rest[len(chunk):]
+	}
+	return .None
+}
+
 @(private = "file", require_results)
 write_json_string :: proc(w: io.Writer, s: string) -> io.Error {
+	// printable ASCII other than " and \ needs no escape, so it is written
+	// as it is, as json.marshal would write it
+	plain := true
+	for i in 0 ..< len(s) {
+		if s[i] < 0x20 || s[i] > 0x7e || s[i] == '"' || s[i] == '\\' {
+			plain = false
+			break
+		}
+	}
+	if plain {
+		io.write_byte(w, '"') or_return
+		io.write_string(w, s) or_return
+		return io.write_byte(w, '"')
+	}
+
 	opt: json.Marshal_Options
 	switch e in json.marshal_to_writer(w, s, &opt) {
 	case io.Error:
