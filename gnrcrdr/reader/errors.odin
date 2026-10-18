@@ -24,7 +24,7 @@ Decoder :: struct {
 	base:      int,        // the offset in the input of r.data[0]
 	allocator: mem.Allocator, // the value tree's arena; also holds path
 	path:      [dynamic]Path_Segment,
-	frames:    [dynamic]^map[int][dynamic]fld.Value, // the set instances being decoded, outermost first; also in allocator
+	frames:    [dynamic]^fld.Instance, // the set instances being decoded, outermost first; also in allocator
 	err:       Parse_Error,
 }
 

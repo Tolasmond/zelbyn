@@ -32,10 +32,10 @@ minimal_valid :: proc(t: ^testing.T) {
 
 	if !testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path) do return
 	testing.expect_value(t, d.consumed, 14)
-	g := set_of(d.tree.root[0])
-	testing.expect_value(t, len(g[5017]), 0)
-	testing.expect_value(t, len(g[5013]), 0)
-	testing.expect_value(t, g[5068][0].(u8), 59)
+	g := root_instance(&ff, &d)
+	testing.expect_value(t, len(field_values(g, 5017)), 0)
+	testing.expect_value(t, len(field_values(g, 5013)), 0)
+	testing.expect_value(t, field_values(g, 5068)[0].(u8), 59)
 }
 
 // Regression test for B1: a comment extension followed by the trailer as
@@ -57,14 +57,14 @@ comment_then_trailer_at_eof :: proc(t: ^testing.T) {
 	if !testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path) do return
 	testing.expect_value(t, d.consumed, 21)
 
-	g := set_of(d.tree.root[0])
-	if !testing.expect_value(t, len(g[5017]), 1) do return
+	g := root_instance(&ff, &d)
+	if !testing.expect_value(t, len(field_values(g, 5017)), 1) do return
 
-	block := set_of(g[5017][0])
-	extension := set_of(block[5018][0])
-	comment := set_of(extension[5030][0])
-	comment_data := set_of(comment[5032][0])
-	blob := comment_data[5052][0].([]byte)
+	block := field_instance(g, 5017)
+	extension := field_instance(block, 5018)
+	comment := field_instance(extension, 5030)
+	comment_data := field_instance(comment, 5032)
+	blob := field_values(comment_data, 5052)[0].([]byte)
 	testing.expect_value(t, string(blob), "abc")
 }
 

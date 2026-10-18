@@ -44,17 +44,20 @@ check_sample :: proc(t: ^testing.T, s: Sample) {
 	if !testing.expectf(t, d.err.kind == .None, "%s: %v at 0x%08X in %s", s.path, d.err.kind, d.err.offset, d.err.path) do return
 	testing.expectf(t, d.consumed == s.consumed, "%s: consumed %v, want %v", s.path, d.consumed, s.consumed)
 
-	g := set_of(d.tree.root[0])
-	lsd := set_of(g[5003][0])
-	testing.expectf(t, lsd[5004][0].(u16) == s.width, "%s: width %v, want %v", s.path, lsd[5004][0], s.width)
-	testing.expectf(t, lsd[5005][0].(u16) == s.height, "%s: height %v, want %v", s.path, lsd[5005][0], s.height)
-	testing.expectf(t, len(g[5013]) == s.gct_len, "%s: %v GCT entries, want %v", s.path, len(g[5013]), s.gct_len)
-	testing.expectf(t, len(g[5017]) == s.blocks, "%s: %v blocks, want %v", s.path, len(g[5017]), s.blocks)
-	if len(g[5013]) > 0 {
-		red := set_of(g[5013][0])[5014][0].(u8)
+	g := root_instance(&ff, &d)
+	lsd := field_instance(g, 5003)
+	width, height := field_values(lsd, 5004)[0], field_values(lsd, 5005)[0]
+	testing.expectf(t, width.(u16) == s.width, "%s: width %v, want %v", s.path, width, s.width)
+	testing.expectf(t, height.(u16) == s.height, "%s: height %v, want %v", s.path, height, s.height)
+	gct, blocks := field_values(g, 5013), field_values(g, 5017)
+	testing.expectf(t, len(gct) == s.gct_len, "%s: %v GCT entries, want %v", s.path, len(gct), s.gct_len)
+	testing.expectf(t, len(blocks) == s.blocks, "%s: %v blocks, want %v", s.path, len(blocks), s.blocks)
+	if len(gct) > 0 {
+		red := field_values(field_instance(g, 5013), 5014)[0].(u8)
 		testing.expectf(t, red == s.first_red, "%s: first GCT red %v, want %v", s.path, red, s.first_red)
 	}
-	testing.expectf(t, g[5068][0].(u8) == s.trailer, "%s: trailer %v, want %v", s.path, g[5068][0], s.trailer)
+	trailer := field_values(g, 5068)[0]
+	testing.expectf(t, trailer.(u8) == s.trailer, "%s: trailer %v, want %v", s.path, trailer, s.trailer)
 }
 
 @(test)
@@ -71,14 +74,14 @@ decode_855 :: proc(t: ^testing.T) {
 	defer destroy_decoded(&d)
 	if d.err.kind != .None do return
 
-	g := set_of(d.tree.root[0])
-	testing.expect_value(t, g[5001][0].(string), "GIF")
-	testing.expect_value(t, g[5002][0].(string), "89a")
+	g := root_instance(&ff, &d)
+	testing.expect_value(t, field_values(g, 5001)[0].(string), "GIF")
+	testing.expect_value(t, field_values(g, 5002)[0].(string), "89a")
 
-	first := set_of(g[5013][0])
-	testing.expect_value(t, first[5014][0].(u8), 252)
-	testing.expect_value(t, first[5015][0].(u8), 243)
-	testing.expect_value(t, first[5016][0].(u8), 233)
+	first := field_instance(g, 5013)
+	testing.expect_value(t, field_values(first, 5014)[0].(u8), 252)
+	testing.expect_value(t, field_values(first, 5015)[0].(u8), 243)
+	testing.expect_value(t, field_values(first, 5016)[0].(u8), 233)
 }
 
 @(test)

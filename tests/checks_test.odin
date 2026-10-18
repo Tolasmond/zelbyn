@@ -32,10 +32,10 @@ decode_byte_order :: proc(t: ^testing.T) {
 	if !testing.expectf(t, d.err.kind == .None, "%v at %v (%s)", d.err.kind, d.err.offset, d.err.path) do return
 	testing.expect_value(t, d.consumed, 6)
 
-	r := set_of(d.tree.root[0])
-	testing.expect_value(t, r[2][0].(u16), 2)
-	testing.expect_value(t, r[3][0].(u16), 0x1234)
-	testing.expect_value(t, len(r[4][0].([]byte)), 2)
+	r := root_instance(&ff, &d)
+	testing.expect_value(t, field_values(r, 2)[0].(u16), 2)
+	testing.expect_value(t, field_values(r, 3)[0].(u16), 0x1234)
+	testing.expect_value(t, len(field_values(r, 4)[0].([]byte)), 2)
 	testing.expect_value(t, expr.to_string(data.length.(mdat.Rule_Length).expr, context.temp_allocator), "peek(u2be, 0)")
 }
 
@@ -134,7 +134,7 @@ decode_bit_fields :: proc(t: ^testing.T) {
 	decode_bytes(&ff, BITS_INPUT, &d)
 	if !testing.expectf(t, d.err.kind == .None, "%v at %v (%s)", d.err.kind, d.err.offset, d.err.path) do return
 
-	r := set_of(d.tree.root[0])
+	r := root_instance(&ff, &d)
 	Want :: struct {
 		id:     int,
 		values: []fld.Value,
@@ -146,7 +146,7 @@ decode_bit_fields :: proc(t: ^testing.T) {
 		{6, {u8(0xf)}},
 		{7, {u64(0xf123_4567_89ab_cdef)}},
 	}) {
-		got := r[w.id]
+		got := field_values(r, w.id)
 		if !testing.expectf(t, len(got) == len(w.values), "field %v: %v values, want %v", w.id, len(got), len(w.values)) do continue
 		for v, i in got {
 			testing.expectf(t, variant_equal(v, w.values[i]), "field %v[%v] = %v (%T), want %v (%T)", w.id, i, v, v, w.values[i], w.values[i])

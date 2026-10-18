@@ -66,7 +66,7 @@ write_value :: proc(w: io.Writer, v: fld.Value) -> io.Error {
 			write_hex_byte(w, b) or_return
 		}
 		if len(x) > BLOB_PREVIEW do io.write_string(w, " ...") or_return
-	case map[int][dynamic]fld.Value:
+	case ^fld.Instance:
 		return .Unsupported
 	case:
 		return .Unsupported
@@ -90,12 +90,14 @@ write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set
 		strings.write_byte(path, ']')
 
 		if set != nil {
-			set_map := v.(map[int][dynamic]fld.Value)
-			for child in children_of(set, set_map) {
-				write_text_array(w, path, child.name, set_of(child), set_map[child.id][:]) or_return
-				for bit in child.bits {
-					write_text_array(w, path, bit.name, nil, set_map[bit.id][:]) or_return
+			instance := v.(^fld.Instance)
+			slot := 0
+			for child in children_of(set, instance) {
+				write_text_array(w, path, child.name, set_of(child), instance.slots[slot][:]) or_return
+				for bit, b in child.bits {
+					write_text_array(w, path, bit.name, nil, instance.slots[slot + 1 + b][:]) or_return
 				}
+				slot += 1 + len(child.bits)
 			}
 		} else {
 			io.write_string(w, strings.to_string(path^)) or_return
@@ -114,7 +116,7 @@ write_json_array :: proc(w: io.Writer, set: ^mdat.Node, values: []fld.Value) -> 
 	for v, i in values {
 		if i > 0 do io.write_byte(w, ',') or_return
 		if set != nil {
-			write_json_object(w, set, v.(map[int][dynamic]fld.Value)) or_return
+			write_json_object(w, set, v.(^fld.Instance)) or_return
 		} else {
 			write_json_scalar(w, v) or_return
 		}
@@ -124,15 +126,17 @@ write_json_array :: proc(w: io.Writer, set: ^mdat.Node, values: []fld.Value) -> 
 }
 
 @(private = "file", require_results)
-write_json_object :: proc(w: io.Writer, node: ^mdat.Node, set_map: map[int][dynamic]fld.Value) -> io.Error {
+write_json_object :: proc(w: io.Writer, node: ^mdat.Node, instance: ^fld.Instance) -> io.Error {
 	io.write_byte(w, '{') or_return
-	for child, i in children_of(node, set_map) {
+	slot := 0
+	for child, i in children_of(node, instance) {
 		if i > 0 do io.write_byte(w, ',') or_return
-		write_json_field(w, child.name, set_of(child), set_map[child.id][:]) or_return
-		for bit in child.bits {
+		write_json_field(w, child.name, set_of(child), instance.slots[slot][:]) or_return
+		for bit, b in child.bits {
 			io.write_byte(w, ',') or_return
-			write_json_field(w, bit.name, nil, set_map[bit.id][:]) or_return
+			write_json_field(w, bit.name, nil, instance.slots[slot + 1 + b][:]) or_return
 		}
+		slot += 1 + len(child.bits)
 	}
 	io.write_byte(w, '}') or_return
 	return .None
@@ -145,12 +149,12 @@ write_json_field :: proc(w: io.Writer, name: string, set: ^mdat.Node, values: []
 	return write_json_array(w, set, values)
 }
 
-// The fields of set_map, an instance of set: for a switch-on field, those
-// of the case it was read as.
+// The fields of instance, an instance of set: for a switch-on field, those
+// of the case it was read as. Their values are in instance's slots, in
+// order, each followed by its bit fields'.
 @(private = "file")
-children_of :: proc(set: ^mdat.Node, set_map: map[int][dynamic]fld.Value) -> []^mdat.Node {
-	s := mdat.instance_set(set, set_map)
-	return s == nil ? nil : s.children
+children_of :: proc(set: ^mdat.Node, instance: ^fld.Instance) -> []^mdat.Node {
+	return mdat.instance_set(set, instance).children
 }
 
 // node when it is a set, else nil.

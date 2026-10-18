@@ -121,12 +121,13 @@ Instance :: struct {
 	node: ^Node,
 }
 
-// The values of field node (whose id is node.id) in the instance base. A
+// The values of field node in the instance base, from its slot there. A
 // field read once gives its value (type Int, Bytes or Struct), any other
 // field all of its values (Array).
 Field_Ref :: struct {
 	base: ^Expr,
 	node: ^Node,
+	slot: int,
 }
 
 // The number of elements of an Array, or of bytes of Bytes.
