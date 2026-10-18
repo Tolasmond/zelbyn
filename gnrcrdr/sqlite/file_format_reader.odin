@@ -78,7 +78,7 @@ load :: proc(db: ^sql.sqlite3, format_id: int, file_format: ^mdata.File_Format, 
 		return query_error(db, rc, "Packed")
 	}
 
-	if rc := read_field(db, metadata.packed_records[:], &metadata.data_type_map, &metadata.field_metadata_map, allocator); rc != .OK {
+	if rc := read_field(db, metadata.packed_records[:], &metadata.data_type_map, &metadata.field_map, &metadata.field_metadata_map, allocator); rc != .OK {
 		return query_error(db, rc, "Field")
 	}
 
@@ -105,7 +105,9 @@ load :: proc(db: ^sql.sqlite3, format_id: int, file_format: ^mdata.File_Format, 
 
 	file_format.root_metadata_node.metadata = root
 
-	return read_children(&file_format.root_metadata_node, metadata, allocator)
+	if err := read_children(&file_format.root_metadata_node, metadata, allocator); err.kind != .None do return err
+
+	return compile(metadata, file_format)
 }
 
 @(private = "file")

@@ -7,6 +7,8 @@ import "core:mem/virtual"
 // per-record destroy procedures. Do not copy a File_Format after loading:
 // its maps, arrays and tree nodes refer to &arena and to &root_metadata_node.
 File_Format :: struct {
+	name: string,
+	root: ^Node, // the compiled plan
 	root_metadata_node: Field_Metadata_Tree_Node,
 	metadata: Field_Metadata_Provider,
 	arena: virtual.Arena,
