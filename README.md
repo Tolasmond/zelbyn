@@ -139,6 +139,16 @@ odin test tests -define:GOLDEN_RECORD=true
 git diff --stat tests/golden
 ```
 
+### Benchmark
+
+`tools/bench` measures decoding in process: for each sample, the size of the decoded tree and the median time to decode it, and to decode it and write the JSON dump. Build it with `-o:speed`:
+
+```
+odin run tools/bench -o:speed
+```
+
+It uses `formats/gif.ksy` unless given another schema (`odin run tools/bench -o:speed -- formats/gif89a.ksy`). Run it before and after a change meant to make decoding faster or the tree smaller, and give both figures in the commit message.
+
 ### Kaitai runtime check
 
 `tools/kaitai_compare/compare.py` decodes files with a `.ksy` schema both in gnrcrdr and with the official Kaitai Struct compiler and JavaScript runtime, and compares the results value by value. It needs Node.js and PyYAML, and the compiler and runtime, pinned in `tools/kaitai_compare/package.json`:
