@@ -2,11 +2,11 @@ package dump
 
 import fld "../field"
 import mdat "../metadata"
-import "core:encoding/json"
 import "core:fmt"
 import "core:io"
 import "core:math"
 import "core:strings"
+import "core:unicode/utf8"
 
 // Number of leading bytes write_value shows for a blob.
 BLOB_PREVIEW :: 16
@@ -200,10 +200,14 @@ write_hex :: proc(w: io.Writer, bytes: []byte) -> io.Error {
 	return .None
 }
 
+// Writes s as a JSON string, escaping characters as json.marshal does. A
+// byte that is not part of valid UTF-8 is written \u00NN, the character of
+// the same value (json.marshal writes \xNN, which is not JSON), so the
+// output is always valid JSON.
 @(private = "file", require_results)
 write_json_string :: proc(w: io.Writer, s: string) -> io.Error {
 	// printable ASCII other than " and \ needs no escape, so it is written
-	// as it is, as json.marshal would write it
+	// as it is
 	plain := true
 	for i in 0 ..< len(s) {
 		if s[i] < 0x20 || s[i] > 0x7e || s[i] == '"' || s[i] == '\\' {
@@ -217,14 +221,18 @@ write_json_string :: proc(w: io.Writer, s: string) -> io.Error {
 		return io.write_byte(w, '"')
 	}
 
-	opt: json.Marshal_Options
-	switch e in json.marshal_to_writer(w, s, &opt) {
-	case io.Error:
-		return e
-	case json.Marshal_Data_Error:
-		return .Unknown // a string always marshals
+	io.write_byte(w, '"') or_return
+	for rest := s; len(rest) > 0; {
+		r, width := utf8.decode_rune_in_string(rest)
+		if r == utf8.RUNE_ERROR && width == 1 {
+			io.write_string(w, `\u00`) or_return
+			write_hex_byte(w, rest[0]) or_return
+		} else {
+			io.write_escaped_rune(w, r, '"', for_json = true) or_return
+		}
+		rest = rest[width:]
 	}
-	return .None
+	return io.write_byte(w, '"')
 }
 
 @(private = "file", require_results)

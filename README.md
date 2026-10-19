@@ -56,7 +56,7 @@ GIF89a[0].Logical Screen Descriptor[0].Global Color Table Flag[0] = 1
 {"gif":[{"hdr":[{"magic":["474946"],"version":["89a"]}],"logical_screen_descriptor":[{"screen_width":[500],...
 ```
 
-Blobs are written in full as lowercase hex strings. NaN and infinite floats are written as `null`.
+Blobs are written in full as lowercase hex strings. Strings are escaped as JSON requires, and each byte that is not part of valid UTF-8 is written `\u00NN`, the character of the same value, so the output is always valid JSON; a JSON reader cannot tell such a byte from that character. NaN and infinite floats are written as `null`.
 
 A field that was not read is an empty array.
 

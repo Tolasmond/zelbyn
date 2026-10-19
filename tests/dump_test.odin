@@ -2,6 +2,7 @@ package tests
 
 import dmp "../gnrcrdr/dump"
 import fld "../gnrcrdr/field"
+import ksy "../gnrcrdr/ksy"
 import mdat "../gnrcrdr/metadata"
 import "core:encoding/json"
 import "core:strings"
@@ -128,4 +129,46 @@ check_json_parses :: proc(t: ^testing.T, path: string, text: string) {
 	v, err := json.parse_string(text, .JSON)
 	defer json.destroy_value(v)
 	testing.expectf(t, err == .None, "%s: JSON does not parse: %v", path, err)
+}
+
+// A string is written as valid JSON whatever its bytes: escapes as
+// json.marshal writes them, and \u00NN for each byte that is not part of
+// valid UTF-8 (a lone byte, a truncated sequence, an encoded surrogate, an
+// overlong encoding).
+@(test)
+dump_json_string_bytes :: proc(t: ^testing.T) {
+	input := []byte {
+		'a', '"', '\\', '\n', 0x01, 0x7f,
+		0xc3, 0xa9, // é
+		0xc2, 0xad, // U+00AD, the soft hyphen
+		0xf0, 0x9f, 0x98, 0x80, // U+1F600
+		0xff,
+		0xc3, 'b',
+		0xed, 0xa0, 0x80,
+		0xc0, 0xaf,
+	}
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	src := "meta:\n  id: t\nseq:\n  - id: s\n    type: str\n    size: 22\n    encoding: UTF-8\n"
+	err := ksy.compile(src, &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "compile: %v: %s", err.kind, err.message) do return
+
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, input, &d)
+	if !testing.expectf(t, d.err.kind == .None, "decode: %v at %v in %s", d.err.kind, d.err.offset, d.err.path) do return
+
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+	testing.expect(t, dmp.write_json(strings.to_writer(&b), &ff, &d.tree) == .None, "write_json failed")
+	text := strings.to_string(b)
+	testing.expect_value(t, text, `{"t":[{"s":["a\"\\\n\u0001\u007fé\u00ad\ud83d\ude00\u00ff\u00c3b\u00ed\u00a0\u0080\u00c0\u00af"]}]}` + "\n")
+
+	// a JSON reader sees each such byte as the character of the same value
+	v, perr := json.parse_string(text, .JSON)
+	defer json.destroy_value(v)
+	if !testing.expectf(t, perr == .None, "JSON does not parse: %v", perr) do return
+	got := v.(json.Object)["t"].(json.Array)[0].(json.Object)["s"].(json.Array)[0].(json.String)
+	testing.expect_value(t, got, "a\"\\\n\x01\x7f\u00e9\u00ad\U0001f600\u00ff\u00c3b\u00ed\u00a0\u0080\u00c0\u00af")
 }
