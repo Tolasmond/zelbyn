@@ -21,19 +21,19 @@ import "core:strings"
 //   - meta: id, endian, bit-endian, encoding, ks-version (checked against
 //     KS_VERSION), and title, application, file-extension, xref, license
 //     and tags (ignored); seq, types, instances, enums and doc, doc-ref
-//   - attributes: id, type, size, size-eos, contents, if, enum, valid,
-//     repeat (expr, eos, until) with repeat-expr and repeat-until, encoding,
-//     doc, doc-ref
-//   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), str with
-//     size or size-eos, byte arrays (size or size-eos without type), user
-//     types (with size or size-eos, read from a substream), and switch-on
-//     whose cases are user types
+//   - attributes: id, type, size, size-eos, terminator with consume, include
+//     and eos-error, pad-right, contents, if, enum, valid, repeat (expr,
+//     eos, until) with repeat-expr and repeat-until, encoding, doc, doc-ref
+//   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), str and
+//     byte arrays (no type) with size, size-eos or terminator, strz, user
+//     types (with size, size-eos or terminator, read from a substream), and
+//     switch-on whose cases are user types
 //   - value instances
 //   - enums whose values are names (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
-// Not supported yet (Unsupported): terminator, strz, bit types
-// (b1-b64), instances other than value instances, size on a switch-on
+// Not supported yet (Unsupported): bit types (b1-b64), instances other
+// than value instances, size, size-eos and terminator on a switch-on
 // field, and any valid constant that is not an integer or string literal.
 
 Error_Kind :: enum {
@@ -163,6 +163,15 @@ get_key :: proc(m: ^yml.Node, key: string) -> ^yml.Node {
 	return nil
 }
 
+// The first key of the mapping m that is one of keys; nil when none is.
+@(private = "file")
+first_key :: proc(m: ^yml.Node, keys: []string) -> ^yml.Node {
+	for e in m.entries {
+		if slice.contains(keys, e.key.text) do return e.key
+	}
+	return nil
+}
+
 @(private = "file")
 expect_map :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> bool {
 	if n.kind != .Map do return fail(c, .Invalid, n, "%s must be a mapping", what)
@@ -226,10 +235,14 @@ TOP_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "do
 TYPE_UNSUPPORTED :: []string{"params", "to-string"}
 
 @(private = "file")
-ATTR_ALLOWED :: []string{"id", "type", "size", "size-eos", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"}
+ATTR_ALLOWED :: []string{"id", "type", "size", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"}
 
 @(private = "file")
-ATTR_UNSUPPORTED :: []string{"terminator", "consume", "include", "eos-error", "pad-right", "process", "io", "pos", "value", "parent"}
+ATTR_UNSUPPORTED :: []string{"process", "io", "pos", "value", "parent"}
+
+// The keys of an attribute that say where the bytes of each element end.
+@(private = "file")
+BYTES_KEYS :: []string{"size", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right"}
 
 // The keys of an instance; only value instances are supported, so the keys
 // of the others are Unsupported.
@@ -649,32 +662,33 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 	user: ^Type_Def
 	switch_node: ^yml.Node
 
+	strz := false
+
 	// size-eos: false is the same as no size-eos
 	size_eos := false
 	if n := get(attr, "size-eos"); n != nil {
 		size_eos = boolean(c, n, "size-eos") or_return
 	}
-	size_eos_key := size_eos ? get_key(attr, "size-eos") : nil
-	if size != nil && size_eos do return nil, fail(c, .Invalid, size_eos_key, "%s: size and size-eos cannot both be given", id)
-	// the key of size or size-eos, whichever is given; nil when neither is
-	size_key := size != nil ? get_key(attr, "size") : size_eos_key
+	if size != nil && size_eos do return nil, fail(c, .Invalid, get_key(attr, "size-eos"), "%s: size and size-eos cannot both be given", id)
+	ends := size != nil || size_eos || get(attr, "terminator") != nil
+	bytes_key := first_key(attr, BYTES_KEYS)
 
 	switch {
 	case contents != nil:
 		if type_node != nil do return nil, fail(c, .Invalid, get_key(attr, "type"), "%s: contents cannot have a type", id)
-		if size_key != nil do return nil, fail(c, .Invalid, size_key, "%s: contents cannot have a %s", id, size_key.text)
+		if bytes_key != nil do return nil, fail(c, .Invalid, bytes_key, "%s: contents cannot have %s", id, bytes_key.text)
 		if valid != nil do return nil, fail(c, .Invalid, get_key(attr, "valid"), "%s: contents already checks the value; it cannot have valid", id)
 		bytes := byte_list(c, contents, "contents") or_return
 		node.type = .Blob
 		node.length = mdata.Fixed_Length{len(bytes)}
 		node.valid = mdata.Valid_Eq{bytes}
 	case type_node == nil:
-		if size_key == nil do return nil, fail(c, .Invalid, attr, "%s needs a type, a size, size-eos or contents", id)
+		if !ends do return nil, fail(c, .Invalid, attr, "%s needs a type, size, size-eos, terminator or contents", id)
 		node.type = .Blob
 	case type_node.kind == .Map:
 		node.type = .Set
 		switch_node = type_node
-		if size_key != nil do return nil, fail(c, .Unsupported, size_key, "%s: %s on a switch-on field is not supported", id, size_key.text)
+		if bytes_key != nil do return nil, fail(c, .Unsupported, bytes_key, "%s: %s on a switch-on field is not supported", id, bytes_key.text)
 	case:
 		type_name := expect_scalar(c, type_node, "type") or_return
 		sizes := TYPE_SIZE
@@ -685,11 +699,12 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 			} else if sizes[prim] > 1 && c.endian == nil {
 				return nil, fail(c, .Invalid, type_node, "%s: %s needs le or be, or meta endian", id, type_name)
 			}
-			if size_key != nil do return nil, fail(c, .Invalid, size_key, "%s: %s does not apply to %s", id, size_key.text, type_name)
-		} else if type_name == "str" {
+			if bytes_key != nil do return nil, fail(c, .Invalid, bytes_key, "%s: %s does not apply to %s", id, bytes_key.text, type_name)
+		} else if type_name == "str" || type_name == "strz" {
 			node.type = .String
-			if size_key == nil do return nil, fail(c, .Unsupported, type_node, "%s: str without size or size-eos is not supported", id)
-		} else if type_name == "strz" || is_bit_type(type_name) {
+			strz = type_name == "strz"
+			if !strz && !ends do return nil, fail(c, .Invalid, type_node, "%s: str needs size, size-eos or terminator", id)
+		} else if is_bit_type(type_name) {
 			return nil, fail(c, .Unsupported, type_node, "%s: type %s is not supported", id, type_name)
 		} else {
 			user = find_type(td, type_name)
@@ -732,6 +747,7 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 	} else if size_eos {
 		node.length = mdata.Eos_Length{}
 	}
+	compile_terminator(c, attr, id, node, strz) or_return
 
 	if valid != nil {
 		node.valid = compile_valid(c, valid, id, node.type) or_return
@@ -933,6 +949,56 @@ compile_expr :: proc(c: ^Compiler, n: ^yml.Node, what: string, scope: expr.Scope
 		c.err.column += strings.rune_count(text[:err.offset]) + (n.style == .Plain ? 0 : 1)
 	}
 	return nil, false
+}
+
+// terminator, or strz's 0, with consume, include and eos-error, and
+// pad-right, on node, whose length is compiled. consume and eos-error
+// apply only without a length, and pad-right only with one; each defaults
+// as in Kaitai.
+@(private = "file")
+compile_terminator :: proc(c: ^Compiler, attr: ^yml.Node, id: string, node: ^mdata.Node, strz: bool) -> bool {
+	sized := node.length != nil
+	if n := get(attr, "pad-right"); n != nil {
+		if !sized do return fail(c, .Invalid, get_key(attr, "pad-right"), "%s: pad-right needs size or size-eos", id)
+		node.pad_right = byte_value(c, n, id, "pad-right") or_return
+	}
+
+	term := get(attr, "terminator")
+	if term == nil && !strz {
+		if k := first_key(attr, {"consume", "include", "eos-error"}); k != nil {
+			return fail(c, .Invalid, k, "%s: %s applies only with terminator or strz", id, k.text)
+		}
+		return true
+	}
+
+	t := mdata.Terminator{consume = true, eos_error = true}
+	if term != nil do t.value = byte_value(c, term, id, "terminator") or_return
+	for e in attr.entries {
+		flag: ^bool
+		switch e.key.text {
+		case "include":
+			flag = &t.include
+		case "consume":
+			flag = &t.consume
+		case "eos-error":
+			flag = &t.eos_error
+		case:
+			continue
+		}
+		if sized && flag != &t.include do return fail(c, .Invalid, e.key, "%s: %s does not apply with a size", id, e.key.text)
+		flag^ = boolean(c, e.value, e.key.text) or_return
+	}
+	node.terminator = t
+	return true
+}
+
+// A byte: an integer from 0 to 255.
+@(private = "file")
+byte_value :: proc(c: ^Compiler, n: ^yml.Node, id, what: string) -> (b: u8, ok: bool) {
+	text := expect_scalar(c, n, what) or_return
+	v, is_int := parse_int(text)
+	if !is_int || n.style != .Plain || v < 0 || v > 255 do return 0, fail(c, .Invalid, n, "%s: %s must be a byte, 0 to 255, not %q", id, what, text)
+	return u8(v), true
 }
 
 // A boolean: true or false.
