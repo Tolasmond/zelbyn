@@ -35,7 +35,8 @@ import "core:strings"
 //     switch-on whose cases are user types
 //   - value instances, and parse instances: instances with pos and the
 //     keys of an attribute
-//   - enums whose values are names (enum constants in expressions)
+//   - enums, whose values are names or mappings of id, doc and doc-ref
+//     (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
 // Not supported yet (Unsupported): bit types (b1-b64), instances without
@@ -599,11 +600,11 @@ build_enums :: proc(c: ^Compiler, n: ^yml.Node) -> (enums: []expr.Enum, ok: bool
 			n, is_int := parse_int(v.key.text)
 			if !is_int || v.key.style != .Plain do return nil, fail(c, .Invalid, v.key, "enum %s: %q is not an integer", name, v.key.text)
 			if n > i128(max(int)) || n < i128(min(int)) do return nil, fail(c, .Unsupported, v.key, "enum %s: %v does not fit in a 64-bit signed integer", name, v.key.text)
-			if v.value.kind == .Map do return nil, fail(c, .Unsupported, v.value, "enum %s: values with id and doc are not supported", name)
-			value_name := identifier(c, v.value, "enum value name") or_return
+			value_name := enum_value_name(c, name, v.value) or_return
 
 			for prev in values[:j] {
-				if prev.name == value_name do return nil, fail(c, .Invalid, v.value, "enum %s: %s appears twice", name, value_name)
+				at := v.value.kind == .Map ? get(v.value, "id") : v.value
+				if prev.name == value_name do return nil, fail(c, .Invalid, at, "enum %s: %s appears twice", name, value_name)
 				if prev.value == int(n) do return nil, fail(c, .Invalid, v.key, "enum %s: value %v appears twice", name, v.key.text)
 			}
 			values[j] = {value_name, int(n)}
@@ -611,6 +612,17 @@ build_enums :: proc(c: ^Compiler, n: ^yml.Node) -> (enums: []expr.Enum, ok: bool
 		enums[i] = {name, values}
 	}
 	return enums, true
+}
+
+// The name of a value of enum name: n itself, or the id of n in the long
+// form, a mapping of id, doc and doc-ref.
+@(private = "file")
+enum_value_name :: proc(c: ^Compiler, name: string, n: ^yml.Node) -> (value_name: string, ok: bool) {
+	if n.kind != .Map do return identifier(c, n, "enum value name")
+	check_keys(c, n, {what = "enum %s", name = name, allowed = {"id", "doc", "doc-ref"}, extensions = {"-orig-id"}}) or_return
+	id := get(n, "id")
+	if id == nil do return "", fail(c, .Invalid, n, "enum %s: a value has no id", name)
+	return identifier(c, id, "enum value name")
 }
 
 // The type called name, looked up from td outward, then among the schemas
