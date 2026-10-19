@@ -198,7 +198,12 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		return single_value(ctx.element)
 	case mdata.Value_Ref:
 		base := eval(d, x.base, ctx) or_return
-		return eval(d, x.instance.expr, {index = -1, self = base.(^fld.Instance)})
+		self := Eval_Context{index = -1, self = base.(^fld.Instance)}
+		if x.instance.cond != nil {
+			cond := eval(d, x.instance.cond, self) or_return
+			if !cond.(bool) do return nil, .Absent_Field
+		}
+		return eval(d, x.instance.expr, self)
 	case mdata.Name, mdata.Member, mdata.Enum_Constant:
 		panic("eval: unresolved expression")
 	}

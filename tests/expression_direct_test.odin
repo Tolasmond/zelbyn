@@ -75,7 +75,10 @@ walk_direct :: proc(node: ^mdat.Node, counts: ^Direct_Counts, clear: bool) {
 		visit(c.expr, counts, clear)
 	}
 	if l, ok := node.length.(mdat.Rule_Length); ok do visit(l.expr, counts, clear)
-	for inst in node.instances do visit(inst.expr, counts, clear)
+	for inst in node.instances {
+		visit(inst.cond, counts, clear)
+		visit(inst.expr, counts, clear)
+	}
 	for child in node.children do walk_direct(child, counts, clear)
 	if sw := node.switch_on; sw != nil {
 		visit(sw.on, counts, clear)

@@ -143,7 +143,11 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "instances:\n  x:\n    doc: d\n", .Unsupported, 5, 3, "instance x: an instance without pos or value is not supported"},
 	{HEAD + "instances:\n  x:\n    size: 1\n", .Unsupported, 5, 3, "instance x: an instance without pos or value is not supported"},
 	{HEAD + "instances:\n  x:\n    value: 1\n    pos: 0\n", .Invalid, 7, 5, `instance x: unknown key "pos"`},
-	{HEAD + "instances:\n  x:\n    value: 1\n    if: true\n", .Unsupported, 7, 5, "instance x: if is not supported"},
+	{HEAD + "instances:\n  x:\n    value: 1\n    if: 1\n", .Invalid, 7, 9, "if: expected a boolean, found an integer"},
+	{HEAD + "instances:\n  x:\n    value: 1\n    if: x == 1\n", .Invalid, 6, 12, "value instance x refers to itself"},
+	{HEAD + "instances:\n  x:\n    value: 1\n    if: _io.eof\n", .Unsupported, 7, 9, "_io in a value instance is not supported"},
+	{HEAD + "instances:\n  x:\n    value: 1\n    enum: e\n", .Invalid, 7, 11, "x: no enum e"},
+	{HEAD + "instances:\n  x:\n    value: 1 == 1\n    enum: e\nenums:\n  e:\n    1: one\n", .Invalid, 7, 5, "value instance x: enum applies only to integer values"},
 	{HEAD + "instances:\n  x:\n    pos: 0\n    type: u1\n    -bits:\n      - {id: b, low: 0, high: 0}\n", .Invalid, 8, 5, "the extension -bits does not apply here"},
 	{HEAD + "instances:\n  x:\n    pos: x\n    type: u1\n", .Invalid, 5, 3, "instance x refers to itself"},
 	{HEAD + "instances:\n  x:\n    pos: y\n    type: u1\n  y:\n    pos: 0\n    type: s\ntypes:\n  s:\n    seq:\n      - id: a\n        size: _parent.x\n", .Invalid, 5, 3, "instance x refers to itself"},
@@ -578,6 +582,50 @@ t[0].table[1] = 33
 	expect_dump(t, "json", ksy_json(t, both, {7}), `{"t":[{"a":[7],"p":[7],"q":[]}]}` + "\n")
 	only := HEAD + "instances:\n  p:\n    pos: 0\n    type: u1\n"
 	expect_dump(t, "json, no fields", ksy_json(t, only, {7}), `{"t":[{"p":[7]}]}` + "\n")
+}
+
+// if and enum on value instances: one has a value only when its if is
+// true, which is evaluated in its own instance, also when it is referred
+// to from outside; with none, a reference to it fails as one to an absent
+// field. An enum keeps the integer, and compares with the enum's constants.
+@(test)
+ksy_value_instance_if_enum :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: hdr
+    type: hdr
+  - id: body
+    size: hdr.len_body
+  - id: big
+    type: u1
+    if: hdr.kind == kinds::big
+types:
+  hdr:
+    seq:
+      - id: flags
+        type: u1
+      - id: extra
+        type: u1
+        if: has_extra
+    instances:
+      has_extra:
+        value: (flags & 1) != 0
+      len_body:
+        value: extra
+        if: has_extra
+      kind:
+        value: flags >> 4
+        enum: kinds
+enums:
+  kinds:
+    0: small
+    1: big
+`
+	expect_dump(t, "if true", ksy_dump(t, src, {0x11, 2, 0xaa, 0xbb, 5}), `t[0].hdr[0].flags[0] = 17
+t[0].hdr[0].extra[0] = 2
+t[0].body[0] = <2 bytes> aa bb
+t[0].big[0] = 5
+`)
+	expect_dump(t, "if false", ksy_dump(t, src, {0x00, 0xaa}), "error: Absent_Field at 1 in t[0].body[0]")
 }
 
 @(test)

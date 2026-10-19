@@ -14,7 +14,7 @@ Read_Error :: enum {
 	Division_By_Zero,      // an expression divides by zero, or takes a remainder by zero
 	Integer_Overflow,      // an expression's result, or an integer field it reads, does not fit in an int
 	Invalid_Shift,         // an expression shifts by a negative amount or by 64 or more
-	Absent_Field,          // an expression refers to a field that has no value (not read yet, or absent)
+	Absent_Field,          // an expression refers to a field that has no value (not read yet, or absent), or to a value instance whose if is false
 	Not_Equal,             // a value is not the one its field requires (Kaitai's contents, valid: eq)
 	Less_Than_Min,         // a value is below its field's minimum (valid: min)
 	Greater_Than_Max,      // a value is above its field's maximum (valid: max)
