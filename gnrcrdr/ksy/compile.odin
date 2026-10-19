@@ -652,7 +652,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 	td.in_progress = true
 	defer td.in_progress = false
 
-	ids := make(map[string]^yml.Node, c.scratch) // of the attributes, bit fields and instances
+	ids := make([dynamic]^yml.Node, c.scratch) // the id nodes of the attributes, bit fields and instances
 
 	// each instance is compiled when an expression first refers to it, or
 	// after the attributes
@@ -772,11 +772,13 @@ compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Inst
 }
 
 @(private = "file")
-claim_id :: proc(c: ^Compiler, ids: ^map[string]^yml.Node, id: string, n: ^yml.Node) -> bool {
-	if prev, seen := ids[id]; seen {
+claim_id :: proc(c: ^Compiler, ids: ^[dynamic]^yml.Node, id: string, n: ^yml.Node) -> bool {
+	// a type has few ids, and searching them costs less than hashing
+	for prev in ids {
+		if prev.text != id do continue
 		return fail(c, .Invalid, n, "id %s is already used (line %v, column %v)", id, prev.line, prev.column)
 	}
-	ids[id] = n
+	append(ids, n)
 	return true
 }
 
@@ -848,7 +850,7 @@ is_bit_type :: proc(name: string) -> bool {
 
 // A seq attribute: its id, then the rest as compile_field compiles it.
 @(private = "file")
-compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.Scope, ids: ^map[string]^yml.Node) -> (node: ^mdata.Node, ok: bool) {
+compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.Scope, ids: ^[dynamic]^yml.Node) -> (node: ^mdata.Node, ok: bool) {
 	id_node := get(attr, "id")
 	if id_node == nil do return nil, fail(c, .Unsupported, attr, "an attribute in type %s has no id; attributes without one are not supported", td.name)
 	id := identifier(c, id_node, "id") or_return
@@ -864,7 +866,7 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 // its id and pos, into node, in scope. ids holds the ids of the type, which
 // bit fields claim; nil for a parse instance, which has none.
 @(private = "file")
-compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata.Node, scope: expr.Scope, ids: ^map[string]^yml.Node) -> bool {
+compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata.Node, scope: expr.Scope, ids: ^[dynamic]^yml.Node) -> bool {
 	id := node.ref_name
 	type_node := get(attr, "type")
 	contents := get(attr, "contents")
@@ -1420,7 +1422,7 @@ parse_int :: proc(text: string) -> (v: i128, ok: bool) {
 // significant). Each is the unsigned number in those bits, of the smallest
 // unsigned type that holds it. They are kept in order of their low bit.
 @(private = "file")
-compile_bits :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Type, ids: ^map[string]^yml.Node) -> (bits: []mdata.Bit_Field, ok: bool) {
+compile_bits :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Type, ids: ^[dynamic]^yml.Node) -> (bits: []mdata.Bit_Field, ok: bool) {
 	if type not_in INTEGER_TYPES do return nil, fail(c, .Invalid, n, "%s: -bits applies only to integer types", id)
 	if n.kind != .Seq || len(n.items) == 0 do return nil, fail(c, .Invalid, n, "%s: -bits must be a non-empty sequence", id)
 
