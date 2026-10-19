@@ -3,6 +3,7 @@ package ksy
 import arn "../arena"
 import dat "../data"
 import expr "../expression"
+import "../file"
 import mdata "../metadata"
 import yml "../yaml"
 import "core:encoding/endian"
@@ -70,7 +71,7 @@ destroy_error :: proc(err: ^Error) {
 // may be partly filled; destroy it either way.
 @(require_results)
 read_file_format :: proc(path: string, file_format: ^mdata.File_Format, import_paths: []string = nil) -> Error {
-	data, err := os.read_entire_file(path, context.allocator)
+	data, err := file.read_entire_file(path, context.allocator)
 	if err != nil do return Error{kind = .Read_Failed, path = strings.clone(path), os_error = err}
 	defer delete(data)
 	return compile(string(data), file_format, path, import_paths)
@@ -441,7 +442,7 @@ import_path :: proc(c: ^Compiler, item: ^yml.Node, name: string) -> (path: strin
 // load_schema does.
 @(private = "file")
 load_import :: proc(c: ^Compiler, item: ^yml.Node, path: string) -> (top: ^Type_Def, ok: bool) {
-	data, err := os.read_entire_file(path, c.scratch)
+	data, err := file.read_entire_file(path, c.scratch)
 	if err != nil do return nil, fail(c, .Invalid, item, "imports: cannot read %s: %v", path, err)
 
 	importer := c.schema
