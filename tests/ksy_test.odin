@@ -33,7 +33,11 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    sizee: 1\n", .Invalid, 7, 5, `attribute a: unknown key "sizee"`},
 	{HEAD + "params:\n  - id: p\n", .Unsupported, 4, 1, "params is not supported"},
 	{HEAD + "sequence: []\n", .Invalid, 4, 1, `the top level: unknown key "sequence"`},
-	{"meta:\n  id: t\n  imports: [a]\n", .Unsupported, 3, 3, "meta: imports is not supported"},
+	{"meta:\n  id: t\n  imports: a\n", .Invalid, 3, 12, "imports must be a sequence"},
+	{"meta:\n  id: t\n  imports: ['']\n", .Invalid, 3, 13, "imports: an import is empty"},
+	{"meta:\n  id: t\n  imports: [/common/x]\n", .Invalid, 3, 13, "imports: /common/x is in none of the import paths"},
+	{"meta:\n  id: t\n  imports: [tests/schemas/imports/does_not_exist]\n", .Invalid, 3, 13, "imports: cannot read tests/schemas/imports/does_not_exist.ksy"},
+	{"meta:\n  id: t\n  ks-debug: true\n", .Unsupported, 3, 3, "meta: ks-debug is not supported"},
 	{"meta:\n  id: t\n  name: x\n", .Invalid, 3, 3, `meta: unknown key "name"`},
 	{"meta:\n  id: t\n  -peek: [1]\n", .Invalid, 3, 3, "the extension -peek does not apply here"},
 	{HEAD + "types:\n  u:\n    meta:\n      endian: be\n", .Unsupported, 6, 5, "type u: meta in a type is not supported"},
@@ -203,14 +207,30 @@ ksy_dump :: proc(t: ^testing.T, src: string, input: []byte) -> string {
 	err := ksy.compile(src, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return ""
+	return dump_decoded(t, &ff, input)
+}
 
+// As ksy_dump, with the schema read from path.
+@(private = "file")
+ksy_file_dump :: proc(t: ^testing.T, path: string, import_paths: []string, input: []byte) -> string {
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	err := ksy.read_file_format(path, &ff, import_paths)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "%s: %v at %s:%v:%v: %s", path, err.kind, err.path, err.line, err.column, err.message) do return ""
+	return dump_decoded(t, &ff, input)
+}
+
+// Decodes input with ff and returns its text dump, as ksy_dump does.
+@(private = "file")
+dump_decoded :: proc(t: ^testing.T, ff: ^mdat.File_Format, input: []byte) -> string {
 	d: Decoded
 	defer destroy_decoded(&d)
-	decode_bytes(&ff, input, &d)
+	decode_bytes(ff, input, &d)
 	if d.err.kind != .None do return fmt.tprintf("error: %v at %v in %s", d.err.kind, d.err.offset, d.err.path)
 
 	b := strings.builder_make(context.temp_allocator)
-	werr := dmp.write_text(strings.to_writer(&b), &ff, &d.tree)
+	werr := dmp.write_text(strings.to_writer(&b), ff, &d.tree)
 	testing.expectf(t, werr == .None, "dump: %v", werr)
 	return strings.to_string(b)
 }
@@ -400,6 +420,57 @@ ksy_json :: proc(t: ^testing.T, src: string, input: []byte) -> string {
 	werr := dmp.write_json(strings.to_writer(&b), &ff, &d.tree)
 	testing.expectf(t, werr == .None, "dump: %v", werr)
 	return strings.to_string(b)
+}
+
+@(test)
+ksy_imports :: proc(t: ^testing.T) {
+	// relative imports are found from the importing file, absolute ones in
+	// the import paths, and a schema imported twice (lib/tag) is read once.
+	// Each schema has its own meta, and _root in one is its top level
+	input := []byte{2, 0, 5, 1, 9, 1, 0, 0, 1, 7, 0x12, 0x34, 0x34, 0x12}
+	expect_dump(t, "imports", ksy_file_dump(t, "tests/schemas/imports/main.ksy", {"tests/schemas/imports"}, input), `main[0].n[0] = 2
+main[0].pairs[0].a[0] = 5
+main[0].pairs[0].t[0].v[0] = 1
+main[0].pairs[0].t[0].inner[0].w[0] = 9
+main[0].pairs[0].t[0].inner[0].first[0] = 2
+main[0].pairs[1].a[0] = 256
+main[0].pairs[1].t[0].v[0] = 0
+main[0].pairs[1].t[0].inner[0].first[0] = 2
+main[0].tag[0].v[0] = 1
+main[0].tag[0].inner[0].w[0] = 7
+main[0].tag[0].inner[0].first[0] = 2
+main[0].word[0].w[0] = 4660
+main[0].le[0] = 4660
+`)
+
+	// an error in an imported schema names its file
+	Case :: struct {
+		path:         string,
+		kind:         ksy.Error_Kind,
+		in_file:      string,
+		line, column: int,
+		message:      string,
+	}
+	DIR :: "tests/schemas/imports/"
+	cases := []Case {
+		{DIR + "main.ksy", .Invalid, DIR + "main.ksy", 9, 7, "imports: /shared/word is in none of the import paths"},
+		{DIR + "errors/broken_import.ksy", .Invalid, DIR + "errors/broken.ksy", 5, 11, "a: unknown type nope"},
+		{DIR + "errors/bad_yaml_import.ksy", .Syntax, DIR + "errors/bad_yaml.ksy", 2, 1, "unterminated flow collection"},
+		{DIR + "errors/orphan.ksy", .Invalid, DIR + "errors/orphan_lib.ksy", 7, 9, "if: _parent: o has no enclosing set here"},
+		{DIR + "errors/twins.ksy", .Invalid, DIR + "errors/twins.ksy", 5, 7, "imports: two schemas have the id tag"},
+		{DIR + "errors/cycle_a.ksy", .Unsupported, DIR + "errors/cycle_a.ksy", 1, 1, "type cycle_a contains itself"},
+	}
+	for c in cases {
+		ff: mdat.File_Format
+		defer mdat.destroy_file_format(&ff)
+		err := ksy.read_file_format(c.path, &ff)
+		defer ksy.destroy_error(&err)
+		testing.expectf(
+			t,
+			err.kind == c.kind && err.path == c.in_file && err.line == c.line && err.column == c.column && strings.contains(err.message, c.message),
+			"%s:\n  got  %v at %s:%v:%v: %s\n  want %v at %s:%v:%v: ...%s...",
+			c.path, err.kind, err.path, err.line, err.column, err.message, c.kind, c.in_file, c.line, c.column, c.message)
+	}
 }
 
 @(test)

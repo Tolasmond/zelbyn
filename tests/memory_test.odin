@@ -329,15 +329,21 @@ schema_compile_uses_only_arena :: proc(t: ^testing.T) {
 }
 
 @(test)
-schema_error_allocates_only_message :: proc(t: ^testing.T) {
+schema_error_allocates_only_message_and_path :: proc(t: ^testing.T) {
 	Case :: struct {
 		path: string, // read with read_file_format; when empty, src is compiled
 		src:  string,
 		kind: ksy.Error_Kind,
-		live: int, // allocations left with the error: the message, if it has one
+		live: int, // allocations left with the error: its message and path, if it has them
 	}
 
-	for c in ([]Case{{"", "meta:\n  id: [\n", .Syntax, 1}, {"", "meta:\n  id: x\nseq:\n  - id: a\n    type: nope\n", .Invalid, 1}, {"formats/does_not_exist.ksy", "", .Read_Failed, 0}}) {
+	cases := []Case {
+		{"", "meta:\n  id: [\n", .Syntax, 1},
+		{"", "meta:\n  id: x\nseq:\n  - id: a\n    type: nope\n", .Invalid, 1},
+		{"formats/does_not_exist.ksy", "", .Read_Failed, 1},
+		{"tests/schemas/imports/errors/broken_import.ksy", "", .Invalid, 2},
+	}
+	for c in cases {
 		ff: mdat.File_Format
 
 		// recorded inside the block, asserted after it: the message is freed inside

@@ -9,6 +9,7 @@ import "core:mem"
 // first. Names refer to fields of the last type.
 Scope :: struct {
 	types:     []^mdata.Node,
+	own_root:  bool,        // types[0] is the top level of an imported schema, its _root, but not the root of the decoded tree
 	in_repeat: bool,        // the expression is evaluated for each element of a repeated field, so _index is defined
 	element:   ^mdata.Node, // repeat-until: the field whose element _ is; nil elsewhere
 	enums:     []Enum,      // the enums enum constants may name; the first with a name is used
@@ -229,7 +230,11 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 
 	switch name {
 	case "_root":
-		e.variant = mdata.Instance{root = true, node = types[0]}
+		if r.scope.own_root {
+			e.variant = mdata.Instance{up = len(types) - 1, node = types[0]}
+		} else {
+			e.variant = mdata.Instance{root = true, node = types[0]}
+		}
 		e.type = .Struct
 	case "_parent":
 		if len(types) < 2 do return fail(r, .Invalid, e.offset, "_parent: %s has no enclosing set here", types[0].ref_name)

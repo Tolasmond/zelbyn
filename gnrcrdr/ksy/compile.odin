@@ -9,6 +9,7 @@ import "core:fmt"
 import "core:mem"
 import "core:mem/virtual"
 import "core:os"
+import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 
@@ -19,8 +20,11 @@ import "core:strings"
 //
 // Supported:
 //   - meta: id, endian, bit-endian, encoding, ks-version (checked against
-//     KS_VERSION), and title, application, file-extension, xref, license
-//     and tags (ignored); seq, types, instances, enums and doc, doc-ref
+//     KS_VERSION), imports, and title, application, file-extension, xref,
+//     license and tags (ignored); seq, types, instances, enums and doc,
+//     doc-ref
+//   - imported schemas, whose top-level types are used by their meta id,
+//     each with its own meta
 //   - attributes: id, type, size, size-eos, terminator with consume, include
 //     and eos-error, pad-right, contents, if, enum, valid, repeat (expr,
 //     eos, until) with repeat-expr and repeat-until, encoding, doc, doc-ref
@@ -49,56 +53,47 @@ Error :: struct {
 	kind:         Error_Kind,
 	line, column: int,      // 1-based; 0 for Read_Failed
 	message:      string,   // owned (context.allocator); free with destroy_error
+	path:         string,   // the file the error is in: the schema, or one it imports; "" for source compiled without a path. Owned, as message is
 	os_error:     os.Error, // Read_Failed only
 }
 
 destroy_error :: proc(err: ^Error) {
 	delete(err.message)
+	delete(err.path)
 	err^ = {}
 }
 
 // Reads the .ksy file at path and compiles it into file_format, which must
-// be zero or destroyed. On error file_format may be partly filled; destroy
-// it either way.
+// be zero or destroyed. A schema it imports is found relative to the
+// directory of the schema that imports it, or for an absolute import
+// (/a/b), in the first of import_paths that has it. On error file_format
+// may be partly filled; destroy it either way.
 @(require_results)
-read_file_format :: proc(path: string, file_format: ^mdata.File_Format) -> Error {
+read_file_format :: proc(path: string, file_format: ^mdata.File_Format, import_paths: []string = nil) -> Error {
 	data, err := os.read_entire_file(path, context.allocator)
-	if err != nil do return Error{kind = .Read_Failed, os_error = err}
+	if err != nil do return Error{kind = .Read_Failed, path = strings.clone(path), os_error = err}
 	defer delete(data)
-	return compile(string(data), file_format)
+	return compile(string(data), file_format, path, import_paths)
 }
 
 // Compiles the .ksy text src into file_format, as read_file_format does.
+// path is the file src was read from, for errors and relative imports; when
+// it is "", relative imports are found in the current directory.
 @(require_results)
-compile :: proc(src: string, file_format: ^mdata.File_Format) -> Error {
-	doc: yml.Document
-	defer yml.destroy_document(&doc)
-
-	if yerr := yml.parse(src, &doc); yerr.kind != .None {
-		kind: Error_Kind
-		switch yerr.kind {
-		case .None:
-			unreachable()
-		case .Syntax:
-			kind = .Syntax
-		case .Unsupported:
-			kind = .Unsupported
-		case .Duplicate_Key:
-			kind = .Invalid
-		}
-		return Error{kind = kind, line = yerr.line, column = yerr.column, message = yerr.message}
-	}
-
+compile :: proc(src: string, file_format: ^mdata.File_Format, path := "", import_paths: []string = nil) -> Error {
 	scratch: virtual.Arena
 	defer virtual.arena_destroy(&scratch)
 
-	c := Compiler{allocator = virtual.arena_allocator(&file_format.arena), scratch = virtual.arena_allocator(&scratch)}
+	c := Compiler{allocator = virtual.arena_allocator(&file_format.arena), scratch = virtual.arena_allocator(&scratch), import_paths = import_paths}
 	c.instances = make(map[^mdata.Value_Instance]^Instance_Source, c.scratch)
 	c.parse_instances = make(map[^mdata.Node]^Parse_Source, c.scratch)
-	if doc.root == nil {
-		fail(&c, .Invalid, nil, "the schema is empty")
-	} else {
-		compile_schema(&c, doc.root, file_format)
+	c.imported = make(map[string]^Type_Def, c.scratch)
+	c.schemas = make([dynamic]^Schema, c.scratch)
+	defer for s in c.schemas do yml.destroy_document(&s.doc)
+
+	c.schema = new_schema(&c, path)
+	if root, ok := parse_schema(&c, src); ok {
+		compile_schema(&c, root, file_format)
 	}
 	return c.err
 }
@@ -108,11 +103,57 @@ Compiler :: struct {
 	allocator:       mem.Allocator, // the File_Format's arena
 	scratch:         mem.Allocator, // freed after compiling
 	next_id:         int,
-	endian:          Maybe(endian.Byte_Order), // meta endian
-	encoding:        string,                   // meta encoding; "" when absent
+	schema:          ^Schema,              // the one whose types are being compiled
+	schemas:         [dynamic]^Schema,     // every one read; in scratch
+	imported:        map[string]^Type_Def, // the top-level type of each schema read from a file, by its cleaned path; in scratch
+	import_paths:    []string,
+	root:            ^mdata.Node,          // the root of the plan
 	instances:       map[^mdata.Value_Instance]^Instance_Source, // in scratch
 	parse_instances: map[^mdata.Node]^Parse_Source,              // in scratch
 	err:             Error,
+}
+
+// A .ksy file: the schema being compiled, or one it imports.
+@(private = "file")
+Schema :: struct {
+	path:     string,                   // the file it was read from; "" for source compiled without one
+	doc:      yml.Document,             // destroyed after compiling
+	endian:   Maybe(endian.Byte_Order), // meta endian
+	encoding: string,                   // meta encoding; "" when absent
+	imports:  []^Type_Def,              // the top-level type of each schema in meta imports, in order
+}
+
+@(private = "file")
+new_schema :: proc(c: ^Compiler, path: string) -> ^Schema {
+	s := new(Schema, c.scratch)
+	s.path = path
+	append(&c.schemas, s)
+	return s
+}
+
+// Parses src, the text of c.schema, into its document, and returns the
+// document's root.
+@(private = "file")
+parse_schema :: proc(c: ^Compiler, src: string) -> (root: ^yml.Node, ok: bool) {
+	yerr := yml.parse(src, &c.schema.doc)
+	defer yml.destroy_error(&yerr)
+	kind: Error_Kind
+	switch yerr.kind {
+	case .None:
+		if c.schema.doc.root == nil do return nil, fail(c, .Invalid, nil, "the schema is empty")
+		return c.schema.doc.root, true
+	case .Syntax:
+		kind = .Syntax
+	case .Unsupported:
+		kind = .Unsupported
+	case .Duplicate_Key:
+		kind = .Invalid
+	}
+	if c.err.kind == .None {
+		fail(c, kind, nil, "%s", yerr.message)
+		c.err.line, c.err.column = yerr.line, yerr.column
+	}
+	return nil, false
 }
 
 // Where a value instance of a set comes from, to compile it when an
@@ -136,12 +177,14 @@ Parse_Source :: struct {
 	compiling: bool,
 }
 
-// A type: the top level, or an entry of types. Its attributes are compiled
-// for each field of the type, so that names resolve in the field's scope.
+// A type: the top level of a schema, or an entry of types. Its attributes
+// are compiled for each field of the type, so that names resolve in the
+// field's scope.
 @(private = "file")
 Type_Def :: struct {
-	name:        string,
+	name:        string,    // the meta id at the top level
 	spec:        ^yml.Node,
+	schema:      ^Schema,   // the schema it is in
 	parent:      ^Type_Def, // the type it is declared in; nil at the top level
 	types:       []^Type_Def,
 	instances:   []yml.Entry, // the entries of instances, each checked
@@ -156,6 +199,7 @@ fail :: proc(c: ^Compiler, kind: Error_Kind, n: ^yml.Node, format: string, args:
 	if c.err.kind == .None {
 		c.err = Error{kind = kind, message = fmt.aprintf(format, ..args)}
 		if n != nil do c.err.line, c.err.column = n.line, n.column
+		if c.schema != nil && c.schema.path != "" do c.err.path = strings.clone(c.schema.path)
 	}
 	return false
 }
@@ -234,8 +278,8 @@ check_keys :: proc(c: ^Compiler, m: ^yml.Node, keys: Keys) -> bool {
 @(private = "file")
 META_KEYS :: Keys {
 	what        = "meta",
-	allowed     = {"id", "endian", "bit-endian", "encoding", "ks-version", "title", "application", "file-extension", "xref", "license", "tags"},
-	unsupported = {"imports", "ks-debug", "ks-opaque-types"},
+	allowed     = {"id", "endian", "bit-endian", "encoding", "ks-version", "imports", "title", "application", "file-extension", "xref", "license", "tags"},
+	unsupported = {"ks-debug", "ks-opaque-types"},
 	extensions  = {"-orig-id"},
 }
 
@@ -298,42 +342,111 @@ identifier :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (id: string, ok:
 
 @(private = "file")
 compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) -> bool {
+	top := load_schema(c, root) or_return
+
+	name := display_name(c, get(root, "meta"), top.name) or_return
+	node := new_node(c, name, top.name)
+	node.type = .Set
+	node.count = mdata.Fixed_Count{1}
+
+	ff.name = node.name
+	ff.root = node
+	c.root = node
+	return compile_fields(c, top, node, {node})
+}
+
+// Checks the top level and meta of c.schema, whose document's root is root,
+// reads the schemas it imports, and builds its types. Returns its top-level
+// type.
+@(private = "file")
+load_schema :: proc(c: ^Compiler, root: ^yml.Node) -> (top: ^Type_Def, ok: bool) {
 	expect_map(c, root, "a schema") or_return
 	check_keys(c, root, {what = "the top level", allowed = TOP_ALLOWED, unsupported = TYPE_UNSUPPORTED}) or_return
 
 	meta := get(root, "meta")
-	if meta == nil do return fail(c, .Invalid, root, "the schema has no meta")
+	if meta == nil do return nil, fail(c, .Invalid, root, "the schema has no meta")
 	expect_map(c, meta, "meta") or_return
 	check_keys(c, meta, META_KEYS) or_return
 
 	id_node := get(meta, "id")
-	if id_node == nil do return fail(c, .Invalid, meta, "meta has no id")
+	if id_node == nil do return nil, fail(c, .Invalid, meta, "meta has no id")
 	id := identifier(c, id_node, "meta id") or_return
 
 	if n := get(meta, "endian"); n != nil {
-		c.endian = byte_order(c, n, "endian") or_return
+		c.schema.endian = byte_order(c, n, "endian") or_return
 	}
 	if n := get(meta, "bit-endian"); n != nil {
 		// nothing reads bit types yet; the value is still checked
 		_ = byte_order(c, n, "bit-endian") or_return
 	}
 	if n := get(meta, "encoding"); n != nil {
-		c.encoding = encoding(c, n) or_return
+		c.schema.encoding = encoding(c, n) or_return
 	}
 	if n := get(meta, "ks-version"); n != nil {
 		check_ks_version(c, n) or_return
 	}
 
-	top := build_type(c, id, root, nil) or_return
+	top = build_type(c, id, root, nil) or_return
+	// registered before its imports, which may import it in turn
+	if c.schema.path != "" {
+		path, _ := filepath.clean(c.schema.path, c.scratch)
+		c.imported[path] = top
+	}
+	if n := get(meta, "imports"); n != nil {
+		c.schema.imports = load_imports(c, n) or_return
+	}
+	return top, true
+}
 
-	name := display_name(c, meta, id) or_return
-	node := new_node(c, name, id)
-	node.type = .Set
-	node.count = mdata.Fixed_Count{1}
+// meta imports: each a schema file named without its .ksy, relative to the
+// directory of the schema that imports it, or when it starts with /, to the
+// first of the import paths that has it. A schema already read is not read
+// again. The imported schemas' top-level types are found by their meta id.
+@(private = "file")
+load_imports :: proc(c: ^Compiler, n: ^yml.Node) -> (imports: []^Type_Def, ok: bool) {
+	if n.kind != .Seq do return nil, fail(c, .Invalid, n, "imports must be a sequence")
+	imports = make([]^Type_Def, len(n.items), c.scratch)
+	for item, i in n.items {
+		name := expect_scalar(c, item, "an import") or_return
+		path := import_path(c, item, name) or_return
+		top, seen := c.imported[path]
+		if !seen do top = load_import(c, item, path) or_return
+		for prev in imports[:i] {
+			if prev != top && prev.name == top.name do return nil, fail(c, .Invalid, item, "imports: two schemas have the id %s", top.name)
+		}
+		imports[i] = top
+	}
+	return imports, true
+}
 
-	ff.name = node.name
-	ff.root = node
-	return compile_fields(c, top, node, {node})
+// The cleaned path of the schema imported as name by item.
+@(private = "file")
+import_path :: proc(c: ^Compiler, item: ^yml.Node, name: string) -> (path: string, ok: bool) {
+	if name == "" do return "", fail(c, .Invalid, item, "imports: an import is empty")
+	file := strings.concatenate({name, ".ksy"}, c.scratch)
+	if file[0] != '/' {
+		path, _ = filepath.join({filepath.dir(c.schema.path), file}, c.scratch)
+		return path, true
+	}
+	for dir in c.import_paths {
+		path, _ = filepath.join({dir, file[1:]}, c.scratch)
+		if os.is_file(path) do return path, true
+	}
+	return "", fail(c, .Invalid, item, "imports: %s is in none of the import paths", name)
+}
+
+// Reads the schema at path, imported by item, and loads it as
+// load_schema does.
+@(private = "file")
+load_import :: proc(c: ^Compiler, item: ^yml.Node, path: string) -> (top: ^Type_Def, ok: bool) {
+	data, err := os.read_entire_file(path, c.scratch)
+	if err != nil do return nil, fail(c, .Invalid, item, "imports: cannot read %s: %v", path, err)
+
+	importer := c.schema
+	defer c.schema = importer
+	c.schema = new_schema(c, path)
+	root := parse_schema(c, string(data)) or_return
+	return load_schema(c, root)
 }
 
 @(private = "file")
@@ -411,7 +524,7 @@ display_name :: proc(c: ^Compiler, m: ^yml.Node, id: string) -> (name: string, o
 new_node :: proc(c: ^Compiler, name, ref_name: string) -> ^mdata.Node {
 	c.next_id += 1
 	node := new(mdata.Node, c.allocator)
-	node^ = {id = c.next_id, name = strings.clone(name, c.allocator), ref_name = strings.clone(ref_name, c.allocator), order = c.endian.? or_else .Little}
+	node^ = {id = c.next_id, name = strings.clone(name, c.allocator), ref_name = strings.clone(ref_name, c.allocator), order = c.schema.endian.? or_else .Little}
 	return node
 }
 
@@ -421,7 +534,7 @@ new_node :: proc(c: ^Compiler, name, ref_name: string) -> ^mdata.Node {
 @(private = "file")
 build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_Def) -> (td: ^Type_Def, ok: bool) {
 	td = new(Type_Def, c.scratch)
-	td^ = {name = name, spec = spec, parent = parent}
+	td^ = {name = name, spec = spec, schema = c.schema, parent = parent}
 
 	if parent != nil {
 		expect_map(c, spec, fmt.tprintf("type %s", name)) or_return
@@ -499,13 +612,17 @@ build_enums :: proc(c: ^Compiler, n: ^yml.Node) -> (enums: []expr.Enum, ok: bool
 	return enums, true
 }
 
-// The type called name, looked up from td outward.
+// The type called name, looked up from td outward, then among the schemas
+// that td's schema imports.
 @(private = "file")
 find_type :: proc(td: ^Type_Def, name: string) -> ^Type_Def {
 	for t := td; t != nil; t = t.parent {
 		for sub in t.types {
 			if sub.name == name do return sub
 		}
+	}
+	for top in td.schema.imports {
+		if top.name == name do return top
 	}
 	return nil
 }
@@ -526,6 +643,9 @@ visible_enums :: proc(c: ^Compiler, td: ^Type_Def) -> []expr.Enum {
 // and to any instance whose expressions refer only to those.
 @(private = "file")
 compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^mdata.Node) -> bool {
+	schema := c.schema
+	defer c.schema = schema
+	c.schema = td.schema
 	if td.in_progress do return fail(c, .Unsupported, td.spec, "type %s contains itself; recursive types are not supported", td.name)
 	td.in_progress = true
 	defer td.in_progress = false
@@ -586,6 +706,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 scope_of :: proc(c: ^Compiler, td: ^Type_Def, chain: []^mdata.Node) -> expr.Scope {
 	return {
 		types                  = chain,
+		own_root               = chain[0] != c.root,
 		enums                  = visible_enums(c, td),
 		compile_instance       = compile_instance_callback,
 		compile_parse_instance = compile_parse_instance_callback,
@@ -610,6 +731,9 @@ compile_parse_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^m
 @(private = "file")
 compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node) -> bool {
 	src := c.parse_instances[inst]
+	schema := c.schema
+	defer c.schema = schema
+	c.schema = src.td.schema
 	if src.compiling do return fail(c, .Invalid, src.entry.key, "instance %s refers to itself", inst.ref_name)
 	src.compiling = true
 	defer src.compiling = false
@@ -625,6 +749,9 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 @(private = "file")
 compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Instance) -> bool {
 	src := c.instances[inst]
+	schema := c.schema
+	defer c.schema = schema
+	c.schema = src.td.schema
 	if src.compiling do return fail(c, .Invalid, src.value, "value instance %s refers to itself", inst.name)
 	src.compiling = true
 	defer src.compiling = false
@@ -778,7 +905,7 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 			node.type = prim
 			if o, has_order := order.?; has_order {
 				node.order = o
-			} else if sizes[prim] > 1 && c.endian == nil {
+			} else if sizes[prim] > 1 && c.schema.endian == nil {
 				return fail(c, .Invalid, type_node, "%s: %s needs le or be, or meta endian", id, type_name)
 			}
 			if bytes_key != nil do return fail(c, .Invalid, bytes_key, "%s: %s does not apply to %s", id, bytes_key.text, type_name)
@@ -790,6 +917,7 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 			return fail(c, .Unsupported, type_node, "%s: type %s is not supported", id, type_name)
 		} else {
 			user = find_type(td, type_name)
+			if user == nil && strings.contains(type_name, "::") do return fail(c, .Unsupported, type_node, "%s: a type of another type (%s) is not supported", id, type_name)
 			if user == nil do return fail(c, .Invalid, type_node, "%s: unknown type %s", id, type_name)
 			node.type = .Set
 		}
@@ -798,7 +926,7 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	if n := get(attr, "encoding"); n != nil {
 		if node.type != .String do return fail(c, .Invalid, get_key(attr, "encoding"), "%s: encoding applies only to str", id)
 		_ = encoding(c, n) or_return
-	} else if node.type == .String && c.encoding == "" {
+	} else if node.type == .String && c.schema.encoding == "" {
 		return fail(c, .Invalid, type_node, "%s: str needs an encoding, or meta encoding", id)
 	}
 
@@ -840,7 +968,7 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	}
 
 	if user != nil {
-		compile_fields(c, user, node, chain_with(c, scope.types, node)) or_return
+		compile_fields(c, user, node, chain_of(c, scope.types, user, node)) or_return
 	}
 	if switch_node != nil {
 		compile_switch(c, td, switch_node, id, node, element_scope) or_return
@@ -854,6 +982,15 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 		node.count = mdata.Until_Count{compile_expr(c, get(attr, "repeat-until"), "repeat-until", until_scope, .Bool) or_return}
 	}
 	return true
+}
+
+// The chain of node, a field of type user in a type whose chain is types:
+// types followed by node, or node alone when user is the top level of an
+// imported schema. As in Kaitai, that is the root of its own types (its
+// _root), and has no _parent.
+@(private = "file")
+chain_of :: proc(c: ^Compiler, types: []^mdata.Node, user: ^Type_Def, node: ^mdata.Node) -> []^mdata.Node {
+	return chain_with(c, user.parent == nil ? nil : types, node)
 }
 
 // types followed by node.
@@ -905,13 +1042,14 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, no
 			if _, _, is_primitive := primitive(type_name); is_primitive || type_name == "str" || type_name == "strz" || is_bit_type(type_name) {
 				return fail(c, .Unsupported, e.value, "%s: a case of type %s is not supported; only user types are", id, type_name)
 			}
+			if strings.contains(type_name, "::") do return fail(c, .Unsupported, e.value, "%s: a type of another type (%s) is not supported", id, type_name)
 			return fail(c, .Invalid, e.value, "%s: unknown type %s", id, type_name)
 		}
 
 		case_node := new_node(c, node.name, node.ref_name)
 		case_node.type = .Set
 		case_node.count = mdata.Fixed_Count{1}
-		compile_fields(c, user, case_node, chain_with(c, scope.types, case_node)) or_return
+		compile_fields(c, user, case_node, chain_of(c, scope.types, user, case_node)) or_return
 
 		if is_default {
 			sw.default = case_node

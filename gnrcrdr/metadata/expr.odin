@@ -111,7 +111,8 @@ Enum_Constant :: struct {
 }
 
 // The set instance being decoded (up = 0), one of its enclosing instances
-// (up > 0, _parent), or the outermost one (root, _root). node is its set.
+// (up > 0, _parent, and _root in an imported schema), or the outermost one
+// (root, _root). node is its set.
 Instance :: struct {
 	root: bool,
 	up:   int,

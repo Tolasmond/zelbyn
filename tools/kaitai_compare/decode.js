@@ -1,9 +1,11 @@
 // Decodes files with the official Kaitai Struct compiler and JavaScript
 // runtime, for compare.py:
 //
-//     node decode.js <schema.json> <file>...
+//     node decode.js <schema.json> [--imports <imports.json>] <file>...
 //
-// schema.json is a .ksy file converted to JSON. For each file, prints one
+// schema.json is a .ksy file converted to JSON. imports.json maps each
+// import, as the compiler asks for it ("rel:" or "abs:" and its name, with
+// no / at the start of an absolute one), to its schema. For each file, prints one
 // line of JSON in the shape of gnrcrdr's --dump json: a set instance is an
 // object of its seq fields in read order, then its parse instances
 // (instances with pos), each an array of its values (one for a field read
@@ -67,21 +69,45 @@ function instance(obj) {
 }
 
 async function main() {
-  const [schemaPath, ...files] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const schemaPath = args.shift();
+  let imports = {};
+  if (args[0] === "--imports") {
+    imports = JSON.parse(fs.readFileSync(args[1], "utf8"));
+    args.splice(0, 2);
+  }
+  const files = args;
   if (!schemaPath || files.length === 0) {
-    console.error("usage: node decode.js <schema.json> <file>...");
+    console.error("usage: node decode.js <schema.json> [--imports <imports.json>] <file>...");
     process.exit(2);
   }
 
   const ksy = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
   PARSE_INSTANCES = parseInstances(ksy, ksy.meta.id, {});
-  const sources = await compiler.compile("javascript", ksy, null, false);
-  const module = { exports: {} };
-  const load = (name) => (name === "kaitai-struct/KaitaiStream" ? KaitaiStream : require(name));
-  for (const source of Object.values(sources)) {
-    new Function("module", "exports", "require", source)(module, module.exports, load);
-  }
-  const Root = Object.values(module.exports)[0];
+  for (const spec of Object.values(imports)) parseInstances(spec, spec.meta.id, PARSE_INSTANCES);
+  const importer = {
+    importYaml(name, mode) {
+      const spec = imports[mode + ":" + name];
+      return spec ? Promise.resolve(spec) : Promise.reject(new Error("no schema for import " + name));
+    },
+  };
+  const sources = await compiler.compile("javascript", ksy, importer, false);
+
+  // each generated file is a module, which requires those of its imports
+  const modules = {};
+  const load = (name) => {
+    if (name === "kaitai-struct/KaitaiStream") return KaitaiStream;
+    const file = name.replace(/^\.\//, "") + ".js";
+    if (!(file in sources)) return require(name);
+    if (!(file in modules)) {
+      const module = { exports: {} };
+      modules[file] = module.exports;
+      new Function("module", "exports", "require", sources[file])(module, module.exports, load);
+    }
+    return modules[file];
+  };
+  const rootName = upperCamel(ksy.meta.id);
+  const Root = load("./" + rootName)[rootName];
 
   for (const file of files) {
     try {

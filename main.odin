@@ -15,9 +15,10 @@ import mdat "gnrcrdr/metadata"
 import rdr "gnrcrdr/reader"
 
 Options :: struct {
-	schema: string `args:"pos=0,required" usage:"Schema: a Kaitai Struct .ksy file."`,
-	file:   string `args:"pos=1,required" usage:"File to decode."`,
-	dump:   string `usage:"Output form: tree or json (default tree)."`,
+	schema:      string `args:"pos=0,required" usage:"Schema: a Kaitai Struct .ksy file."`,
+	file:        string `args:"pos=1,required" usage:"File to decode."`,
+	dump:        string `usage:"Output form: tree or json (default tree)."`,
+	import_path: string `args:"name=import-path" usage:"Directories that absolute imports (/a/b) are found in, separated by ':' (';' on Windows)."`,
 }
 
 Dump_Kind :: enum {
@@ -31,7 +32,7 @@ main :: proc() {
 	opts, dump, usage_exit, ok := parse_args(os.args)
 	if !ok do os.exit(usage_exit)
 
-	exit_code := run_tracked(opts.schema, opts.file, dump)
+	exit_code := run_tracked(opts.schema, opts.file, opts.import_path, dump)
 
 	os.exit(exit_code) // os.exit skips defers: run_tracked has already cleaned up
 }
@@ -69,14 +70,14 @@ parse_args :: proc(args: []string) -> (opts: Options, dump: Dump_Kind, exit_code
 // Calls run. In debug builds (-debug) it runs under a tracking allocator and
 // reports leaks and bad frees on stderr, either of which turns exit code 0
 // into 1.
-run_tracked :: proc(schema_path: string, file_path: string, dump: Dump_Kind) -> int {
+run_tracked :: proc(schema_path: string, file_path: string, import_path: string, dump: Dump_Kind) -> int {
 	when ODIN_DEBUG {
 		tracking_allocator: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&tracking_allocator, context.allocator)
 		tracking_allocator.bad_free_callback = mem.tracking_allocator_bad_free_callback_add_to_array
 		context.allocator = mem.tracking_allocator(&tracking_allocator)
 
-		exit_code := run(schema_path, file_path, dump)
+		exit_code := run(schema_path, file_path, import_path, dump)
 
 		if reset_tracking_allocator(&tracking_allocator) && exit_code == 0 {
 			exit_code = 1
@@ -84,19 +85,21 @@ run_tracked :: proc(schema_path: string, file_path: string, dump: Dump_Kind) -> 
 		mem.tracking_allocator_destroy(&tracking_allocator)
 		return exit_code
 	} else {
-		return run(schema_path, file_path, dump)
+		return run(schema_path, file_path, import_path, dump)
 	}
 }
 
-// Loads the format from schema_path, decodes file_path with it and writes the decoded tree to stdout as a text
-// dump or JSON. Errors are reported on stderr, and nothing is written to
-// stdout unless decoding succeeds. Returns 0 on success, 1 on a load, parse
-// or output error.
-run :: proc(schema_path: string, file_path: string, dump: Dump_Kind) -> int {
+// Loads the format from schema_path, with absolute imports found in the
+// directories of the list import_path, decodes file_path with it and writes
+// the decoded tree to stdout as a text dump or JSON. Errors are reported on
+// stderr, and nothing is written to stdout unless decoding succeeds.
+// Returns 0 on success, 1 on a load, parse or output error.
+run :: proc(schema_path: string, file_path: string, import_path: string, dump: Dump_Kind) -> int {
 	file_format: mdat.File_Format
 	defer mdat.destroy_file_format(&file_format)
 
-	if !load_format(schema_path, &file_format) do return 1
+	import_paths, _ := filepath.split_list(import_path, context.temp_allocator)
+	if !load_format(schema_path, import_paths, &file_format) do return 1
 
 	tree: fld.Value_Tree
 	// the tree may be partially filled after a parse error; free it either way
@@ -135,20 +138,22 @@ run :: proc(schema_path: string, file_path: string, dump: Dump_Kind) -> int {
 	return 0
 }
 
-// Loads file_format from schema_path, reporting any error on stderr.
-load_format :: proc(schema_path: string, file_format: ^mdat.File_Format) -> bool {
-	err := ksy.read_file_format(schema_path, file_format)
+// Loads file_format from schema_path, reporting any error on stderr with
+// the file it is in: the schema, or one it imports.
+load_format :: proc(schema_path: string, import_paths: []string, file_format: ^mdat.File_Format) -> bool {
+	err := ksy.read_file_format(schema_path, file_format, import_paths)
 	defer ksy.destroy_error(&err)
 
+	file := err.path != "" ? err.path : schema_path
 	switch {
 	case err.kind == .None:
 		return true
 	case err.kind == .Read_Failed:
-		fmt.eprintfln("error: cannot read %s: %v", schema_path, err.os_error)
+		fmt.eprintfln("error: cannot read %s: %v", file, err.os_error)
 	case err.line == 0:
-		fmt.eprintfln("error: %s: %v: %s", schema_path, err.kind, err.message)
+		fmt.eprintfln("error: %s: %v: %s", file, err.kind, err.message)
 	case:
-		fmt.eprintfln("error: %s:%v:%v: %v: %s", schema_path, err.line, err.column, err.kind, err.message)
+		fmt.eprintfln("error: %s:%v:%v: %v: %s", file, err.line, err.column, err.kind, err.message)
 	}
 	return false
 }
