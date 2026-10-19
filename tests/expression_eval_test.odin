@@ -32,6 +32,7 @@ plan_node :: proc(id: int, name: string, type: dat.Data_Type, a: mem.Allocator, 
 	n := new(mdat.Node, a)
 	n^ = {id = id, name = name, ref_name = name, type = type, count = mdat.Fixed_Count{1}}
 	if len(children) > 0 do n.children = slice_clone(children, a)
+	n.slot_count = mdat.count_slots(n) // the children's bit fields must be set first
 	return n
 }
 
