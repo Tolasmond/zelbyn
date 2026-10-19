@@ -93,7 +93,7 @@ error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]
 | Area | Supported |
 |---|---|
 | Top level | `meta`, `seq`, `types`, `instances`, `enums`, `doc`, `doc-ref` |
-| `meta` | `id`, `endian`, `bit-endian`, `encoding`; `title`, `file-extension`, `xref`, `license` (ignored) |
+| `meta` | `id`, `endian`, `bit-endian`, `encoding`, `ks-version` (0.11 or older, the Kaitai version gnrcrdr follows); `title`, `application`, `file-extension`, `xref`, `license`, `tags` (ignored) |
 | Attributes | `id`, `type`, `size`, `contents`, `if`, `enum`, `valid` (a constant, or `eq`, `min`/`max`, `any-of`), `repeat` (`expr` with `repeat-expr`, `eos`, `until` with `repeat-until`), `encoding`, `doc`, `doc-ref` |
 | Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `str` with `size` (ASCII or UTF-8, kept as bytes, NULs included), byte arrays, user types (not recursive; with `size`, read from a substream of that many bytes), `switch-on` with `cases` whose types are user types, including the `_` default case |
 | Instances | value instances (`value:`), over the fields and other value instances of their own type. Expressions anywhere can refer to them; they are evaluated each time, and not dumped |

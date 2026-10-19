@@ -34,7 +34,6 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    sizee: 1\n", .Invalid, 7, 5, `attribute a: unknown key "sizee"`},
 	{HEAD + "params:\n  - id: p\n", .Unsupported, 4, 1, "params is not supported"},
 	{HEAD + "sequence: []\n", .Invalid, 4, 1, `the top level: unknown key "sequence"`},
-	{"meta:\n  id: t\n  ks-version: 0.9\n", .Unsupported, 3, 3, "meta: ks-version is not supported"},
 	{"meta:\n  id: t\n  imports: [a]\n", .Unsupported, 3, 3, "meta: imports is not supported"},
 	{"meta:\n  id: t\n  name: x\n", .Invalid, 3, 3, `meta: unknown key "name"`},
 	{"meta:\n  id: t\n  -peek: [1]\n", .Invalid, 3, 3, "the extension -peek does not apply here"},
@@ -50,6 +49,16 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\n  endian: little\n", .Invalid, 3, 11, `endian must be le or be, not "little"`},
 	{"meta:\n  id: t\n  endian:\n    switch-on: x\n", .Unsupported, 4, 5, "endian: switch-on is not supported"},
 	{"meta:\n  id: t\n  encoding: UTF-16LE\n", .Unsupported, 3, 13, `encoding "UTF-16LE" is not supported`},
+	{"meta:\n  id: t\n  ks-version: 0.12\n", .Unsupported, 3, 15, "ks-version 0.12 is newer than 0.11, the Kaitai version gnrcrdr follows"},
+	{"meta:\n  id: t\n  ks-version: 0.11.1\n", .Unsupported, 3, 15, "ks-version 0.11.1 is newer than 0.11"},
+	{"meta:\n  id: t\n  ks-version: 1\n", .Unsupported, 3, 15, "ks-version 1 is newer than 0.11"},
+	{"meta:\n  id: t\n  ks-version: 0.9.\n", .Invalid, 3, 15, `ks-version "0.9." is not a version`},
+	{"meta:\n  id: t\n  ks-version: 0..9\n", .Invalid, 3, 15, `ks-version "0..9" is not a version`},
+	{"meta:\n  id: t\n  ks-version: 0.9.1.2\n", .Invalid, 3, 15, `ks-version "0.9.1.2" is not a version`},
+	{"meta:\n  id: t\n  ks-version: v0.9\n", .Invalid, 3, 15, `ks-version "v0.9" is not a version`},
+	{"meta:\n  id: t\n  ks-version: ''\n", .Invalid, 3, 15, `ks-version "" is not a version`},
+	{"meta:\n  id: t\n  ks-version: 99999999999999999999.0\n", .Invalid, 3, 15, "is not a version"},
+	{"meta:\n  id: t\n  ks-version: [0, 9]\n", .Invalid, 3, 15, "ks-version must be a scalar"},
 
 	// attributes
 	{HEAD + "seq:\n  - type: u1\n", .Unsupported, 5, 5, "an attribute in type t has no id"},
@@ -335,6 +344,13 @@ t[0].z[0] = -2
 
 	// - keys gnrcrdr does not know are ignored, as the official tools do
 	expect_dump(t, "unknown extension", ksy_dump(t, HEAD + "-webide-representation: x\nseq:\n  - id: a\n    type: u1\n    -note: y\n", {7}), "t[0].a[0] = 7\n")
+
+	// meta keys that affect no decoding are ignored, and ks-version is no
+	// newer than 0.11
+	meta := "meta:\n  id: t\n  title: T\n  application: [A, B]\n  file-extension: t\n  xref:\n    wikidata: Q1\n  license: CC0-1.0\n  tags: [x, y]\n  ks-version: %s\nseq:\n  - id: a\n    type: u1\n"
+	for v in ([]string{"0.6", "0.9", "'0.10'", "\"0.11\"", "0.11.0", "0.10.9"}) {
+		expect_dump(t, v, ksy_dump(t, fmt.tprintf(meta, v), {7}), "t[0].a[0] = 7\n")
+	}
 
 	// -orig-id on a type documents its original name, as in
 	// kaitai_struct_formats; nothing shows it
