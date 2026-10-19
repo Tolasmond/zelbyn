@@ -4,6 +4,7 @@ import dat "../data"
 import fld "../field"
 import mdata "../metadata"
 import "core:os"
+import "core:slice"
 
 // Reads the file name into tree's arena, closes it, and decodes it into
 // tree, which must be zero or destroyed. Strings and blobs are views of that
@@ -233,8 +234,8 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, must_
 }
 
 // Reads instance index of set node into s: from a substream when node has
-// a length, and as the set its switch-on chooses. A switch-on that chooses
-// no set reads nothing.
+// a length or a terminator, and as the set its switch-on chooses. A
+// switch-on that chooses no set reads nothing.
 @(private = "file", require_results)
 read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> dat.Read_Error {
 	set := node
@@ -252,14 +253,10 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> d
 		if set == nil do return .None
 	}
 
-	if node.length == nil do return read_set_instance(d, s, set, choice)
+	if node.length == nil && node.terminator == nil do return read_set_instance(d, s, set, choice)
 
 	start := d.r.pos
-	n, err := byte_length(d, node.length, index)
-	if err != .None do return fail(d, err, start)
-	bytes: []byte
-	bytes, err = dat.read_bytes(&d.r, n)
-	if err != .None do return fail(d, err, start)
+	bytes := element_bytes(d, node, index) or_return
 
 	// the parent's stream is already past the substream, whatever the
 	// instance consumes
@@ -326,20 +323,9 @@ read_scalar :: proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.V
 	case .Float64:
 		value, err = to_value(dat.read(&d.r, f64, node.order))
 	case .String:
-		n: int
-		n, err = byte_length(d, node.length, index)
-		if err != .None do return nil, fail(d, err, start)
-		src: []byte
-		src, err = dat.read_bytes(&d.r, n)
-		if err == .None do value = fld.Value(string(src))
+		value = fld.Value(string(element_bytes(d, node, index) or_return))
 	case .Blob:
-		n: int
-		n, err = byte_length(d, node.length, index)
-		if err != .None do return nil, fail(d, err, start)
-		src: []byte
-		src, err = dat.read_bytes(&d.r, n)
-		if err != .None do return nil, fail(d, err, start)
-		value = fld.Value(src)
+		value = fld.Value(element_bytes(d, node, index) or_return)
 	case .Set:
 		panic("read_scalar: called for a set")
 	}
@@ -347,6 +333,42 @@ read_scalar :: proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.V
 	if err == .None do err = check_valid(value, node.valid)
 	if err != .None do return nil, fail(d, err, start)
 	return value, .None
+}
+
+// Reads the bytes of element index of node, a String or Blob, or of the
+// substream of instance index of a Set: those of its length, without the
+// pad_right at their end and cut at its terminator, or else those up to
+// its terminator.
+@(private = "file", require_results)
+element_bytes :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (bytes: []byte, err: dat.Read_Error) {
+	start := d.r.pos
+	if node.length == nil {
+		t := node.terminator.?
+		bytes, err = dat.read_bytes_term(&d.r, t.value, t.include, t.consume, t.eos_error)
+		if err != .None do return nil, fail(d, err, start)
+		return
+	}
+
+	n: int
+	n, err = byte_length(d, node.length, index)
+	if err != .None do return nil, fail(d, err, start)
+	bytes, err = dat.read_bytes(&d.r, n)
+	if err != .None do return nil, fail(d, err, start)
+	if node.pad_right != nil || node.terminator != nil do bytes = trim_bytes(node, bytes)
+	return
+}
+
+// bytes without node's pad_right at their end, and cut at its terminator.
+@(private = "file")
+trim_bytes :: proc(node: ^mdata.Node, bytes: []byte) -> []byte {
+	bytes := bytes
+	if pad, padded := node.pad_right.?; padded {
+		for len(bytes) > 0 && bytes[len(bytes) - 1] == pad do bytes = bytes[:len(bytes) - 1]
+	}
+	if t, terminated := node.terminator.?; terminated {
+		if i, found := slice.linear_search(bytes, t.value); found do bytes = bytes[:i + int(t.include)]
+	}
+	return bytes
 }
 
 @(private = "file", require_results)

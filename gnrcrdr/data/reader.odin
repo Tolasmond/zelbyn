@@ -1,6 +1,7 @@
 package data
 
 import "base:intrinsics"
+import "core:bytes"
 import "core:encoding/endian"
 
 Read_Error :: enum {
@@ -99,6 +100,23 @@ read_bytes :: proc(r: ^Reader, n: int) -> ([]byte, Read_Error) {
 	return take(r, n)
 }
 
+// Returns a view of the bytes up to the first byte term, followed by term
+// when include is set. consume moves past term; without it the reader
+// stops at term. When the data ends first, that is .Unexpected_EOF with
+// eos_error, and otherwise the bytes run to the end. Leaves r unchanged
+// on error.
+@(require_results)
+read_bytes_term :: proc(r: ^Reader, term: byte, include, consume, eos_error: bool) -> ([]byte, Read_Error) {
+	rest := r.data[r.pos:]
+	i := bytes.index_byte(rest, term)
+	if i < 0 {
+		if eos_error do return nil, .Unexpected_EOF
+		r.pos = len(r.data)
+		return rest, .None
+	}
+	r.pos += i + int(consume)
+	return rest[:i + int(include)], .None
+}
 
 // Reads an integer at absolute position pos without changing r.
 @(require_results)

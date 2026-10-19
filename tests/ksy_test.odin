@@ -29,7 +29,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	// keys: Kaitai keys outside the subset, unknown keys, misplaced extensions
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    pos: 1\n", .Unsupported, 7, 5, "attribute a: pos is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    process: xor(1)\n", .Unsupported, 7, 5, "process is not supported"},
-	{HEAD + "seq:\n  - id: a\n    type: str\n    terminator: 0\n", .Unsupported, 7, 5, "terminator is not supported"},
+	{HEAD + "seq:\n  - id: a\n    size: 1\n    io: _root._io\n", .Unsupported, 7, 5, "attribute a: io is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    sizee: 1\n", .Invalid, 7, 5, `attribute a: unknown key "sizee"`},
 	{HEAD + "params:\n  - id: p\n", .Unsupported, 4, 1, "params is not supported"},
 	{HEAD + "sequence: []\n", .Invalid, 4, 1, `the top level: unknown key "sequence"`},
@@ -63,16 +63,15 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - type: u1\n", .Unsupported, 5, 5, "an attribute in type t has no id"},
 	{HEAD + "seq:\n  - id: A\n    type: u1\n", .Invalid, 5, 9, `id "A" is not an identifier`},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n  - id: a\n    type: u1\n", .Invalid, 7, 9, "id a is already used (line 5, column 9)"},
-	{HEAD + "seq:\n  - id: a\n", .Invalid, 5, 5, "a needs a type, a size, size-eos or contents"},
-	{HEAD + "seq:\n  - id: a\n    size-eos: false\n", .Invalid, 5, 5, "a needs a type, a size, size-eos or contents"},
+	{HEAD + "seq:\n  - id: a\n", .Invalid, 5, 5, "a needs a type, size, size-eos, terminator or contents"},
+	{HEAD + "seq:\n  - id: a\n    size-eos: false\n", .Invalid, 5, 5, "a needs a type, size, size-eos, terminator or contents"},
 
 	// types
 	{HEAD + "seq:\n  - id: a\n    type: u3\n", .Invalid, 6, 11, "a: unknown type u3"},
 	{HEAD + "seq:\n  - id: a\n    type: u1le\n", .Invalid, 6, 11, "a: unknown type u1le"},
 	{"meta:\n  id: t\nseq:\n  - id: a\n    type: u2\n", .Invalid, 5, 11, "a: u2 needs le or be, or meta endian"},
-	{HEAD + "seq:\n  - id: a\n    type: strz\n    encoding: ASCII\n", .Unsupported, 6, 11, "a: type strz is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: b3\n", .Unsupported, 6, 11, "a: type b3 is not supported"},
-	{HEAD + "seq:\n  - id: a\n    type: str\n    encoding: ASCII\n", .Unsupported, 6, 11, "a: str without size or size-eos is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: str\n    encoding: ASCII\n", .Invalid, 6, 11, "a: str needs size, size-eos or terminator"},
 	{HEAD + "seq:\n  - id: a\n    type: str\n    size: 1\n", .Invalid, 6, 11, "a: str needs an encoding"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    encoding: ASCII\n", .Invalid, 7, 5, "a: encoding applies only to str"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    size: 2\n", .Invalid, 7, 5, "a: size does not apply to u1"},
@@ -83,10 +82,21 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    size-eos: true\n", .Invalid, 7, 5, "a: size and size-eos cannot both be given"},
 	{HEAD + "seq:\n  - id: a\n    size-eos: yes\n", .Invalid, 6, 15, `size-eos must be true or false, not "yes"`},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    size-eos: true\n", .Invalid, 7, 5, "a: size-eos does not apply to u1"},
-	{HEAD + "seq:\n  - id: a\n    contents: [1]\n    size-eos: true\n", .Invalid, 7, 5, "a: contents cannot have a size-eos"},
+	{HEAD + "seq:\n  - id: a\n    contents: [1]\n    size-eos: true\n", .Invalid, 7, 5, "a: contents cannot have size-eos"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    size-eos: true\ntypes:\n  s: {}\n", .Unsupported, 10, 5, "a: size-eos on a switch-on field is not supported"},
 	{HEAD + "seq:\n  - id: a\n    contents: 1\n", .Invalid, 6, 15, "contents: write a byte as a sequence, [1]"},
 	{HEAD + "seq:\n  - id: a\n    contents: [256]\n", .Invalid, 6, 16, "contents: 256 is not a byte"},
+
+	// terminator and pad-right
+	{HEAD + "seq:\n  - id: a\n    terminator: 256\n", .Invalid, 6, 17, `a: terminator must be a byte, 0 to 255, not "256"`},
+	{HEAD + "seq:\n  - id: a\n    terminator: '0'\n", .Invalid, 6, 17, `a: terminator must be a byte, 0 to 255, not "0"`},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    terminator: 0\n", .Invalid, 7, 5, "a: terminator does not apply to u1"},
+	{HEAD + "seq:\n  - id: a\n    contents: [1]\n    pad-right: 0\n", .Invalid, 7, 5, "a: contents cannot have pad-right"},
+	{HEAD + "seq:\n  - id: a\n    size: 1\n    consume: false\n", .Invalid, 7, 5, "a: consume applies only with terminator or strz"},
+	{HEAD + "seq:\n  - id: a\n    size: 2\n    terminator: 0\n    eos-error: false\n", .Invalid, 8, 5, "a: eos-error does not apply with a size"},
+	{HEAD + "seq:\n  - id: a\n    terminator: 0\n    include: maybe\n", .Invalid, 7, 14, `include must be true or false, not "maybe"`},
+	{HEAD + "seq:\n  - id: a\n    terminator: 0\n    pad-right: 0\n", .Invalid, 7, 5, "a: pad-right needs size or size-eos"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    terminator: 0\ntypes:\n  s: {}\n", .Unsupported, 10, 5, "a: terminator on a switch-on field is not supported"},
 
 	// counts
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    repeat: forever\n", .Invalid, 7, 13, `a: repeat must be expr, eos or until, not "forever"`},
@@ -504,6 +514,69 @@ t[0].rest[0].tail[0] = <2 bytes> 04 05
 	str_eos := HEAD + "seq:\n  - id: s\n    type: str\n    encoding: ASCII\n    size-eos: true\n"
 	expect_dump(t, "str size-eos", ksy_dump(t, str_eos, {'h', 'i'}), "t[0].s[0] = \"hi\"\n")
 	expect_dump(t, "str size-eos empty", ksy_dump(t, str_eos, {}), "t[0].s[0] = \"\"\n")
+
+	// terminator: strz; a byte array up to its terminator, which is
+	// consumed, kept with include, or left with consume: false; a
+	// substream; a str to the end with eos-error: false. With a size,
+	// pad-right is removed from the end before the bytes are cut at the
+	// terminator
+	term := HEAD + `seq:
+  - id: z
+    type: strz
+    encoding: ASCII
+  - id: line
+    terminator: 0x0a
+    include: true
+  - id: word
+    type: str
+    encoding: ASCII
+    terminator: 0x20
+    consume: false
+  - id: space
+    type: u1
+  - id: sub
+    type: sub
+    terminator: 0x3b
+  - id: padded
+    type: str
+    encoding: ASCII
+    size: 4
+    pad-right: 0x20
+  - id: cut
+    size: 4
+    terminator: 0
+    pad-right: 0xff
+  - id: tail
+    type: str
+    encoding: ASCII
+    terminator: 0
+    eos-error: false
+types:
+  sub:
+    seq:
+      - id: a
+        type: u1
+      - id: rest
+        size-eos: true
+`
+	term_input := []byte{'a', 'b', 0, 'x', '\n', 'h', 'i', ' ', 1, 2, 3, ';', 'o', 'k', ' ', ' ', 5, 0xff, 0, 0xff, 'e', 'n', 'd'}
+	expect_dump(t, "terminator", ksy_dump(t, term, term_input), `t[0].z[0] = "ab"
+t[0].line[0] = <2 bytes> 78 0a
+t[0].word[0] = "hi"
+t[0].space[0] = 32
+t[0].sub[0].a[0] = 1
+t[0].sub[0].rest[0] = <2 bytes> 02 03
+t[0].padded[0] = "ok"
+t[0].cut[0] = <2 bytes> 05 ff
+t[0].tail[0] = "end"
+`)
+	expect_dump(t, "no terminator", ksy_dump(t, term, {'a', 'b'}), "error: Unexpected_EOF at 0 in t[0].z[0]")
+
+	// include without consume leaves the reader at the terminator, as the
+	// C++ and Python runtimes do (the JavaScript one moves one byte
+	// further whenever include is set)
+	kept := HEAD + "seq:\n  - id: a\n    terminator: 0\n    include: true\n    consume: false\n  - id: b\n    type: u1\n"
+	expect_dump(t, "include without consume", ksy_dump(t, kept, {7, 0}), "t[0].a[0] = <2 bytes> 07 00\nt[0].b[0] = 0\n")
 
 	// every count on primitives: an expression, -peek, repeat: eos and
 	// repeat: until over _

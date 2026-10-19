@@ -16,7 +16,9 @@ Node :: struct {
 	order:      endian.Byte_Order, // integer and float types: the byte order they are read in
 	cond:       ^Expr,             // a Bool expression: the field is read only when it is true; nil when always read (Kaitai's if)
 	count:      Count,             // instances of a set, or elements of any other field
-	length:     Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from, or nil to read from the parent's stream
+	length:     Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from. nil for a terminator alone, or for a Set read from its parent's stream
+	terminator: Maybe(Terminator), // String, Blob and Set: the byte that ends each element's bytes (Kaitai's terminator, and strz)
+	pad_right:  Maybe(u8),         // String, Blob and Set with a length: removed from the end of each element's bytes (Kaitai's pad-right)
 	children:   []^Node,           // Set only, in order; nil when switch_on is set
 	slot_count: int,               // Set only: the slots in each instance (count_slots), recorded when children is set
 	switch_on:  ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
@@ -145,6 +147,20 @@ Rule_Length :: struct {
 
 // The rest of the stream being read (Kaitai's size-eos).
 Eos_Length :: struct {}
+
+// The byte that ends each element of a String or Blob, or the substream
+// of each instance of a Set (Kaitai's terminator). Without a length, the
+// bytes run up to the terminator, and consume moves past it; when the
+// stream ends first, that is an error with eos_error, else the bytes run
+// to the end. With a length, its bytes are read, pad_right is removed
+// from their end, and they are cut at the first terminator, if any.
+// include keeps the terminator in the bytes.
+Terminator :: struct {
+	value:     u8,
+	include:   bool,
+	consume:   bool,
+	eos_error: bool,
+}
 
 // A field whose type is chosen by a value (Kaitai's switch-on): each
 // instance is one of the set of the first case whose value equals on, or of

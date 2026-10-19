@@ -77,7 +77,7 @@ Stdout carries only the decoded tree. Errors and usage messages go to stderr, an
 A `.ksy` schema that cannot be compiled is reported with its line and column, and the kind of problem: `Syntax`, `Unsupported` (valid YAML or Kaitai outside the supported subset) or `Invalid`:
 
 ```
-error: formats/x.ksy:6:5: Unsupported: attribute a: terminator is not supported
+error: formats/x.ksy:6:5: Unsupported: attribute a: process is not supported
 ```
 
 Decoding checks every value against its field's `contents` and `valid`. A value that does not pass stops the decode with `Not_Equal`, `Less_Than_Min`, `Greater_Than_Max` or `Not_Any_Of`, at the offset and path of that value. A file that is not a GIF fails on its signature:
@@ -94,14 +94,16 @@ error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]
 |---|---|
 | Top level | `meta`, `seq`, `types`, `instances`, `enums`, `doc`, `doc-ref` |
 | `meta` | `id`, `endian`, `bit-endian`, `encoding`, `ks-version` (0.11 or older, the Kaitai version gnrcrdr follows); `title`, `application`, `file-extension`, `xref`, `license`, `tags` (ignored) |
-| Attributes | `id`, `type`, `size`, `size-eos`, `contents`, `if`, `enum`, `valid` (a constant, or `eq`, `min`/`max`, `any-of`), `repeat` (`expr` with `repeat-expr`, `eos`, `until` with `repeat-until`), `encoding`, `doc`, `doc-ref` |
-| Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `str` with `size` or `size-eos` (ASCII or UTF-8, kept as bytes, NULs included), byte arrays, user types (not recursive; with `size` or `size-eos`, read from a substream of those bytes), `switch-on` with `cases` whose types are user types, including the `_` default case |
+| Attributes | `id`, `type`, `size`, `size-eos`, `terminator` (with `consume`, `include`, `eos-error`), `pad-right`, `contents`, `if`, `enum`, `valid` (a constant, or `eq`, `min`/`max`, `any-of`), `repeat` (`expr` with `repeat-expr`, `eos`, `until` with `repeat-until`), `encoding`, `doc`, `doc-ref` |
+| Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `str` with `size`, `size-eos` or `terminator`, and `strz` (ASCII or UTF-8, kept as bytes, NULs included within a `size`), byte arrays, user types (not recursive; with `size`, `size-eos` or `terminator`, read from a substream of those bytes), `switch-on` with `cases` whose types are user types, including the `_` default case |
 | Instances | value instances (`value:`), over the fields and other value instances of their own type. Expressions anywhere can refer to them; they are evaluated each time, and not dumped |
 | Expressions | integer and boolean operators, `?:`, field references, `_parent`, `_root`, `_io.pos`, `_io.size`, `_io.eof` (of the substream, inside one), `.size`, `_index`, `_` in `repeat-until`, enum constants (`kinds::two`) |
 
+With a `size`, the bytes are read, `pad-right` is removed from their end, and they are cut at the `terminator`, if one is given. Without one, they run up to the `terminator`; `include` keeps it in the value, and `consume: false` leaves the reader at it, as in the C++ and Python runtimes (the JavaScript runtime moves one byte further when `include` is set). `consume` and `eos-error` do not apply with a `size`, nor `pad-right` without one.
+
 A field read once whose `switch-on` matches no case, without a `_` case, is not read, as in Kaitai; a repeated `switch-on` needs a `_` case. Expressions cannot refer to a `switch-on` field. Each element read by `repeat: eos` must consume input, and so must each element of `repeat: until` but the last.
 
-Not supported yet: `terminator`, `strz`, bit types (`b1`–`b64`), instances other than value instances (`pos`, `io`), `params`, `imports`, attributes without an `id`, `size` or `size-eos` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
+Not supported yet: bit types (`b1`–`b64`), instances other than value instances (`pos`, `io`), `params`, `imports`, attributes without an `id`, `size`, `size-eos` or `terminator` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
 
 Keys starting with `-` are extensions. The official Kaitai tools ignore them, and gnrcrdr ignores the ones it does not know, as well as `-orig-id` on a type. gnrcrdr's own extensions let `formats/gif89a.ksy` give the same dumps as the SQLite schema it was ported from:
 
