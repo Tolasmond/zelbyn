@@ -81,10 +81,10 @@ read_file_format :: proc(path: string, file_format: ^mdata.File_Format, import_p
 // it is "", relative imports are found in the current directory.
 @(require_results)
 compile :: proc(src: string, file_format: ^mdata.File_Format, path := "", import_paths: []string = nil) -> Error {
-	scratch: arn.Arena
-	defer arn.arena_destroy(&scratch)
-
-	c := Compiler{allocator = arn.arena_allocator(&file_format.arena), scratch = arn.arena_allocator(&scratch), import_paths = import_paths}
+	// what only compiling needs goes in the plan's arena too: a second arena
+	// would cost a mapping, and its first pages, in every compile
+	plan := arn.arena_allocator(&file_format.arena)
+	c := Compiler{allocator = plan, scratch = plan, import_paths = import_paths}
 	c.instances = make(map[^mdata.Value_Instance]^Instance_Source, c.scratch)
 	c.parse_instances = make(map[^mdata.Node]^Parse_Source, c.scratch)
 	c.imported = make(map[string]^Type_Def, c.scratch)
@@ -99,7 +99,7 @@ compile :: proc(src: string, file_format: ^mdata.File_Format, path := "", import
 @(private = "file")
 Compiler :: struct {
 	allocator:       mem.Allocator, // the File_Format's arena
-	scratch:         mem.Allocator, // freed after compiling
+	scratch:         mem.Allocator, // for what only compiling needs: the YAML documents, types, maps; the File_Format's arena too, freed with it
 	next_id:         int,
 	schema:          ^Schema,              // the one whose types are being compiled
 	imported:        map[string]^Type_Def, // the top-level type of each schema read from a file, by its cleaned path; in scratch
