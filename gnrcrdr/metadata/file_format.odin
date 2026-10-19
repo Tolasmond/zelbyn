@@ -3,7 +3,8 @@ package metadata
 import arn "../arena"
 
 // A compiled format. name and every node reachable from root are allocated
-// in arena and freed by destroy_file_format.
+// in arena and freed by destroy_file_format, as is what the compiler needed
+// only while it ran.
 File_Format :: struct {
 	name:  string,
 	root:  ^Node,
