@@ -90,10 +90,12 @@ parse :: proc(src: string, doc: ^Document) -> Error {
 // Parses src as parse does, allocating every node and string with
 // allocator, which must free them all at once (an arena): an error leaves
 // what was allocated. root is nil for a stream with no document, and on
-// error. The nodes do not refer to src.
+// error. The nodes do not refer to src: the parser reads a copy of it,
+// made with allocator, which the text of a scalar is a slice of unless it
+// has to be built.
 @(require_results)
 parse_into :: proc(src: string, allocator: mem.Allocator) -> (root: ^Node, err: Error) {
-	p := Parser{src = src, line = 1, allocator = allocator}
+	p := Parser{src = strings.clone(src, allocator), line = 1, allocator = allocator}
 
 	if strings.has_prefix(src, "\xef\xbb\xbf") do p.pos, p.line_start = 3, 3
 
@@ -603,7 +605,7 @@ parse_plain :: proc(p: ^Parser, indent: int, flow: bool) -> (node: ^Node, multil
 
 	// leave the reader right after the last character
 	reset(p, end)
-	text := folded ? strings.to_string(b) : strings.clone(p.src[start.pos:end.pos], p.allocator)
+	text := folded ? strings.to_string(b) : p.src[start.pos:end.pos]
 	return new_scalar(p, start, .Plain, text), end.line != start.line
 }
 
@@ -655,7 +657,7 @@ parse_quoted :: proc(p: ^Parser) -> ^Node {
 		}
 
 		if peek(p) == quote {
-			text := built ? strings.to_string(b) : strings.clone(p.src[from:p.pos], p.allocator)
+			text := built ? strings.to_string(b) : p.src[from:p.pos]
 			advance(p)
 			return new_scalar(p, start, style, text)
 		}
