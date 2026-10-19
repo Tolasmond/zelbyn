@@ -1,11 +1,11 @@
 package tests
 
+import arn "../gnrcrdr/arena"
 import dat "../gnrcrdr/data"
 import expr "../gnrcrdr/expression"
 import mdat "../gnrcrdr/metadata"
 import "core:fmt"
 import "core:mem"
-import "core:mem/virtual"
 import "core:testing"
 
 // A hand-built plan whose fields expressions can refer to:
@@ -47,7 +47,7 @@ slice_clone :: proc(s: []^mdat.Node, a: mem.Allocator) -> []^mdat.Node {
 // and returns nil on error.
 @(private)
 must_compile :: proc(t: ^testing.T, ff: ^mdat.File_Format, text: string, scope: ..^mdat.Node, in_repeat := false) -> ^mdat.Expr {
-	e, err := expr.compile(text, {types = scope, in_repeat = in_repeat}, .Int, virtual.arena_allocator(&ff.arena))
+	e, err := expr.compile(text, {types = scope, in_repeat = in_repeat}, .Int, arn.arena_allocator(&ff.arena))
 	defer expr.destroy_error(&err)
 	testing.expectf(t, err.kind == .None, "%q: %v at %v: %s", text, err.kind, err.offset, err.message)
 	return e
@@ -56,7 +56,7 @@ must_compile :: proc(t: ^testing.T, ff: ^mdat.File_Format, text: string, scope: 
 // Fills p, which must be zero; destroy with mdat.destroy_file_format(&p.ff).
 @(private)
 make_expr_plan :: proc(t: ^testing.T, p: ^Expr_Plan) {
-	a := virtual.arena_allocator(&p.ff.arena)
+	a := arn.arena_allocator(&p.ff.arena)
 
 	tag := plan_node(12, "tag", .Blob, a)
 	p.hdr = plan_node(10, "hdr", .Set, a, plan_node(11, "n", .UInt8, a), tag)
@@ -94,7 +94,7 @@ expression_field_references :: proc(t: ^testing.T) {
 expression_repeat_index :: proc(t: ^testing.T) {
 	ff: mdat.File_Format
 	defer mdat.destroy_file_format(&ff)
-	a := virtual.arena_allocator(&ff.arena)
+	a := arn.arena_allocator(&ff.arena)
 
 	s := plan_node(2, "s", .Blob, a)
 	s.count = mdat.Fixed_Count{3}
@@ -214,7 +214,7 @@ expression_eval :: proc(t: ^testing.T) {
 expression_absent_set :: proc(t: ^testing.T) {
 	ff: mdat.File_Format
 	defer mdat.destroy_file_format(&ff)
-	a := virtual.arena_allocator(&ff.arena)
+	a := arn.arena_allocator(&ff.arena)
 
 	// opt: present only when the input starts with 0x21
 	opt := plan_node(2, "opt", .Set, a, plan_node(3, "n", .UInt8, a))

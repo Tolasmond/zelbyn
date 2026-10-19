@@ -1,5 +1,7 @@
 package field
 
+import arn "../arena"
+
 Value :: union {
 	i8,
 	i16,
@@ -38,13 +40,13 @@ DEFAULT_CASE :: -1
 
 // Allocates an instance with n slots, all empty, in one block of a, and
 // returns it with its n cells.
-make_instance :: proc(a: ^Tree_Arena, n: int, choice: int) -> (instance: ^Instance, cells: []Value) {
+make_instance :: proc(a: ^arn.Arena, n: int, choice: int) -> (instance: ^Instance, cells: []Value) {
 	// Instance, slots and Value all have the alignment of a pointer
 	#assert(align_of(Instance) == align_of(rawptr) && align_of([]Value) == align_of(rawptr) && align_of(Value) == align_of(rawptr))
 	SLOT_WORDS :: size_of([]Value) / size_of(rawptr)
 	CELL_WORDS :: size_of(Value) / size_of(rawptr)
 	HEADER_WORDS :: size_of(Instance) / size_of(rawptr)
-	words := raw_data(tree_arena_make(a, rawptr, HEADER_WORDS + n * (SLOT_WORDS + CELL_WORDS)))
+	words := raw_data(arn.arena_make(a, rawptr, HEADER_WORDS + n * (SLOT_WORDS + CELL_WORDS)))
 	instance = (^Instance)(words)
 	slots := ([^][]Value)(&words[HEADER_WORDS])
 	instance.slots = slots[:n]
@@ -67,12 +69,12 @@ instance_cells :: proc(instance: ^Instance) -> []Value {
 // one of the copies.
 Value_Tree :: struct {
 	root:  []Value,
-	arena: Tree_Arena,
+	arena: arn.Arena,
 }
 
 // Frees the whole tree and resets it to the zero value, ready for reuse. Safe
 // on a zero or already destroyed tree.
 destroy_value_tree :: proc(tree: ^Value_Tree) {
-	tree_arena_destroy(&tree.arena)
+	arn.arena_destroy(&tree.arena)
 	tree^ = {}
 }

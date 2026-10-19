@@ -1,5 +1,6 @@
 package tests
 
+import arn "../gnrcrdr/arena"
 import dat "../gnrcrdr/data"
 import fld "../gnrcrdr/field"
 import ksy "../gnrcrdr/ksy"
@@ -324,7 +325,7 @@ schema_compile_uses_only_arena :: proc(t: ^testing.T) {
 
 		testing.expectf(t, err.kind == .None, "%s: %v at %v:%v: %s", path, err.kind, err.line, err.column, err.message)
 		testing.expectf(t, track.total_allocation_count == 0, "%s: %v heap allocations, want 0", path, track.total_allocation_count)
-		testing.expectf(t, ff.arena.total_used > 0, "%s: arena unused", path)
+		testing.expectf(t, arn.arena_used(&ff.arena) > 0, "%s: arena unused", path)
 	}
 }
 
@@ -399,7 +400,7 @@ destroy_file_format_resets :: proc(t: ^testing.T) {
 		context.logger = log.nil_logger()
 
 		mdat.destroy_file_format(&ff)
-		arena_reset = ff.arena.curr_block == nil
+		arena_reset = ff.arena.block == nil
 		name_reset = ff.name == ""
 		root_reset = ff.root == nil
 
@@ -407,7 +408,7 @@ destroy_file_format_resets :: proc(t: ^testing.T) {
 	}
 
 	testing.expect_value(t, track.total_allocation_count, 0)
-	testing.expect(t, arena_reset, "ff.arena.curr_block should be nil")
+	testing.expect(t, arena_reset, "ff.arena.block should be nil")
 	testing.expect(t, name_reset, "ff.name should be empty")
 	testing.expect(t, root_reset, "ff.root should be nil")
 }

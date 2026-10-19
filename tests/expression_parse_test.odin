@@ -1,5 +1,6 @@
 package tests
 
+import arn "../gnrcrdr/arena"
 import expr "../gnrcrdr/expression"
 import mdat "../gnrcrdr/metadata"
 import "core:mem/virtual"
@@ -123,7 +124,7 @@ expression_compile_errors :: proc(t: ^testing.T) {
 	make_expr_plan(t, &p)
 
 	for c in COMPILE_ERROR_CASES {
-		e, err := expr.compile(c.text, {types = {p.root}}, .Int, virtual.arena_allocator(&p.ff.arena))
+		e, err := expr.compile(c.text, {types = {p.root}}, .Int, arn.arena_allocator(&p.ff.arena))
 		defer expr.destroy_error(&err)
 		testing.expectf(
 			t,
@@ -140,7 +141,7 @@ expression_parent_scope :: proc(t: ^testing.T) {
 	p: Expr_Plan
 	defer mdat.destroy_file_format(&p.ff)
 	make_expr_plan(t, &p)
-	a := virtual.arena_allocator(&p.ff.arena)
+	a := arn.arena_allocator(&p.ff.arena)
 
 	e, err := expr.compile("_parent._parent.a", {types = {p.root, p.hdr}}, .Int, a)
 	defer expr.destroy_error(&err)

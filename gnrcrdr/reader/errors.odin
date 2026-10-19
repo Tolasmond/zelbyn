@@ -1,5 +1,6 @@
 package reader
 
+import arn "../arena"
 import dat "../data"
 import fld "../field"
 import "core:mem"
@@ -22,7 +23,7 @@ Path_Segment :: struct {
 Decoder :: struct {
 	r:         dat.Reader,      // the stream being read: the input, or a substream of it
 	base:      int,             // the offset in the input of r.data[0]
-	arena:     ^fld.Tree_Arena, // the value tree's; the decoder allocates its values here directly
+	arena:     ^arn.Arena,      // the value tree's; the decoder allocates its values here directly
 	allocator: mem.Allocator,   // the same arena, for path, frames and streams
 	path:      [dynamic]Path_Segment,
 	frames:    [dynamic]Frame,  // the set instances being decoded, outermost first

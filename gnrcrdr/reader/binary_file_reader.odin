@@ -1,5 +1,6 @@
 package reader
 
+import arn "../arena"
 import dat "../data"
 import fld "../field"
 import mdata "../metadata"
@@ -20,7 +21,7 @@ read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree) ->
 	// a size that cannot be found leaves the arena at its default first block
 	size, _ := os.file_size(f)
 	init_arena(tree, int(size))
-	data, read_err := os.read_entire_file(f, fld.tree_arena_allocator(&tree.arena))
+	data, read_err := os.read_entire_file(f, arn.arena_allocator(&tree.arena))
 	os.close(f)
 	if read_err != nil {
 		return 0, Parse_Error{kind = .File_Read_Failed, os_error = read_err}
@@ -44,13 +45,13 @@ read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Val
 // tree of every sample, and the input too when read put it there.
 @(private = "file")
 init_arena :: proc(tree: ^fld.Value_Tree, input_size: int) {
-	fld.tree_arena_init(&tree.arena, max(16 * uint(max(input_size, 0)), fld.TREE_ARENA_BLOCK_SIZE))
+	arn.arena_init(&tree.arena, max(16 * uint(max(input_size, 0)), arn.ARENA_BLOCK_SIZE))
 }
 
 // Decodes data into tree, whose arena init_arena has sized.
 @(private = "file", require_results)
 decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
-	allocator := fld.tree_arena_allocator(&tree.arena)
+	allocator := arn.arena_allocator(&tree.arena)
 
 	d := Decoder{arena = &tree.arena, allocator = allocator}
 	d.path = make([dynamic]Path_Segment, allocator)
@@ -82,7 +83,7 @@ Sink :: struct {
 @(private = "file")
 reserve_exactly :: proc(d: ^Decoder, s: ^Sink, n: int) {
 	for &slot, k in s.slots {
-		slot = n <= 1 && s.cells != nil ? s.cells[k:k] : fld.tree_arena_make(d.arena, fld.Value, n)[:0]
+		slot = n <= 1 && s.cells != nil ? s.cells[k:k] : arn.arena_make(d.arena, fld.Value, n)[:0]
 	}
 	s.cap = n
 }
@@ -94,7 +95,7 @@ reserve_growing :: proc(d: ^Decoder, s: ^Sink, n: int) {
 	if n <= s.cap do return
 	s.cap = max(8, 2 * s.cap, n)
 	for &slot in s.slots {
-		grown := fld.tree_arena_make(d.arena, fld.Value, s.cap)
+		grown := arn.arena_make(d.arena, fld.Value, s.cap)
 		copy(grown, slot)
 		slot = grown[:len(slot)]
 	}

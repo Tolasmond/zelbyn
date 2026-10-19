@@ -14,6 +14,7 @@
 // it exits at once, so that bench.py can time starting a process.
 package bench
 
+import arn "../../gnrcrdr/arena"
 import dmp "../../gnrcrdr/dump"
 import fld "../../gnrcrdr/field"
 import ksy "../../gnrcrdr/ksy"
@@ -66,8 +67,7 @@ main :: proc() {
 	}
 	json := time.tick_lap_time(&t)
 
-	tree_bytes: uint
-	for block := tree.arena.block; block != nil; block = block.prev do tree_bytes += block.used
+	tree_bytes := arn.arena_used(&tree.arena)
 
 	fmt.printfln(
 		"compile_us=%.1f read_us=%.1f decode_us=%.1f json_us=%.1f faults=%v tree_bytes=%v input_bytes=%v",
