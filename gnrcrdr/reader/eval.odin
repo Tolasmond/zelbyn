@@ -29,6 +29,7 @@ Repeat :: struct {
 @(private, require_results)
 eval_int :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (n: int, err: dat.Read_Error) {
 	assert(e.type == .Int)
+	if value, ok := eval_direct(d, e.direct, nil); ok do return value, .None
 	v := eval(d, e, {index = index}) or_return
 	return v.(int), .None
 }
@@ -38,8 +39,80 @@ eval_int :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (n: int, err: dat.
 @(private, require_results)
 eval_bool :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1, element: fld.Value = nil) -> (b: bool, err: dat.Read_Error) {
 	assert(e.type == .Bool)
+	if n, ok := eval_direct(d, e.direct, element); ok do return n != 0, .None
 	v := eval(d, e, {index, element}) or_return
 	return v.(bool), .None
+}
+
+// The value of a direct form, a Bool as 0 or 1. ok is false when there is
+// none, or when the field it reads has no value or one that does not fit
+// an int: the tree is then evaluated, and gives the error.
+@(private = "file", require_results)
+eval_direct :: #force_inline proc(d: ^Decoder, direct: mdata.Direct, element: fld.Value) -> (n: int, ok: bool) {
+	switch x in direct {
+	case mdata.Direct_Constant:
+		return x.value, true
+	case mdata.Direct_Field:
+		return direct_field(d, x, element)
+	case mdata.Direct_Compare:
+		v := direct_field(d, x.field, element) or_return
+		result: bool
+		#partial switch x.op {
+		case .Eq:
+			result = v == x.constant
+		case .Ne:
+			result = v != x.constant
+		case .Lt:
+			result = v < x.constant
+		case .Le:
+			result = v <= x.constant
+		case .Gt:
+			result = v > x.constant
+		case .Ge:
+			result = v >= x.constant
+		case:
+			panic("eval_direct: not a comparison")
+		}
+		return int(result), true
+	}
+	return
+}
+
+// The value of f's field, as single_value would give it; ok is false when
+// the field has no value, or one that does not fit an int.
+@(private = "file", require_results)
+direct_field :: #force_inline proc(d: ^Decoder, f: mdata.Direct_Field, element: fld.Value) -> (n: int, ok: bool) {
+	instance: ^fld.Instance
+	if f.of_element {
+		instance = element.(^fld.Instance) or_return
+	} else {
+		if len(d.frames) == 0 do return
+		instance = d.frames[len(d.frames) - 1]
+	}
+	values := instance.slots[f.slot]
+	if len(values) == 0 do return
+
+	switch v in values[0] {
+	case i8:
+		return int(v), true
+	case i16:
+		return int(v), true
+	case i32:
+		return int(v), true
+	case i64:
+		return int(v), true
+	case u8:
+		return int(v), true
+	case u16:
+		return int(v), true
+	case u32:
+		return int(v), true
+	case u64:
+		if v > u64(max(int)) do return
+		return int(v), true
+	case f32, f64, string, []byte, ^fld.Instance:
+	}
+	return
 }
 
 @(private = "file", require_results)

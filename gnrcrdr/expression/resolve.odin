@@ -45,7 +45,54 @@ compile :: proc(text: string, scope: Scope, want: mdata.Expr_Type, allocator: me
 		fail(&r, .Invalid, e.offset, "expected %s, found %s", type_name(want), type_name(e.type))
 	}
 	if r.err.kind != .None do return nil, r.err
+	e.direct = direct_form(e)
 	return e, {}
+}
+
+// The direct form of e, a resolved expression, or nil when it has none
+// (mdata.Direct).
+direct_form :: proc(e: ^mdata.Expr) -> mdata.Direct {
+	#partial switch x in e.variant {
+	case mdata.Int_Literal:
+		return mdata.Direct_Constant{x.value}
+	case mdata.Bool_Literal:
+		return mdata.Direct_Constant{int(x.value)}
+	case mdata.Field_Ref:
+		if f, ok := direct_field(e); ok do return f
+	case mdata.Binary:
+		REVERSED := #partial [mdata.Binary_Op]mdata.Binary_Op {
+			.Eq = .Eq,
+			.Ne = .Ne,
+			.Lt = .Gt,
+			.Le = .Ge,
+			.Gt = .Lt,
+			.Ge = .Le,
+		}
+		if x.op < .Eq || x.op > .Ge do return nil
+		if f, ok := direct_field(x.left); ok {
+			if c, is_literal := x.right.variant.(mdata.Int_Literal); is_literal do return mdata.Direct_Compare{f, x.op, c.value}
+		}
+		if f, ok := direct_field(x.right); ok {
+			if c, is_literal := x.left.variant.(mdata.Int_Literal); is_literal do return mdata.Direct_Compare{f, REVERSED[x.op], c.value}
+		}
+	}
+	return nil
+}
+
+// e as a Direct_Field: an Int field read at most once, of the set instance
+// being decoded or of _.
+@(private = "file")
+direct_field :: proc(e: ^mdata.Expr) -> (f: mdata.Direct_Field, ok: bool) {
+	ref := e.variant.(mdata.Field_Ref) or_return
+	if e.type != .Int do return
+	#partial switch b in ref.base.variant {
+	case mdata.Instance:
+		if b.root || b.up != 0 do return
+		return {slot = ref.slot}, true
+	case mdata.Repeat_Element:
+		return {slot = ref.slot, of_element = true}, true
+	}
+	return
 }
 
 @(private = "file")
