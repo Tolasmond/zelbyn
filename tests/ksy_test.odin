@@ -74,7 +74,11 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: u3\n", .Invalid, 6, 11, "a: unknown type u3"},
 	{HEAD + "seq:\n  - id: a\n    type: u1le\n", .Invalid, 6, 11, "a: unknown type u1le"},
 	{"meta:\n  id: t\nseq:\n  - id: a\n    type: u2\n", .Invalid, 5, 11, "a: u2 needs le or be, or meta endian"},
-	{HEAD + "seq:\n  - id: a\n    type: b3\n", .Unsupported, 6, 11, "a: type b3 is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: b65\n", .Invalid, 6, 11, "a: unknown type b65"},
+	{HEAD + "seq:\n  - id: a\n    type: b01\n", .Invalid, 6, 11, "a: unknown type b01"},
+	{HEAD + "seq:\n  - id: a\n    type: b4\n    size: 1\n", .Invalid, 7, 5, "a: size does not apply to b4"},
+	{HEAD + "seq:\n  - id: a\n    type: b1\n    valid: true\n", .Unsupported, 7, 12, "a: valid on a Bool is not supported"},
+	{"meta:\n  id: t\n  bit-endian: x\n", .Invalid, 3, 15, "bit-endian must be le or be"},
 	{HEAD + "seq:\n  - id: a\n    type: str\n    encoding: ASCII\n", .Invalid, 6, 11, "a: str needs size, size-eos or terminator"},
 	{HEAD + "seq:\n  - id: a\n    type: str\n    size: 1\n", .Invalid, 6, 11, "a: str needs an encoding"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    encoding: ASCII\n", .Invalid, 7, 5, "a: encoding applies only to str"},
@@ -126,6 +130,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases: {}\n      default: x\n", .Invalid, 9, 7, `a: type: unknown key "default"`},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1 == 1\n      cases: {}\n", .Invalid, 7, 20, "switch-on: expected an integer, found a boolean"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n", .Unsupported, 9, 12, "a: a case of type u1 is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: b4le\n", .Unsupported, 9, 12, "a: a case of type b4le is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: nope\n", .Invalid, 9, 12, "a: unknown type nope"},
 	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        n: s\ntypes:\n  s: {}\n", .Unsupported, 11, 9, "a case must be an integer or an enum constant"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n        0x1: s\ntypes:\n  s: {}\n", .Invalid, 10, 9, "a: case 1 is already given (line 9, column 9)"},
@@ -171,6 +176,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 
 	// -bits
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    -bits:\n      - {id: b, low: 0, high: 0}\n", .Invalid, 8, 7, "a: -bits applies only to integer types"},
+	{HEAD + "seq:\n  - id: a\n    type: b8\n    -bits:\n      - {id: b, low: 0, high: 0}\n", .Invalid, 8, 7, "a: -bits does not apply to a bit type"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    -bits:\n      - {id: b, low: 4, high: 8}\n", .Invalid, 8, 9, "b has bits 4 to 8, not within 0 to 7"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    -bits:\n      - {id: a, low: 0, high: 0}\n", .Invalid, 8, 14, "id a is already used"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    -bits:\n      - {id: b, low: 0}\n", .Invalid, 8, 9, "a: a -bits entry has no high"},
@@ -825,4 +831,91 @@ t[0].items[1].w[0] = 770
 	expect_dump(t, "eos without progress", ksy_dump(t, empty, {1}), "error: No_Progress at 0 in t[0].e[0]")
 	empty_until := HEAD + "seq:\n  - id: e\n    type: empty\n    repeat: until\n    repeat-until: _io.eof\ntypes:\n  empty: {}\n"
 	expect_dump(t, "until without progress", ksy_dump(t, empty_until, {1}), "error: No_Progress at 0 in t[0].e[0]")
+}
+
+@(test)
+ksy_bit_types :: proc(t: ^testing.T) {
+	// bit types read on from the bits left over, most significant first
+	// unless le; b1 is a boolean, unless it has an enum. As in Kaitai, a
+	// field after a bit type, and not one, starts at a byte, before its if
+	// (n), but a field after a user type does not (after), so the next bit
+	// type reads the bits sub left (stale). repeat: eos reads the bits left
+	// at the end, and a parse instance starts at a byte
+	src := HEAD + `seq:
+  - id: ver
+    type: b3
+  - id: flag
+    type: b1
+  - id: kind
+    type: b1
+    enum: kind
+  - id: low
+    type: b3le
+  - id: n
+    type: u1
+    if: ver == 5
+  - id: opt
+    type: u1
+    if: flag
+  - id: wide
+    type: b12
+  - id: sub
+    type: sub
+  - id: after
+    type: u1
+  - id: stale
+    type: b4
+  - id: nibbles
+    type: b4
+    repeat: eos
+types:
+  sub:
+    seq:
+      - id: x
+        type: b4
+instances:
+  again:
+    pos: 0
+    type: b3
+enums:
+  kind:
+    0: a
+    1: b
+`
+	expect_dump(t, "bits", ksy_dump(t, src, {0xb3, 0x07, 0x2a, 0xab, 0xcd, 0xe1, 0x99, 0x5f}), `t[0].ver[0] = 5
+t[0].flag[0] = true
+t[0].kind[0] = 0
+t[0].low[0] = 3
+t[0].n[0] = 7
+t[0].opt[0] = 42
+t[0].wide[0] = 2748
+t[0].sub[0].x[0] = 14
+t[0].after[0] = 153
+t[0].stale[0] = 1
+t[0].nibbles[0] = 5
+t[0].nibbles[1] = 15
+t[0].again[0] = 5
+`)
+	expect_dump(t, "bits, flag false", ksy_dump(t, src, {0xa3, 0x07, 0xab, 0xcd, 0xe1, 0x99}), `t[0].ver[0] = 5
+t[0].flag[0] = false
+t[0].kind[0] = 0
+t[0].low[0] = 3
+t[0].n[0] = 7
+t[0].wide[0] = 2748
+t[0].sub[0].x[0] = 14
+t[0].after[0] = 153
+t[0].stale[0] = 1
+t[0].again[0] = 5
+`)
+	expect_dump(t, "bits past the end", ksy_dump(t, src, {0xb3, 0x07, 0x2a, 0xab}), "error: Unexpected_EOF at 3 in t[0].wide[0]")
+
+	// each element of repeat: eos must consume input, which an instance of
+	// bit types does without starting a byte
+	pairs := HEAD + "seq:\n  - id: p\n    type: pair\n    repeat: eos\ntypes:\n  pair:\n    seq:\n      - id: a\n        type: b2\n      - id: b\n        type: b2\n"
+	expect_dump(t, "pairs", ksy_dump(t, pairs, {0xe4}), "t[0].p[0].a[0] = 3\nt[0].p[0].b[0] = 2\nt[0].p[1].a[0] = 1\nt[0].p[1].b[0] = 0\n")
+
+	// meta bit-endian, a be suffix, booleans in JSON, and a 64-bit read
+	// whose low 6 bits are the 6 left over from the first byte
+	le := "meta:\n  id: t\n  bit-endian: le\nseq:\n  - id: a\n    type: b1\n  - id: b\n    type: b1be\n  - id: c\n    type: b64\n"
+	expect_dump(t, "bit-endian le", ksy_json(t, le, {0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f}), `{"t":[{"a":[true],"b":[false],"c":[18446744073709551552]}]}` + "\n")
 }

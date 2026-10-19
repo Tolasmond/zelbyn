@@ -113,7 +113,7 @@ direct_field :: #force_inline proc(d: ^Decoder, f: mdata.Direct_Field, element: 
 	case u64:
 		if v > u64(max(int)) do return
 		return int(v), true
-	case f32, f64, string, []byte, ^fld.Instance:
+	case f32, f64, string, []byte, bool, ^fld.Instance:
 	}
 	return
 }
@@ -172,7 +172,7 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 	case mdata.Io_Size:
 		return len(d.r.data), .None
 	case mdata.Io_Eof:
-		return d.r.pos >= len(d.r.data), .None
+		return dat.at_eof(&d.r), .None
 	case mdata.Repeat_Index:
 		assert(ctx.index >= 0, "eval: _index outside a repeat")
 		return ctx.index, .None
@@ -210,6 +210,8 @@ single_value :: proc(value: fld.Value) -> (Eval_Value, dat.Read_Error) {
 		if v > u64(max(int)) do return nil, .Integer_Overflow
 		return int(v), .None
 	case []byte:
+		return v, .None
+	case bool:
 		return v, .None
 	case ^fld.Instance:
 		return v, .None

@@ -29,7 +29,8 @@ import "core:strings"
 //   - attributes: id, type, size, size-eos, terminator with consume, include
 //     and eos-error, pad-right, contents, if, enum, valid, repeat (expr,
 //     eos, until) with repeat-expr and repeat-until, encoding, doc, doc-ref
-//   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), str and
+//   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), b1-b64
+//     (le/be suffixes or meta bit-endian), str and
 //     byte arrays (no type) with size, size-eos or terminator, strz, user
 //     types (with size, size-eos or terminator, read from a substream), and
 //     switch-on whose cases are user types
@@ -39,8 +40,7 @@ import "core:strings"
 //     (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
-// Not supported yet (Unsupported): bit types (b1-b64), instances without
-// pos or value, io, size, size-eos and terminator on a switch-on field,
+// Not supported yet (Unsupported): instances without pos or value, io, size, size-eos and terminator on a switch-on field,
 // and any valid constant that is not an integer or string literal.
 
 Error_Kind :: enum {
@@ -115,15 +115,17 @@ Compiler :: struct {
 @(private = "file")
 Schema :: struct {
 	path:     string,                   // the file it was read from; "" for source compiled without one
-	endian:   Maybe(endian.Byte_Order), // meta endian
-	encoding: string,                   // meta encoding; "" when absent
-	imports:  []^Type_Def,              // the top-level type of each schema in meta imports, in order
+	bit_endian: endian.Byte_Order,        // meta bit-endian; .Big when absent, as in Kaitai
+	endian:     Maybe(endian.Byte_Order), // meta endian
+	encoding:   string,                   // meta encoding; "" when absent
+	imports:    []^Type_Def,              // the top-level type of each schema in meta imports, in order
 }
 
 @(private = "file")
 new_schema :: proc(c: ^Compiler, path: string) -> ^Schema {
 	s := new(Schema, c.scratch)
 	s.path = path
+	s.bit_endian = .Big
 	return s
 }
 
@@ -379,8 +381,7 @@ load_schema :: proc(c: ^Compiler, root: ^yml.Node) -> (top: ^Type_Def, ok: bool)
 		c.schema.endian = byte_order(c, n, "endian") or_return
 	}
 	if n := get(meta, "bit-endian"); n != nil {
-		// nothing reads bit types yet; the value is still checked
-		_ = byte_order(c, n, "bit-endian") or_return
+		c.schema.bit_endian = byte_order(c, n, "bit-endian") or_return
 	}
 	if n := get(meta, "encoding"); n != nil {
 		c.schema.encoding = encoding(c, n) or_return
@@ -690,8 +691,13 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 	set.parse_instances = parse_instances[:]
 	if seq := get(td.spec, "seq"); seq != nil {
 		children := make([dynamic]^mdata.Node, c.allocator)
+		after_bits := false
 		for attr in seq.items {
 			child := compile_attr(c, td, attr, scope, &ids) or_return
+			// as in Kaitai, a field that follows a bit type, and is not one,
+			// starts at a byte
+			child.align = after_bits && child.width == 0
+			after_bits = child.width > 0
 			append(&children, child)
 			set.children = children[:]
 		}
@@ -848,15 +854,22 @@ primitive :: proc(name: string) -> (type: dat.Data_Type, order: Maybe(endian.Byt
 	return .Set, nil, false
 }
 
-// b1 to b64, with an optional le or be.
+// A bit type name: b1 to b64, with le or be after it or not.
 @(private = "file")
-is_bit_type :: proc(name: string) -> bool {
-	s := strings.trim_suffix(strings.trim_suffix(name, "le"), "be")
-	if len(s) < 2 || s[0] != 'b' do return false
-	for ch in transmute([]byte)s[1:] {
-		if ch < '0' || ch > '9' do return false
+bit_type :: proc(name: string) -> (width: int, order: Maybe(endian.Byte_Order), ok: bool) {
+	s := name
+	switch {
+	case strings.has_suffix(s, "le"):
+		s, order = s[:len(s) - 2], .Little
+	case strings.has_suffix(s, "be"):
+		s, order = s[:len(s) - 2], .Big
 	}
-	return true
+	if len(s) < 2 || len(s) > 3 || s[0] != 'b' || s[1] == '0' do return 0, nil, false
+	for ch in transmute([]byte)s[1:] {
+		if ch < '0' || ch > '9' do return 0, nil, false
+		width = width * 10 + int(ch - '0')
+	}
+	return width, order, width <= 64
 }
 
 // A seq attribute: its id, then the rest as compile_field compiles it.
@@ -928,8 +941,12 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 			node.type = .String
 			strz = type_name == "strz"
 			if !strz && !ends do return fail(c, .Invalid, type_node, "%s: str needs size, size-eos or terminator", id)
-		} else if is_bit_type(type_name) {
-			return fail(c, .Unsupported, type_node, "%s: type %s is not supported", id, type_name)
+		} else if width, bit_order, is_bits := bit_type(type_name); is_bits {
+			node.width = u8(width)
+			node.order = bit_order.? or_else c.schema.bit_endian
+			// b1 is a boolean, unless it has an enum
+			node.type = width == 1 && get(attr, "enum") == nil ? .Bool : .Bits
+			if bytes_key != nil do return fail(c, .Invalid, bytes_key, "%s: %s does not apply to %s", id, bytes_key.text, type_name)
 		} else {
 			user = find_type(td, type_name)
 			if user == nil && strings.contains(type_name, "::") do return fail(c, .Unsupported, type_node, "%s: a type of another type (%s) is not supported", id, type_name)
@@ -946,7 +963,7 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	}
 
 	if n := get(attr, "enum"); n != nil {
-		if node.type not_in INTEGER_TYPES do return fail(c, .Invalid, get_key(attr, "enum"), "%s: enum applies only to integer types", id)
+		if node.type not_in INTEGER_TYPES && node.type != .Bits do return fail(c, .Invalid, get_key(attr, "enum"), "%s: enum applies only to integer types", id)
 		enum_name := expect_scalar(c, n, "enum") or_return
 		if strings.contains(enum_name, "::") do return fail(c, .Unsupported, n, "%s: an enum of another type (%s) is not supported", id, enum_name)
 		// the field keeps its integer, which the enum's constants are
@@ -975,10 +992,12 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	compile_terminator(c, attr, id, node, strz) or_return
 
 	if valid != nil {
-		node.valid = compile_valid(c, valid, id, node.type) or_return
+		// the constants of a bit type have the type of its values
+		node.valid = compile_valid(c, valid, id, node.type == .Bits ? mdata.bits_type(int(node.width)) : node.type) or_return
 	}
 
 	if bits := get(attr, "-bits"); bits != nil {
+		if node.width > 0 do return fail(c, .Invalid, bits, "%s: -bits does not apply to a bit type", id)
 		node.bits = compile_bits(c, bits, id, node.type, ids) or_return
 	}
 
@@ -1054,7 +1073,9 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, no
 		type_name := expect_scalar(c, e.value, "a case type") or_return
 		user := find_type(td, type_name)
 		if user == nil {
-			if _, _, is_primitive := primitive(type_name); is_primitive || type_name == "str" || type_name == "strz" || is_bit_type(type_name) {
+			_, _, is_primitive := primitive(type_name)
+			_, _, is_bits := bit_type(type_name)
+			if is_primitive || is_bits || type_name == "str" || type_name == "strz" {
 				return fail(c, .Unsupported, e.value, "%s: a case of type %s is not supported; only user types are", id, type_name)
 			}
 			if strings.contains(type_name, "::") do return fail(c, .Unsupported, e.value, "%s: a type of another type (%s) is not supported", id, type_name)

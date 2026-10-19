@@ -229,3 +229,49 @@ read_eof_each_type :: proc(t: ^testing.T) {
 	check_read_eof(t, f32)
 	check_read_eof(t, f64)
 }
+
+// read_bits as Kaitai's C++ runtime reads them, in both orders: a 64-bit
+// read with bits left over takes 8 more bytes; the bits a byte read skips
+// stay for the next bit read; align_to_byte discards them.
+@(test)
+read_bits_both_orders :: proc(t: ^testing.T) {
+	data := []byte{0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xff, 0x5a, 0x0f}
+	Step :: struct {
+		n:         int,
+		want:      u64,
+		pos, left: int,
+	}
+	Case :: struct {
+		order:    endian.Byte_Order,
+		steps:    []Step,
+		leftover: u64, // the 5 bits of 0x5a left after the last step
+	}
+	for c in ([?]Case {
+		{.Big, {{4, 0xa, 1, 4}, {64, 0xbcde_f012_3456_789f, 9, 4}, {4, 0xf, 9, 0}, {3, 0x2, 10, 5}}, 0x1a},
+		{.Little, {{4, 0xb, 1, 4}, {64, 0xf896_7452_301e_fcda, 9, 4}, {4, 0xf, 9, 0}, {3, 0x2, 10, 5}}, 0x0b},
+	}) {
+		r: dat.Reader
+		dat.reader_init(&r, data)
+		for s in c.steps {
+			v, err := dat.read_bits(&r, s.n, c.order)
+			testing.expectf(t, err == .None && v == s.want && r.pos == s.pos && r.bits_left == s.left, "%v, %v bits: %x (%v) at %v with %v left, want %x at %v with %v left", c.order, s.n, v, err, r.pos, r.bits_left, s.want, s.pos, s.left)
+		}
+
+		// a byte read leaves the bits, and the next bit read uses them
+		b, err := dat.read(&r, u8, .Little)
+		testing.expect(t, err == .None && b == 0x0f && r.bits_left == 5, "a byte read used the bits left over")
+		v, _ := dat.read_bits(&r, 5, c.order)
+		testing.expectf(t, v == c.leftover, "%v: the bits left over gave %x, want %x", c.order, v, c.leftover)
+		testing.expect(t, dat.at_eof(&r), "not at the end once every bit is read")
+	}
+
+	// past the end: an error, and the reader is unchanged
+	r: dat.Reader
+	dat.reader_init(&r, data[10:])
+	_, _ = dat.read_bits(&r, 4, .Big)
+	testing.expect(t, !dat.at_eof(&r), "at the end with 4 bits left")
+	_, err := dat.read_bits(&r, 9, .Big)
+	testing.expect(t, err == .Unexpected_EOF && r.pos == 1 && r.bits_left == 4 && r.bits == 0xf, "a failed bit read changed the reader")
+	dat.align_to_byte(&r)
+	testing.expect(t, dat.at_eof(&r) && dat.bit_pos(&r) == 8, "align_to_byte kept bits")
+}

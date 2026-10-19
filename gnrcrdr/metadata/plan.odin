@@ -12,7 +12,9 @@ Node :: struct {
 	name:            string,            // shown in the dump and in error paths: the .ksy -orig-id, or else the id
 	ref_name:        string,            // what expressions call it: the .ksy id
 	type:            dat.Data_Type,
-	order:           endian.Byte_Order, // integer and float types: the byte order they are read in
+	order:           endian.Byte_Order, // integer and float types: the byte order they are read in; bit types: the bit order (data.read_bits)
+	width:           u8,                // a bit type (Kaitai's b1-b64): the bits each element is read from; 0 for every other field
+	align:           bool,              // the bits left over from the fields before are discarded first, before cond (Kaitai's alignToByte)
 	cond:            ^Expr,             // a Bool expression: the field is read only when it is true; nil when always read (Kaitai's if)
 	count:           Count,             // instances of a set, or elements of any other field
 	length:          Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from. nil for a terminator alone, or for a Set read from its parent's stream
@@ -192,6 +194,20 @@ instance_set :: proc(node: ^Node, instance: ^fld.Instance) -> ^Node {
 	if sw == nil do return node
 	if instance.choice == fld.DEFAULT_CASE do return sw.default
 	return sw.cases[instance.choice].node
+}
+
+// The type of the values of a field of type Bits whose elements are width
+// bits: the smallest unsigned integer type that holds them.
+bits_type :: proc(width: int) -> dat.Data_Type {
+	switch {
+	case width <= 8:
+		return .UInt8
+	case width <= 16:
+		return .UInt16
+	case width <= 32:
+		return .UInt32
+	}
+	return .UInt64
 }
 
 // The number of slots in an instance of set: one for each parse instance,

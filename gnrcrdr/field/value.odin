@@ -15,6 +15,7 @@ Value :: union {
 	f64,
 	string,
 	[]byte,
+	bool,
 	^Instance,
 }
 

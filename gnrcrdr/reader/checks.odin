@@ -36,6 +36,8 @@ check_valid :: proc(value: fld.Value, valid: mdata.Valid) -> dat.Read_Error {
 		return check_scalar(v, valid)
 	case []byte:
 		return check_bytes(v, valid)
+	case bool:
+		panic("check_valid: a check on a boolean")
 	case ^fld.Instance:
 		panic("check_valid: called for a set")
 	}

@@ -41,7 +41,7 @@ write_json :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tre
 }
 
 // Writes one scalar in text-dump form: integers in decimal, floats with %v,
-// strings with %q, and a blob as "<N bytes>" followed by its first
+// strings with %q, booleans as true or false, and a blob as "<N bytes>" followed by its first
 // BLOB_PREVIEW bytes in hex and " ..." if there are more. Anything else (a
 // set or nil) is .Unsupported.
 @(require_results)
@@ -68,6 +68,8 @@ write_value :: proc(w: io.Writer, v: fld.Value) -> io.Error {
 			write_hex_byte(w, b) or_return
 		}
 		if len(x) > BLOB_PREVIEW do io.write_string(w, " ...") or_return
+	case bool:
+		io.write_string(w, x ? "true" : "false") or_return
 	case ^fld.Instance:
 		return .Unsupported
 	case:
