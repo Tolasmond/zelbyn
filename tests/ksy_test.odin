@@ -177,7 +177,10 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    -bits:\n      - {id: b, low: 0, high: 0, width: 1}\n", .Invalid, 8, 34, `-bits: unknown key "width"`},
 
 	// enums
-	{HEAD + "enums:\n  e:\n    1:\n      id: one\n      doc: d\n", .Unsupported, 7, 7, "values with id and doc are not supported"},
+	{HEAD + "enums:\n  e:\n    1:\n      doc: d\n", .Invalid, 7, 7, "enum e: a value has no id"},
+	{HEAD + "enums:\n  e:\n    1:\n      id: one\n      name: x\n", .Invalid, 8, 7, `enum e: unknown key "name"`},
+	{HEAD + "enums:\n  e:\n    1:\n      id: One\n", .Invalid, 7, 11, `enum value name "One" is not an identifier`},
+	{HEAD + "enums:\n  e:\n    1: one\n    2:\n      id: one\n", .Invalid, 8, 11, "enum e: one appears twice"},
 	{HEAD + "enums:\n  e:\n    one: 1\n", .Invalid, 6, 5, `enum e: "one" is not an integer`},
 	{HEAD + "enums:\n  e:\n    1: x\n    0x01: y\n", .Invalid, 7, 5, "enum e: value 0x01 appears twice"},
 }
@@ -559,8 +562,9 @@ t[0].table[1] = 33
 ksy_kaitai_features :: proc(t: ^testing.T) {
 	// if, value instances (Bool and Int, one referring to a later one, used
 	// in the type and from outside it), a substream read with repeat: eos,
-	// repeat: until over _ and _io.eof, enum, and switch-on whose cases are
-	// enum constants and an integer, with no case for stop
+	// repeat: until over _ and _io.eof, enum (with a value in the long
+	// form), and switch-on whose cases are enum constants and an integer,
+	// with no case for stop
 	src := HEAD + `seq:
   - id: hdr
     type: hdr
@@ -617,7 +621,10 @@ enums:
   kind:
     1: one
     2: two
-    9: stop
+    9:
+      id: stop
+      doc: the last block
+      -orig-id: STOP
 `
 	expect_dump(t, "until stop", ksy_dump(t, src, {0x21, 7, 1, 0, 2, 0, 1, 0xaa, 2, 0xbb, 0xcc, 9}), `t[0].hdr[0].flags[0] = 33
 t[0].opt[0] = 7
