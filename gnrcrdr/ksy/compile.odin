@@ -99,7 +99,7 @@ compile :: proc(src: string, file_format: ^mdata.File_Format, path := "", import
 @(private = "file")
 Compiler :: struct {
 	allocator:       mem.Allocator, // the File_Format's arena
-	scratch:         mem.Allocator, // for what only compiling needs: the YAML documents, types, maps; the File_Format's arena too, freed with it
+	scratch:         mem.Allocator, // for what only compiling needs: the YAML documents, types, maps; the File_Format's arena too, freed with it, so the plan uses the documents' strings as they are
 	next_id:         int,
 	schema:          ^Schema,              // the one whose types are being compiled
 	imported:        map[string]^Type_Def, // the top-level type of each schema read from a file, by its cleaned path; in scratch
@@ -526,7 +526,7 @@ display_name :: proc(c: ^Compiler, m: ^yml.Node, id: string) -> (name: string, o
 new_node :: proc(c: ^Compiler, name, ref_name: string) -> ^mdata.Node {
 	c.next_id += 1
 	node := new(mdata.Node, c.allocator)
-	node^ = {id = c.next_id, name = strings.clone(name, c.allocator), ref_name = strings.clone(ref_name, c.allocator), order = c.schema.endian.? or_else .Little}
+	node^ = {id = c.next_id, name = name, ref_name = ref_name, order = c.schema.endian.? or_else .Little}
 	return node
 }
 
@@ -607,9 +607,9 @@ build_enums :: proc(c: ^Compiler, n: ^yml.Node) -> (enums: []expr.Enum, ok: bool
 				if prev.name == value_name do return nil, fail(c, .Invalid, v.value, "enum %s: %s appears twice", name, value_name)
 				if prev.value == int(n) do return nil, fail(c, .Invalid, v.key, "enum %s: value %v appears twice", name, v.key.text)
 			}
-			values[j] = {strings.clone(value_name, c.allocator), int(n)}
+			values[j] = {value_name, int(n)}
 		}
-		enums[i] = {strings.clone(name, c.allocator), values}
+		enums[i] = {name, values}
 	}
 	return enums, true
 }
@@ -662,7 +662,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 	for e in td.instances {
 		if value := get(e.value, "value"); value != nil {
 			inst := new(mdata.Value_Instance, c.allocator)
-			inst.name = strings.clone(e.key.text, c.allocator)
+			inst.name = e.key.text
 			src := new(Instance_Source, c.scratch)
 			src^ = {value = value, td = td, set = set}
 			c.instances[inst] = src
@@ -1318,7 +1318,7 @@ constant :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Type) ->
 		if len(text) >= 2 && (text[0] == '"' || text[0] == '\'') && text[len(text) - 1] == text[0] {
 			inner := text[1:len(text) - 1]
 			if strings.contains_any(inner, "\\\"'") do return nil, fail(c, .Unsupported, n, "%s: escapes and quotes in a string literal are not supported", id)
-			return strings.clone(inner, c.allocator), true
+			return inner, true
 		}
 		return nil, fail(c, .Unsupported, n, "%s: a valid constant for a str must be a string literal (\"text\")", id)
 	case .Int8, .UInt8, .Int16, .UInt16, .Int32, .UInt32, .Int64, .UInt64:
@@ -1453,7 +1453,7 @@ compile_bits :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Type
 
 		c.next_id += 1
 		name := display_name(c, item, bit_id) or_return
-		bits[i] = {id = c.next_id, name = strings.clone(name, c.allocator), low = low, high = high}
+		bits[i] = {id = c.next_id, name = name, low = low, high = high}
 		switch count := high - low + 1; {
 		case count <= 8:
 			bits[i].type = .UInt8
