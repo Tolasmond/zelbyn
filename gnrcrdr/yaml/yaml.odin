@@ -82,19 +82,30 @@ destroy_error :: proc(err: ^Error) {
 @(require_results)
 parse :: proc(src: string, doc: ^Document) -> Error {
 	assert(doc.arena.block == nil && doc.root == nil, "parse: doc must be zero or destroyed")
-	p := Parser{src = src, line = 1, allocator = arn.arena_allocator(&doc.arena)}
+	root, err := parse_into(src, arn.arena_allocator(&doc.arena))
+	doc.root = root
+	return err
+}
+
+// Parses src as parse does, allocating every node and string with
+// allocator, which must free them all at once (an arena): an error leaves
+// what was allocated. root is nil for a stream with no document, and on
+// error. The nodes do not refer to src.
+@(require_results)
+parse_into :: proc(src: string, allocator: mem.Allocator) -> (root: ^Node, err: Error) {
+	p := Parser{src = src, line = 1, allocator = allocator}
 
 	if strings.has_prefix(src, "\xef\xbb\xbf") do p.pos, p.line_start = 3, 3
 
 	if skip_to_content(&p) {
 		if peek(&p) == '%' && column(&p) == 0 {
 			fail(&p, .Unsupported, p.pos, "directives (%%YAML, %%TAG) are not supported")
-			return p.err
+			return nil, p.err
 		}
 		if at_document_marker(&p, "---") {
 			p.pos += 3
 		}
-		doc.root = parse_node(&p, -1, .Top)
+		root = parse_node(&p, -1, .Top)
 	}
 
 	if p.err.kind == .None && skip_to_content(&p) {
@@ -109,8 +120,8 @@ parse :: proc(src: string, doc: ^Document) -> Error {
 		}
 	}
 
-	if p.err.kind != .None do doc.root = nil
-	return p.err
+	if p.err.kind != .None do root = nil
+	return root, p.err
 }
 
 @(private = "file")

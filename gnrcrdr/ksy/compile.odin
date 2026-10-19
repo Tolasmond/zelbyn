@@ -88,8 +88,6 @@ compile :: proc(src: string, file_format: ^mdata.File_Format, path := "", import
 	c.instances = make(map[^mdata.Value_Instance]^Instance_Source, c.scratch)
 	c.parse_instances = make(map[^mdata.Node]^Parse_Source, c.scratch)
 	c.imported = make(map[string]^Type_Def, c.scratch)
-	c.schemas = make([dynamic]^Schema, c.scratch)
-	defer for s in c.schemas do yml.destroy_document(&s.doc)
 
 	c.schema = new_schema(&c, path)
 	if root, ok := parse_schema(&c, src); ok {
@@ -104,7 +102,6 @@ Compiler :: struct {
 	scratch:         mem.Allocator, // freed after compiling
 	next_id:         int,
 	schema:          ^Schema,              // the one whose types are being compiled
-	schemas:         [dynamic]^Schema,     // every one read; in scratch
 	imported:        map[string]^Type_Def, // the top-level type of each schema read from a file, by its cleaned path; in scratch
 	import_paths:    []string,
 	root:            ^mdata.Node,          // the root of the plan
@@ -117,7 +114,6 @@ Compiler :: struct {
 @(private = "file")
 Schema :: struct {
 	path:     string,                   // the file it was read from; "" for source compiled without one
-	doc:      yml.Document,             // destroyed after compiling
 	endian:   Maybe(endian.Byte_Order), // meta endian
 	encoding: string,                   // meta encoding; "" when absent
 	imports:  []^Type_Def,              // the top-level type of each schema in meta imports, in order
@@ -127,21 +123,21 @@ Schema :: struct {
 new_schema :: proc(c: ^Compiler, path: string) -> ^Schema {
 	s := new(Schema, c.scratch)
 	s.path = path
-	append(&c.schemas, s)
 	return s
 }
 
-// Parses src, the text of c.schema, into its document, and returns the
-// document's root.
+// Parses src, the text of c.schema, in scratch, and returns the root of its
+// document.
 @(private = "file")
 parse_schema :: proc(c: ^Compiler, src: string) -> (root: ^yml.Node, ok: bool) {
-	yerr := yml.parse(src, &c.schema.doc)
+	yerr: yml.Error
+	root, yerr = yml.parse_into(src, c.scratch)
 	defer yml.destroy_error(&yerr)
 	kind: Error_Kind
 	switch yerr.kind {
 	case .None:
-		if c.schema.doc.root == nil do return nil, fail(c, .Invalid, nil, "the schema is empty")
-		return c.schema.doc.root, true
+		if root == nil do return nil, fail(c, .Invalid, nil, "the schema is empty")
+		return root, true
 	case .Syntax:
 		kind = .Syntax
 	case .Unsupported:
