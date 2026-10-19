@@ -85,10 +85,9 @@ Fixed_Count :: struct {
 	n: int,
 }
 
-// The value of expr, an Int expression, at most max.
+// The value of expr, an Int expression.
 Rule_Count :: struct {
 	expr: ^Expr,
-	max:  Maybe(int),
 }
 
 // 1 when every marker matches the input at the reader's position, else 0. A
@@ -100,13 +99,12 @@ Marker_Count :: struct {
 // Instances are read while (until = false) or until (until = true) the
 // integer of type, in order, at the reader's position equals value. It is
 // peeked, never consumed. With until, reaching the end of the input first
-// is an error; without it, the repeat stops there. At most max instances
-// are read, and each must consume input.
+// is an error; without it, the repeat stops there. Each instance must
+// consume input.
 Repeat_Count :: struct {
 	type:  dat.Data_Type,
 	value: int,
 	until: bool,
-	max:   Maybe(int),
 	order: endian.Byte_Order,
 }
 
@@ -140,11 +138,9 @@ Fixed_Length :: struct {
 	n: int,
 }
 
-// The value of expr, an Int expression evaluated for each element, which
-// must lie within [min, max] (either bound may be absent).
+// The value of expr, an Int expression evaluated for each element.
 Rule_Length :: struct {
-	expr:     ^Expr,
-	min, max: Maybe(int),
+	expr: ^Expr,
 }
 
 // The rest of the stream being read (Kaitai's size-eos).

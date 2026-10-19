@@ -2,7 +2,6 @@ package tests
 
 import ksy "../gnrcrdr/ksy"
 import mdat "../gnrcrdr/metadata"
-import rdr "../gnrcrdr/reader"
 import "core:os"
 import "core:testing"
 import "core:time"
@@ -319,10 +318,27 @@ count_beyond_input :: proc(t: ^testing.T) {
 	}
 }
 
+// A count or a length computed from the input may be negative, which is an
+// error where the field starts.
 @(test)
-checked_count_limits :: proc(t: ^testing.T) {
-	testing.expect_value(t, rdr.check_count(-1, nil), .Invalid_Length)
-	testing.expect_value(t, rdr.check_count(5, 4), .Repeat_Limit_Exceeded)
-	testing.expect_value(t, rdr.check_count(4, 4), .None)
-	testing.expect_value(t, rdr.check_count(10, nil), .None)
+negative_count_and_length :: proc(t: ^testing.T) {
+	SRC :: "meta:\n  id: neg\nseq:\n  - id: n\n    type: s1\n  - id: items\n    type: u1\n    repeat: expr\n    repeat-expr: n\n  - id: m\n    type: s1\n  - id: data\n    size: m\n"
+
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	err := ksy.compile(SRC, &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "%v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
+
+	Case :: struct {
+		input:  []byte,
+		path:   string,
+		offset: int,
+	}
+	for c in ([?]Case{{{0xff}, "neg[0]", 1}, {{0, 0xff}, "neg[0].data[0]", 2}}) {
+		d: Decoded
+		decode_bytes(&ff, c.input, &d)
+		testing.expectf(t, d.err.kind == .Invalid_Length && d.err.offset == c.offset && d.err.path == c.path, "%v: %v at %v in %s, want Invalid_Length at %v in %s", c.input, d.err.kind, d.err.offset, d.err.path, c.offset, c.path)
+		destroy_decoded(&d)
+	}
 }
