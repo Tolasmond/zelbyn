@@ -14,9 +14,10 @@ BLOB_PREVIEW :: 16
 // Writes one line per scalar in tree: its path in reader.format_path form
 // (Name[i].Name[i]..., root included), " = ", then the value as write_value
 // writes it. Sets get no line of their own, and empty arrays write nothing.
-// Children are taken in schema order, each followed by its bit fields;
-// those of a switch-on field are those of the case each instance was read
-// as. Value instances are not read, so they are not written.
+// Children are taken in schema order, each followed by its bit fields, and
+// then the parse instances; those of a switch-on field are those of the
+// case each instance was read as. Value instances are not read, so they
+// are not written.
 @(require_results)
 write_text :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tree) -> io.Error {
 	path := strings.builder_make()
@@ -27,7 +28,8 @@ write_text :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tre
 
 // Writes tree as compact JSON followed by a newline. A set instance is an
 // object whose keys are its field names in schema order, each followed by
-// the names of its bit fields, and every field is an array:
+// the names of its bit fields, then the names of its parse instances, and
+// every field is an array:
 // {"<root name>":[{...}]}. Blobs are lowercase hex strings, numbers are
 // numbers, and NaN and infinities are null.
 @(require_results)
@@ -91,13 +93,17 @@ write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set
 
 		if set != nil {
 			instance := v.(^fld.Instance)
-			slot := 0
-			for child in children_of(set, instance) {
+			read_as := mdat.instance_set(set, instance)
+			slot := len(read_as.parse_instances)
+			for child in read_as.children {
 				write_text_array(w, path, child.name, set_of(child), instance.slots[slot][:]) or_return
 				for bit, b in child.bits {
 					write_text_array(w, path, bit.name, nil, instance.slots[slot + 1 + b][:]) or_return
 				}
 				slot += 1 + len(child.bits)
+			}
+			for p, k in read_as.parse_instances {
+				write_text_array(w, path, p.name, set_of(p), instance.slots[k][:]) or_return
 			}
 		} else {
 			io.write_string(w, strings.to_string(path^)) or_return
@@ -128,8 +134,9 @@ write_json_array :: proc(w: io.Writer, set: ^mdat.Node, values: []fld.Value) -> 
 @(private = "file", require_results)
 write_json_object :: proc(w: io.Writer, node: ^mdat.Node, instance: ^fld.Instance) -> io.Error {
 	io.write_byte(w, '{') or_return
-	slot := 0
-	for child, i in children_of(node, instance) {
+	read_as := mdat.instance_set(node, instance)
+	slot := len(read_as.parse_instances)
+	for child, i in read_as.children {
 		if i > 0 do io.write_byte(w, ',') or_return
 		write_json_field(w, child.name, set_of(child), instance.slots[slot][:]) or_return
 		for bit, b in child.bits {
@@ -137,6 +144,10 @@ write_json_object :: proc(w: io.Writer, node: ^mdat.Node, instance: ^fld.Instanc
 			write_json_field(w, bit.name, nil, instance.slots[slot + 1 + b][:]) or_return
 		}
 		slot += 1 + len(child.bits)
+	}
+	for p, k in read_as.parse_instances {
+		if k > 0 || len(read_as.children) > 0 do io.write_byte(w, ',') or_return
+		write_json_field(w, p.name, set_of(p), instance.slots[k][:]) or_return
 	}
 	io.write_byte(w, '}') or_return
 	return .None
@@ -147,14 +158,6 @@ write_json_field :: proc(w: io.Writer, name: string, set: ^mdat.Node, values: []
 	write_json_string(w, name) or_return
 	io.write_byte(w, ':') or_return
 	return write_json_array(w, set, values)
-}
-
-// The fields of instance, an instance of set: for a switch-on field, those
-// of the case it was read as. Their values are in instance's slots, in
-// order, each followed by its bit fields'.
-@(private = "file")
-children_of :: proc(set: ^mdat.Node, instance: ^fld.Instance) -> []^mdat.Node {
-	return mdat.instance_set(set, instance).children
 }
 
 // node when it is a set, else nil.

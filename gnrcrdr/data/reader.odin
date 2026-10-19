@@ -7,7 +7,7 @@ import "core:encoding/endian"
 Read_Error :: enum {
 	None,
 	Unexpected_EOF,        // a read needs more bytes than remain
-	Offset_Out_Of_Range,   // a peek offset is outside [0, len(data))
+	Offset_Out_Of_Range,   // a peek offset is outside [0, len(data)), or a parse instance's pos outside [0, len(data)]
 	Unsupported_Type,      // the data type cannot be read as an integer (Set, UInt64, floats, String, Blob)
 	Invalid_Length,        // a computed count or length is negative, or outside its field's bounds
 	Repeat_Limit_Exceeded, // a count exceeds its field's maximum

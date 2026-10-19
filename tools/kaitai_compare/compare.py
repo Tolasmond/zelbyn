@@ -8,8 +8,9 @@ Run from the repository root, after `npm ci --prefix tools/kaitai_compare`.
 Needs Odin, Node.js and PyYAML. The schema is compiled with the official
 compiler to JavaScript and run with the JavaScript runtime (decode.js), and
 with gnrcrdr's --dump json. Both are brought to one shape: every field an
-array of its values, set instances objects, byte arrays hex. A field with
-no values (not read because of if or switch-on, or an empty repeat) is left
+array of its values, set instances objects, byte arrays hex. Parse
+instances (instances with pos) are compared as fields. A field with no
+values (not read because of if or switch-on, or an empty repeat) is left
 out on both sides, as are value instances, which gnrcrdr does not dump.
 Field names are compared as the generated code spells them. Exits 1 if any
 file differs, or fails to decode on either side.

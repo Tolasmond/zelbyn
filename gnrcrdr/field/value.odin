@@ -17,14 +17,17 @@ Value :: union {
 }
 
 // A decoded set instance. slots holds the values of each field of the set
-// it was read as, by position: each child of the set in order, each
-// followed by its bit fields (metadata.slot_of gives a child's slot). For
-// an instance of a switch-on field, choice is the case it was read as: an
-// index into the field's cases, or DEFAULT_CASE; otherwise it is 0.
+// it was read as, by position: each of its parse instances, then each
+// child in order, each followed by its bit fields (metadata.slot_of gives
+// a child's slot). For an instance of a switch-on field, choice is the
+// case it was read as: an index into the field's cases, or DEFAULT_CASE;
+// otherwise it is 0.
 //
 // An instance is one block of its tree's arena (make_instance): the
 // Instance, its slots, then a cell for each slot. The slot of a field read
-// at most once is a view of its cell; any other slot is its own array.
+// at most once is a view of its cell; any other slot is its own array. The
+// slot of a parse instance is nil until it is read, and then never nil,
+// even when it has no values.
 Instance :: struct {
 	slots:  [][]Value,
 	choice: int,
@@ -48,6 +51,12 @@ make_instance :: proc(a: ^Tree_Arena, n: int, choice: int) -> (instance: ^Instan
 	instance.choice = choice
 	cells = ([^]Value)(&slots[n])[:n]
 	return
+}
+
+// The cells of instance, which make_instance allocated after its slots.
+instance_cells :: proc(instance: ^Instance) -> []Value {
+	n := len(instance.slots)
+	return ([^]Value)(&raw_data(instance.slots)[n])[:n]
 }
 // A decoded value tree. Every instance and array reachable from root is
 // allocated in arena, so the tree is freed with one destroy_value_tree, and

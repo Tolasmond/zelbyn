@@ -38,7 +38,7 @@ gif[0].global_color_table[0].entries[0].red[0] = 252
 gif[0].blocks[2].body[0].image_data[0].subblocks[0].entries[0].bytes[0] = <254 bytes> 80 42 29 83 84 83 56 3c 83 7e 29 8a 8c 8b 8e 8d ...
 ```
 
-Integers are decimal and strings are quoted. A blob shows its length and its first 16 bytes in hex, followed by `...` if it is longer. A field with an `enum` shows its integer. Value instances (such as `has_color_table`) are not read from the file, so they are not shown.
+Integers are decimal and strings are quoted. A blob shows its length and its first 16 bytes in hex, followed by `...` if it is longer. A field with an `enum` shows its integer. Value instances (such as `has_color_table`) are not read from the file, so they are not shown. Parse instances (`instances` with `pos`) are read, and shown after the fields of their type, in the order of `instances`.
 
 In a schema with the `-bits` extension, such as `formats/gif89a.ksy`, an integer with packed bit fields is followed by one line for each of them, in the order of their lowest bit:
 
@@ -50,7 +50,7 @@ GIF89a[0].Logical Screen Descriptor[0].Color Resolution[0] = 7
 GIF89a[0].Logical Screen Descriptor[0].Global Color Table Flag[0] = 1
 ```
 
-`--dump json` writes the same tree as compact JSON on one line. Each set instance is an object whose keys are its field names in schema order, each followed by its bit fields, and every field is an array:
+`--dump json` writes the same tree as compact JSON on one line. Each set instance is an object whose keys are its field names in schema order, each followed by its bit fields, then its parse instances, and every field is an array:
 
 ```
 {"gif":[{"hdr":[{"magic":["474946"],"version":["89a"]}],"logical_screen_descriptor":[{"screen_width":[500],...
@@ -96,14 +96,16 @@ error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]
 | `meta` | `id`, `endian`, `bit-endian`, `encoding`, `ks-version` (0.11 or older, the Kaitai version gnrcrdr follows); `title`, `application`, `file-extension`, `xref`, `license`, `tags` (ignored) |
 | Attributes | `id`, `type`, `size`, `size-eos`, `terminator` (with `consume`, `include`, `eos-error`), `pad-right`, `contents`, `if`, `enum`, `valid` (a constant, or `eq`, `min`/`max`, `any-of`), `repeat` (`expr` with `repeat-expr`, `eos`, `until` with `repeat-until`), `encoding`, `doc`, `doc-ref` |
 | Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `str` with `size`, `size-eos` or `terminator`, and `strz` (ASCII or UTF-8, kept as bytes, NULs included within a `size`), byte arrays, user types (not recursive; with `size`, `size-eos` or `terminator`, read from a substream of those bytes), `switch-on` with `cases` whose types are user types, including the `_` default case |
-| Instances | value instances (`value:`), over the fields and other value instances of their own type. Expressions anywhere can refer to them; they are evaluated each time, and not dumped |
+| Instances | value instances (`value:`), over the fields and other value instances of their own type. Expressions anywhere can refer to them; they are evaluated each time, and not dumped. Parse instances (`pos:`), with the keys of an attribute other than `id` and `io` |
 | Expressions | integer and boolean operators, `?:`, field references, `_parent`, `_root`, `_io.pos`, `_io.size`, `_io.eof` (of the substream, inside one), `.size`, `_index`, `_` in `repeat-until`, enum constants (`kinds::two`) |
 
 With a `size`, the bytes are read, `pad-right` is removed from their end, and they are cut at the `terminator`, if one is given. Without one, they run up to the `terminator`; `include` keeps it in the value, and `consume: false` leaves the reader at it, as in the C++ and Python runtimes (the JavaScript runtime moves one byte further when `include` is set). `consume` and `eos-error` do not apply with a `size`, nor `pad-right` without one.
 
+A parse instance is read at `pos` in the stream of its type, which does not move, the first time an expression refers to it, as in Kaitai. Any that no expression has read are read once the fields of their type are, so every parse instance is in the decoded tree; an error in one fails the decode, even if nothing uses it. A `pos` outside the stream is `Offset_Out_Of_Range`.
+
 A field read once whose `switch-on` matches no case, without a `_` case, is not read, as in Kaitai; a repeated `switch-on` needs a `_` case. Expressions cannot refer to a `switch-on` field. Each element read by `repeat: eos` must consume input, and so must each element of `repeat: until` but the last.
 
-Not supported yet: bit types (`b1`–`b64`), instances other than value instances (`pos`, `io`), `params`, `imports`, attributes without an `id`, `size`, `size-eos` or `terminator` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
+Not supported yet: bit types (`b1`–`b64`), instances without `pos` or `value`, `io`, `if` and `enum` on value instances, `params`, `imports`, attributes without an `id`, `size`, `size-eos` or `terminator` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
 
 Keys starting with `-` are extensions. The official Kaitai tools ignore them, and gnrcrdr ignores the ones it does not know, as well as `-orig-id` on a type. gnrcrdr's own extensions let `formats/gif89a.ksy` give the same dumps as the SQLite schema it was ported from:
 

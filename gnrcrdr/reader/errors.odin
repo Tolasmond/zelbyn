@@ -20,13 +20,29 @@ Path_Segment :: struct {
 
 @(private)
 Decoder :: struct {
-	r:         dat.Reader,             // the stream being read: the input, or a substream of it
-	base:      int,                    // the offset in the input of r.data[0]
-	arena:     ^fld.Tree_Arena,        // the value tree's; the decoder allocates its values here directly
-	allocator: mem.Allocator,          // the same arena, for path and frames
+	r:         dat.Reader,      // the stream being read: the input, or a substream of it
+	base:      int,             // the offset in the input of r.data[0]
+	arena:     ^fld.Tree_Arena, // the value tree's; the decoder allocates its values here directly
+	allocator: mem.Allocator,   // the same arena, for path, frames and streams
 	path:      [dynamic]Path_Segment,
-	frames:    [dynamic]^fld.Instance, // the set instances being decoded, outermost first
+	frames:    [dynamic]Frame,  // the set instances being decoded, outermost first
+	streams:   [dynamic]Stream, // the streams that substreams were taken from, outermost first, as they are now
 	err:       Parse_Error,
+}
+
+// A set instance being decoded, and where: its stream is streams[stream],
+// or r when stream is len(streams); path[:path] is its path.
+@(private)
+Frame :: struct {
+	instance: ^fld.Instance,
+	stream:   int,
+	path:     int,
+}
+
+@(private)
+Stream :: struct {
+	r:    dat.Reader,
+	base: int,
 }
 
 // Records the first error with the current path; always returns kind.
