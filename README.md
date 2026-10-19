@@ -92,10 +92,11 @@ error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]
 
 | Area | Supported |
 |---|---|
-| Top level | `meta`, `seq`, `types`, `instances`, `enums` (each value a name, or a mapping of `id`, `doc` and `doc-ref`), `doc`, `doc-ref` |
+| Top level | `meta`, `params` (in an imported schema), `seq`, `types`, `instances`, `enums` (each value a name, or a mapping of `id`, `doc` and `doc-ref`), `doc`, `doc-ref` |
 | `meta` | `id`, `endian`, `bit-endian`, `encoding`, `ks-version` (0.11 or older, the Kaitai version gnrcrdr follows), `imports`; `title`, `application`, `file-extension`, `xref`, `license`, `tags` (ignored) |
 | Attributes | `id`, `type`, `size`, `size-eos`, `terminator` (with `consume`, `include`, `eos-error`), `pad-right`, `contents`, `if`, `enum`, `valid` (a constant, or `eq`, `min`/`max`, `any-of`), `repeat` (`expr` with `repeat-expr`, `eos`, `until` with `repeat-until`), `encoding`, `doc`, `doc-ref` |
-| Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `b1`–`b64` (with `le`/`be` or `meta: bit-endian`, else big-endian; `b1` is a boolean, unless it has an `enum`), `str` with `size`, `size-eos` or `terminator`, and `strz` (ASCII or UTF-8, kept as bytes, NULs included within a `size`), byte arrays, user types (not recursive; with `size`, `size-eos` or `terminator`, read from a substream of those bytes), `switch-on` with `cases` whose types are user types, including the `_` default case |
+| Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `b1`–`b64` (with `le`/`be` or `meta: bit-endian`, else big-endian; `b1` is a boolean, unless it has an `enum`), `str` with `size`, `size-eos` or `terminator`, and `strz` (ASCII or UTF-8, kept as bytes, NULs included within a `size`), byte arrays, user types (not recursive; with `size`, `size-eos` or `terminator`, read from a substream of those bytes; with arguments, `t(a, b)`, when they have `params`), `switch-on` with `cases` whose types are user types, including the `_` default case |
+| Params | `id`, `type` (an integer type, `bool` or `bytes`), `enum` (on an integer), `doc`, `doc-ref` |
 | Instances | value instances (`value:`), over the fields and other value instances of their own type. Expressions anywhere can refer to them; they are evaluated each time, and not dumped. Parse instances (`pos:`), with the keys of an attribute other than `id` and `io` |
 | Expressions | integer and boolean operators, `?:`, field references, `_parent`, `_root`, `_io.pos`, `_io.size`, `_io.eof` (of the substream, inside one), `.size`, `_index`, `_` in `repeat-until`, enum constants (`kinds::two`) |
 
@@ -107,9 +108,11 @@ A parse instance is read at `pos` in the stream of its type, which does not move
 
 Each entry of `imports` names a schema file without its `.ksy`: relative to the directory of the schema that imports it, or, when it starts with `/`, in the first `--import-path` directory that has it. The top-level type of an imported schema is used by its `meta` `id`, and its own `meta` (`endian`, `encoding`) applies inside it. As in Kaitai, it is the `_root` of its own types and has no `_parent`. A schema imported more than once is read once.
 
+A type with `params` is given one argument for each, `t(a, b)`, in `type` or in a `switch-on` case. Each argument is an expression of the param's type, evaluated where each instance is read: as in Kaitai, in the stream of the field, after the bytes of a substream, and for a parse instance after it moves to `pos`. Expressions in the type refer to its params by their `id`, and params are not dumped. An integer param holds the argument's value as it is, whatever its integer type, as in the JavaScript runtime, and one with an `enum` takes any integer, where the official compiler requires a value of the enum. The type of the schema itself cannot have params, since nothing would give their arguments.
+
 A field read once whose `switch-on` matches no case, without a `_` case, is not read, as in Kaitai; a repeated `switch-on` needs a `_` case. Expressions cannot refer to a `switch-on` field. Each element read by `repeat: eos` must consume input, and so must each element of `repeat: until` but the last.
 
-Not supported yet: instances without `pos` or `value`, `io`, `if` and `enum` on value instances, `params`, a type of another type (`a::b`, such as a type declared in an imported schema), attributes without an `id`, `size`, `size-eos` or `terminator` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
+Not supported yet: instances without `pos` or `value`, `io`, `if` and `enum` on value instances, params of other types (`str`, user types, `struct`, `io`, `any`), a type of another type (`a::b`, such as a type declared in an imported schema), attributes without an `id`, `size`, `size-eos` or `terminator` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
 
 Keys starting with `-` are extensions. The official Kaitai tools ignore them, and gnrcrdr ignores the ones it does not know, as well as `-orig-id` on a type. gnrcrdr's own extensions let `formats/gif89a.ksy` give the same dumps as the SQLite schema it was ported from:
 
@@ -186,7 +189,7 @@ python3 tools/kaitai_compare/compare.py formats/gif.ksy data/*.gif data/*.GIF
 python3 tools/kaitai_compare/compare.py --import-path ../kaitai_struct_formats ../kaitai_struct_formats/image/pcx_dcx.ksy file.dcx
 ```
 
-Both decodes are brought to one shape, every field an array of its values, and compared field by field. Parse instances are compared as fields; fields with no values are left out on both sides, as are value instances. The script reads the schemas the schema imports, and gives them to both decoders. The script exits 1 if any file differs or fails to decode. Run it when the decoder, the `.ksy` compiler or `formats/gif.ksy` changes.
+Both decodes are brought to one shape, every field an array of its values, and compared field by field. Parse instances are compared as fields; fields with no values are left out on both sides, as are value instances and params. The script reads the schemas the schema imports, and gives them to both decoders. The script exits 1 if any file differs or fails to decode. Run it when the decoder, the `.ksy` compiler or `formats/gif.ksy` changes.
 
 ### YAML corpus check
 

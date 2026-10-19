@@ -47,6 +47,22 @@ eval_bool :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1, element: fld.Value =
 	return v.(bool), .None
 }
 
+// Evaluates e, an Int, Bool or Bytes expression, as eval_int does, as a
+// value of the tree: an Int is an i64.
+@(private, require_results)
+eval_value :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (value: fld.Value, err: dat.Read_Error) {
+	v := eval(d, e, {index = index}) or_return
+	#partial switch x in v {
+	case int:
+		return i64(x), .None
+	case bool:
+		return x, .None
+	case []byte:
+		return x, .None
+	}
+	panic("eval_value: not an Int, Bool or Bytes expression")
+}
+
 // The value of a direct form, a Bool as 0 or 1. ok is false when there is
 // none, or when the field it reads has no value or one that does not fit
 // an int: the tree is then evaluated, and gives the error.

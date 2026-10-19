@@ -31,7 +31,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    process: xor(1)\n", .Unsupported, 7, 5, "process is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    io: _root._io\n", .Unsupported, 7, 5, "attribute a: io is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    sizee: 1\n", .Invalid, 7, 5, `attribute a: unknown key "sizee"`},
-	{HEAD + "params:\n  - id: p\n", .Unsupported, 4, 1, "params is not supported"},
+	{HEAD + "params:\n  - id: p\n    type: u1\n", .Unsupported, 4, 1, "params on the top-level type are not supported, except in an imported schema"},
 	{HEAD + "sequence: []\n", .Invalid, 4, 1, `the top level: unknown key "sequence"`},
 	{"meta:\n  id: t\n  imports: a\n", .Invalid, 3, 12, "imports must be a sequence"},
 	{"meta:\n  id: t\n  imports: ['']\n", .Invalid, 3, 13, "imports: an import is empty"},
@@ -181,6 +181,21 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    -bits:\n      - {id: a, low: 0, high: 0}\n", .Invalid, 8, 14, "id a is already used"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    -bits:\n      - {id: b, low: 0}\n", .Invalid, 8, 9, "a: a -bits entry has no high"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    -bits:\n      - {id: b, low: 0, high: 0, width: 1}\n", .Invalid, 8, 34, `-bits: unknown key "width"`},
+
+	// params
+	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    params:\n      - id: p\n        type: u1\n", .Invalid, 6, 11, "a: type s takes 1 argument, not 0"},
+	{HEAD + "seq:\n  - id: a\n    type: s(1, 2)\ntypes:\n  s: {}\n", .Invalid, 6, 11, "a: type s takes 0 arguments, not 2"},
+	{HEAD + "seq:\n  - id: a\n    type: s(1 == 1)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u1\n", .Invalid, 6, 15, "type: argument 1 of s, p, must be an integer, not a boolean"},
+	{HEAD + "seq:\n  - id: a\n    type: s(1 +)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u1\n", .Syntax, 6, 16, "type: unexpected end of expression"},
+	{HEAD + "seq:\n  - id: a\n    type: s(1, )\ntypes:\n  s:\n    params:\n      - id: p\n        type: u1\n", .Syntax, 6, 16, "type: expected an expression after ,"},
+	{HEAD + "seq:\n  - id: a\n    type: s(1\ntypes:\n  s:\n    params:\n      - id: p\n        type: u1\n", .Invalid, 6, 11, "a: type s(1 does not end with )"},
+	{HEAD + "seq:\n  - id: a\n    type: s(1)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u1\n    seq:\n      - id: p\n        type: u1\n", .Invalid, 13, 13, "id p is already used"},
+	{HEAD + "types:\n  s:\n    params:\n      - id: p\n", .Unsupported, 7, 9, "param p has no type; params of any type are not supported"},
+	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: str\n", .Unsupported, 8, 15, "param p: type str is not supported; only integer types, bool and bytes are"},
+	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: bool\n        enum: e\n", .Invalid, 9, 9, "param p: enum applies only to integer types"},
+	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: u1\n        enum: e\n", .Invalid, 9, 15, "p: no enum e"},
+	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: u1\n        size: 1\n", .Invalid, 9, 9, `param p: unknown key "size"`},
+	{HEAD + "types:\n  s:\n    params: 1\n", .Invalid, 6, 13, "params must be a sequence"},
 
 	// enums
 	{HEAD + "enums:\n  e:\n    1:\n      doc: d\n", .Invalid, 7, 7, "enum e: a value has no id"},
@@ -918,4 +933,95 @@ t[0].again[0] = 5
 	// whose low 6 bits are the 6 left over from the first byte
 	le := "meta:\n  id: t\n  bit-endian: le\nseq:\n  - id: a\n    type: b1\n  - id: b\n    type: b1be\n  - id: c\n    type: b64\n"
 	expect_dump(t, "bit-endian le", ksy_json(t, le, {0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f}), `{"t":[{"a":[true],"b":[false],"c":[18446744073709551552]}]}` + "\n")
+}
+
+@(test)
+ksy_params :: proc(t: ^testing.T) {
+	// the arguments of a type are evaluated where each instance is read,
+	// with _index, and as in Kaitai, after the bytes of its substream
+	// (_io.pos is the parent's, past them), or after pos; each switch-on
+	// case has its own. Expressions in the type, and its value
+	// instances, refer to its params, which are not dumped
+	src := HEAD + `seq:
+  - id: n
+    type: u1
+  - id: raw
+    size: 2
+  - id: recs
+    type: rec(n + _index, _index == 1, raw)
+    repeat: expr
+    repeat-expr: 2
+  - id: pick
+    type:
+      switch-on: n
+      cases:
+        1: rec(0, true, raw)
+        _: rec(1, false, raw)
+  - id: sub
+    type: at(_io.pos)
+    size: 2
+instances:
+  first:
+    pos: 1
+    type: rec(_io.pos, false, raw)
+types:
+  rec:
+    params:
+      - id: len
+        type: u1
+      - id: flag
+        type: bool
+      - id: tag
+        type: bytes
+    seq:
+      - id: data
+        size: twice / 2
+      - id: extra
+        type: u1
+        if: flag and tag.size == 2
+    instances:
+      twice:
+        value: len * 2
+  at:
+    params:
+      - id: start
+        type: u4
+    seq:
+      - id: v
+        type: u1
+      - id: w
+        type: u1
+        if: start == 10
+`
+	expect_dump(t, "params, n = 1", ksy_dump(t, src, {1, 0xaa, 0xbb, 1, 2, 3, 4, 5, 6, 7}), `t[0].n[0] = 1
+t[0].raw[0] = <2 bytes> aa bb
+t[0].recs[0].data[0] = <1 bytes> 01
+t[0].recs[1].data[0] = <2 bytes> 02 03
+t[0].recs[1].extra[0] = 4
+t[0].pick[0].data[0] = <0 bytes>
+t[0].pick[0].extra[0] = 5
+t[0].sub[0].v[0] = 6
+t[0].sub[0].w[0] = 7
+t[0].first[0].data[0] = <1 bytes> aa
+`)
+	// a block scalar, with its line breaks
+	block := HEAD + "seq:\n  - id: a\n    type: |\n      s(\n        2\n      )\ntypes:\n  s:\n    params:\n      - id: p\n        type: u1\n    seq:\n      - id: v\n        size: p\n"
+	expect_dump(t, "params in a block scalar", ksy_dump(t, block, {1, 2}), "t[0].a[0].v[0] = <2 bytes> 01 02\n")
+
+	expect_dump(t, "params, n = 2", ksy_dump(t, src, {2, 0xaa, 0xbb, 1, 2, 3, 4, 5, 6, 7, 8, 9}), `t[0].n[0] = 2
+t[0].raw[0] = <2 bytes> aa bb
+t[0].recs[0].data[0] = <2 bytes> 01 02
+t[0].recs[1].data[0] = <3 bytes> 03 04 05
+t[0].recs[1].extra[0] = 6
+t[0].pick[0].data[0] = <1 bytes> 07
+t[0].sub[0].v[0] = 8
+t[0].first[0].data[0] = <1 bytes> aa
+`)
+
+	// the top-level type of an imported schema can have params
+	expect_dump(t, "imported params", ksy_file_dump(t, "tests/schemas/params/main.ksy", nil, {2, 5, 6, 7}), `main[0].n[0] = 2
+main[0].items[0].values[0] = 5
+main[0].items[0].values[1] = 6
+main[0].items[0].extra[0] = 7
+`)
 }

@@ -25,6 +25,8 @@ Node :: struct {
 	switch_on:       ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
 	instances:       []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
 	parse_instances: []^Node,           // Set only: Kaitai's instances with pos, each read at an offset (see pos)
+	params:          []^Node,           // Set only: Kaitai's params, each a field read once, of type Int64 (any integer type), Bool or Blob, whose value is its argument (see args)
+	args:            []^Expr,           // a Set with params: an Int, Bool or Bytes expression for each, evaluated where each instance is read, after the bytes of its substream
 	pos:             ^Expr,             // a parse instance only: an Int expression, the offset it is read at (see below); nil for every other field
 	bits:            []Bit_Field,       // integer types only: packed subfields, decoded from each element
 	valid:           Valid,             // checked on every element; nil when there is no check
@@ -211,11 +213,17 @@ bits_type :: proc(width: int) -> dat.Data_Type {
 }
 
 // The number of slots in an instance of set: one for each parse instance,
-// child and bit field. A front end records it in set.slot_count.
+// child, bit field and param. A front end records it in set.slot_count.
 count_slots :: proc(set: ^Node) -> int {
-	n := len(set.parse_instances) + len(set.children)
+	n := len(set.parse_instances) + len(set.children) + len(set.params)
 	for child in set.children do n += len(child.bits)
 	return n
+}
+
+// The slot of param k of set: the params come last, after the children
+// and their bit fields.
+param_slot :: proc(set: ^Node, k: int) -> int {
+	return set.slot_count - len(set.params) + k
 }
 
 // The slot of child index of set; its bit fields follow it, in order. Parse
