@@ -2,7 +2,7 @@
 """Compares gnrcrdr's decode of files with the official Kaitai Struct
 runtime's, value by value (decision record §8, step 6).
 
-    python3 tools/kaitai_compare/compare.py <schema.ksy> <file>...
+    python3 tools/kaitai_compare/compare.py [--import-path DIRS] <schema.ksy> <file>...
 
 Run from the repository root, after `npm ci --prefix tools/kaitai_compare`.
 Needs Odin, Node.js and PyYAML. The schema is compiled with the official
@@ -12,10 +12,13 @@ array of its values, set instances objects, byte arrays hex. Parse
 instances (instances with pos) are compared as fields. A field with no
 values (not read because of if or switch-on, or an empty repeat) is left
 out on both sides, as are value instances, which gnrcrdr does not dump.
-Field names are compared as the generated code spells them. Exits 1 if any
-file differs, or fails to decode on either side.
+Field names are compared as the generated code spells them. Imports are
+read relative to the importing schema, or for an absolute one, from the
+directories of --import-path (separated as in PATH), and given to both.
+Exits 1 if any file differs, or fails to decode on either side.
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -46,6 +49,30 @@ def theirs(value):
     return value
 
 
+def read_imports(path, ksy, import_paths, out, seen):
+    """Adds the schemas that ksy, read from path, imports, and theirs, to
+    out, keyed as decode.js's importer is asked for them."""
+    for name in (ksy.get('meta') or {}).get('imports') or []:
+        if name.startswith('/'):
+            key = 'abs:' + name[1:]
+            found = [os.path.join(d, name[1:] + '.ksy') for d in import_paths]
+            found = [f for f in found if os.path.isfile(f)]
+            if not found:
+                sys.exit('import %s is in none of the import paths' % name)
+            file = found[0]
+        else:
+            key = 'rel:' + name
+            file = os.path.join(os.path.dirname(path), name + '.ksy')
+        real = os.path.realpath(file)
+        if seen.setdefault(key, real) != real:
+            sys.exit('import %s names two schemas, which decode.js cannot tell apart' % key)
+        if key in out:
+            continue
+        with open(file, 'rb') as f:
+            out[key] = yaml.safe_load(f)
+        read_imports(file, out[key], import_paths, out, seen)
+
+
 def first_difference(a, b, path):
     """The path of the first value that differs, and the two values; None
     when a and b are equal. Also counts the values compared."""
@@ -66,21 +93,30 @@ def first_difference(a, b, path):
 
 
 def main():
-    if len(sys.argv) < 3:
-        sys.exit(__doc__)
-    schema, files = sys.argv[1], sys.argv[2:]
+    p = argparse.ArgumentParser(usage=__doc__)
+    p.add_argument('--import-path', default='')
+    p.add_argument('schema')
+    p.add_argument('files', nargs='+')
+    args = p.parse_args()
+    schema, files = args.schema, args.files
+    import_paths = [d for d in args.import_path.split(os.pathsep) if d]
     if not os.path.isdir(os.path.join(HERE, 'node_modules')):
         sys.exit('run npm ci --prefix tools/kaitai_compare first')
 
     with open(schema, 'rb') as f:
         ksy = yaml.safe_load(f)
     root_name = ksy['meta']['id']
+    imports = {}
+    read_imports(schema, ksy, import_paths, imports, {})
 
     with tempfile.TemporaryDirectory() as tmp:
         schema_json = os.path.join(tmp, 'schema.json')
         with open(schema_json, 'w') as f:
             json.dump(ksy, f)
-        out = subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema_json] + files,
+        imports_json = os.path.join(tmp, 'imports.json')
+        with open(imports_json, 'w') as f:
+            json.dump(imports, f)
+        out = subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema_json, '--imports', imports_json] + files,
                              check=True, capture_output=True, text=True).stdout
         reference = [json.loads(line) for line in out.splitlines()]
 
@@ -88,7 +124,10 @@ def main():
         subprocess.run(['odin', 'build', '.', '-out:' + tool], check=True)
         mine = []
         for path in files:
-            r = subprocess.run([tool, schema, path, '--dump', 'json'], capture_output=True, text=True)
+            cmd = [tool, schema, path, '--dump', 'json']
+            if args.import_path:
+                cmd += ['--import-path', args.import_path]
+            r = subprocess.run(cmd, capture_output=True, text=True)
             mine.append(json.loads(r.stdout) if r.returncode == 0 else {'error': r.stderr.strip()})
 
     failed = 0

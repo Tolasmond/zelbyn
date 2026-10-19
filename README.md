@@ -14,7 +14,7 @@ This produces `gnrcrdr.exe` on Windows and `gnrcrdr.bin` on Linux. There are no 
 ## Usage
 
 ```
-gnrcrdr <schema.ksy> <file> [--dump tree|json]
+gnrcrdr <schema.ksy> <file> [--dump tree|json] [--import-path dirs]
 ```
 
 Decodes `<file>` with the Kaitai Struct schema and writes the decoded tree to stdout. For example:
@@ -25,7 +25,7 @@ Decodes `<file>` with the Kaitai Struct schema and writes the decoded tree to st
 ./gnrcrdr.bin formats/gif89a.ksy data/855.gif
 ```
 
-`formats/gif.ksy` is `gif.ksy` from [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats), unchanged (CC0-1.0), and decodes the samples as the official Kaitai Struct runtime does (see [Kaitai runtime check](#kaitai-runtime-check)). `formats/gif89a.ksy` is a field-for-field port of the SQLite schema gnrcrdr used before `.ksy`, written with gnrcrdr's extensions, and gives the same output as that schema did. Options may also be written `--dump=json`. `--help` (or `-h`) prints usage.
+`formats/gif.ksy` is `gif.ksy` from [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats), unchanged (CC0-1.0), and decodes the samples as the official Kaitai Struct runtime does (see [Kaitai runtime check](#kaitai-runtime-check)). `formats/gif89a.ksy` is a field-for-field port of the SQLite schema gnrcrdr used before `.ksy`, written with gnrcrdr's extensions, and gives the same output as that schema did. Options may also be written `--dump=json`. `--import-path` lists the directories that a schema's absolute imports (`/common/x`) are found in, separated by `:` (`;` on Windows), as the official compiler's `-I` does. `--help` (or `-h`) prints usage.
 
 ### Output
 
@@ -74,7 +74,7 @@ Stdout carries only the decoded tree. Errors and usage messages go to stderr, an
 
 `--dump` values are case-sensitive.
 
-A `.ksy` schema that cannot be compiled is reported with its line and column, and the kind of problem: `Syntax`, `Unsupported` (valid YAML or Kaitai outside the supported subset) or `Invalid`:
+A `.ksy` schema that cannot be compiled is reported with its file (the schema, or one it imports), line and column, and the kind of problem: `Syntax`, `Unsupported` (valid YAML or Kaitai outside the supported subset) or `Invalid`:
 
 ```
 error: formats/x.ksy:6:5: Unsupported: attribute a: process is not supported
@@ -93,7 +93,7 @@ error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]
 | Area | Supported |
 |---|---|
 | Top level | `meta`, `seq`, `types`, `instances`, `enums`, `doc`, `doc-ref` |
-| `meta` | `id`, `endian`, `bit-endian`, `encoding`, `ks-version` (0.11 or older, the Kaitai version gnrcrdr follows); `title`, `application`, `file-extension`, `xref`, `license`, `tags` (ignored) |
+| `meta` | `id`, `endian`, `bit-endian`, `encoding`, `ks-version` (0.11 or older, the Kaitai version gnrcrdr follows), `imports`; `title`, `application`, `file-extension`, `xref`, `license`, `tags` (ignored) |
 | Attributes | `id`, `type`, `size`, `size-eos`, `terminator` (with `consume`, `include`, `eos-error`), `pad-right`, `contents`, `if`, `enum`, `valid` (a constant, or `eq`, `min`/`max`, `any-of`), `repeat` (`expr` with `repeat-expr`, `eos`, `until` with `repeat-until`), `encoding`, `doc`, `doc-ref` |
 | Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `str` with `size`, `size-eos` or `terminator`, and `strz` (ASCII or UTF-8, kept as bytes, NULs included within a `size`), byte arrays, user types (not recursive; with `size`, `size-eos` or `terminator`, read from a substream of those bytes), `switch-on` with `cases` whose types are user types, including the `_` default case |
 | Instances | value instances (`value:`), over the fields and other value instances of their own type. Expressions anywhere can refer to them; they are evaluated each time, and not dumped. Parse instances (`pos:`), with the keys of an attribute other than `id` and `io` |
@@ -103,9 +103,11 @@ With a `size`, the bytes are read, `pad-right` is removed from their end, and th
 
 A parse instance is read at `pos` in the stream of its type, which does not move, the first time an expression refers to it, as in Kaitai. Any that no expression has read are read once the fields of their type are, so every parse instance is in the decoded tree; an error in one fails the decode, even if nothing uses it. A `pos` outside the stream is `Offset_Out_Of_Range`.
 
+Each entry of `imports` names a schema file without its `.ksy`: relative to the directory of the schema that imports it, or, when it starts with `/`, in the first `--import-path` directory that has it. The top-level type of an imported schema is used by its `meta` `id`, and its own `meta` (`endian`, `encoding`) applies inside it. As in Kaitai, it is the `_root` of its own types and has no `_parent`. A schema imported more than once is read once.
+
 A field read once whose `switch-on` matches no case, without a `_` case, is not read, as in Kaitai; a repeated `switch-on` needs a `_` case. Expressions cannot refer to a `switch-on` field. Each element read by `repeat: eos` must consume input, and so must each element of `repeat: until` but the last.
 
-Not supported yet: bit types (`b1`–`b64`), instances without `pos` or `value`, `io`, `if` and `enum` on value instances, `params`, `imports`, attributes without an `id`, `size`, `size-eos` or `terminator` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
+Not supported yet: bit types (`b1`–`b64`), instances without `pos` or `value`, `io`, `if` and `enum` on value instances, `params`, a type of another type (`a::b`, such as a type declared in an imported schema), attributes without an `id`, `size`, `size-eos` or `terminator` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
 
 Keys starting with `-` are extensions. The official Kaitai tools ignore them, and gnrcrdr ignores the ones it does not know, as well as `-orig-id` on a type. gnrcrdr's own extensions let `formats/gif89a.ksy` give the same dumps as the SQLite schema it was ported from:
 
@@ -179,9 +181,10 @@ The generated parser and the binary go to `tools/bench/cpp/build/`, which is not
 ```
 npm ci --prefix tools/kaitai_compare
 python3 tools/kaitai_compare/compare.py formats/gif.ksy data/*.gif data/*.GIF
+python3 tools/kaitai_compare/compare.py --import-path ../kaitai_struct_formats ../kaitai_struct_formats/image/pcx_dcx.ksy file.dcx
 ```
 
-Both decodes are brought to one shape, every field an array of its values, and compared field by field. Fields with no values are left out on both sides, as are value instances. The script exits 1 if any file differs or fails to decode. Run it when the decoder, the `.ksy` compiler or `formats/gif.ksy` changes.
+Both decodes are brought to one shape, every field an array of its values, and compared field by field. Parse instances are compared as fields; fields with no values are left out on both sides, as are value instances. The script reads the schemas the schema imports, and gives them to both decoders. The script exits 1 if any file differs or fails to decode. Run it when the decoder, the `.ksy` compiler or `formats/gif.ksy` changes.
 
 ### YAML corpus check
 
