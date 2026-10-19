@@ -11,13 +11,13 @@ import "core:time"
 
 // Decodes path and dumps it into b as JSON (as_json) or text. Fails the
 // test and returns false on any error.
-dump_sample :: proc(t: ^testing.T, path: string, as_json: bool, b: ^strings.Builder, source := Schema_Source.Ported) -> bool {
+dump_sample :: proc(t: ^testing.T, path: string, as_json: bool, b: ^strings.Builder, source := Schema_Source.Ported, spans := false) -> bool {
 	ff: mdat.File_Format
 	defer mdat.destroy_file_format(&ff)
 	if !load_gif_from(t, source, &ff) do return false
 
 	d: Decoded
-	decode_file(&ff, path, &d)
+	decode_file(&ff, path, &d, spans)
 	defer destroy_decoded(&d)
 	if !testing.expectf(t, d.err.kind == .None, "%s: %v at 0x%08X in %s", path, d.err.kind, d.err.offset, d.err.path) do return false
 

@@ -51,12 +51,12 @@ Decoded :: struct {
 
 // d must be zero or destroyed. Decoded embeds an arena, so it is filled in
 // place and never returned by value (see §3.3).
-decode_bytes :: proc(ff: ^mdat.File_Format, data: []byte, d: ^Decoded) {
-	d.consumed, d.err = rdr.read_from_bytes(data, ff, &d.tree)
+decode_bytes :: proc(ff: ^mdat.File_Format, data: []byte, d: ^Decoded, spans := false) {
+	d.consumed, d.err = rdr.read_from_bytes(data, ff, &d.tree, spans)
 }
 
-decode_file :: proc(ff: ^mdat.File_Format, path: string, d: ^Decoded) {
-	d.consumed, d.err = rdr.read(path, ff, &d.tree)
+decode_file :: proc(ff: ^mdat.File_Format, path: string, d: ^Decoded, spans := false) {
+	d.consumed, d.err = rdr.read(path, ff, &d.tree, spans)
 }
 
 destroy_decoded :: proc(d: ^Decoded) {
@@ -85,18 +85,25 @@ root_instance :: proc(ff: ^mdat.File_Format, d: ^Decoded) -> Set_Instance {
 // The values of a field of s: a parse instance or a field by its .ksy id,
 // or a bit field by its name. nil when the set has none.
 field_values :: proc(s: Set_Instance, name: string) -> []fld.Value {
+	k := field_slot(s, name)
+	return k < 0 ? nil : s.instance.slots[k][:]
+}
+
+// The slot of a field of s, found as field_values finds it; -1 when the
+// set has none.
+field_slot :: proc(s: Set_Instance, name: string) -> int {
 	for p, k in s.set.parse_instances {
-		if p.ref_name == name do return s.instance.slots[k][:]
+		if p.ref_name == name do return k
 	}
 	slot := len(s.set.parse_instances)
 	for child in s.set.children {
-		if child.ref_name == name do return s.instance.slots[slot][:]
+		if child.ref_name == name do return slot
 		for bit, b in child.bits {
-			if bit.name == name do return s.instance.slots[slot + 1 + b][:]
+			if bit.name == name do return slot + 1 + b
 		}
 		slot += 1 + len(child.bits)
 	}
-	return nil
+	return -1
 }
 
 // Instance index of a set field of s, by .ksy id.

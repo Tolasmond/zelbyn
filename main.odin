@@ -18,6 +18,7 @@ Options :: struct {
 	schema:      string `args:"pos=0,required" usage:"Schema: a Kaitai Struct .ksy file."`,
 	file:        string `args:"pos=1,required" usage:"File to decode."`,
 	dump:        string `usage:"Output form: tree or json (default tree)."`,
+	offsets:     bool `usage:"With --dump tree: end each line with the value's offset in the file (@0x1A2B)."`,
 	import_path: string `args:"name=import-path" usage:"Directories that absolute imports (/a/b) are found in, separated by ':' (';' on Windows)."`,
 }
 
@@ -32,7 +33,7 @@ main :: proc() {
 	opts, dump, usage_exit, ok := parse_args(os.args)
 	if !ok do os.exit(usage_exit)
 
-	exit_code := run_tracked(opts.schema, opts.file, opts.import_path, dump)
+	exit_code := run_tracked(opts.schema, opts.file, opts.import_path, dump, opts.offsets)
 
 	os.exit(exit_code) // os.exit skips defers: run_tracked has already cleaned up
 }
@@ -63,6 +64,11 @@ parse_args :: proc(args: []string) -> (opts: Options, dump: Dump_Kind, exit_code
 		flags.write_usage(stderr, Options, program, .Unix)
 		return opts, dump, 2, false
 	}
+	if opts.offsets && dump != .Tree {
+		fmt.eprintln("error: --offsets applies only to --dump tree")
+		flags.write_usage(stderr, Options, program, .Unix)
+		return opts, dump, 2, false
+	}
 
 	return opts, dump, 0, true
 }
@@ -70,14 +76,14 @@ parse_args :: proc(args: []string) -> (opts: Options, dump: Dump_Kind, exit_code
 // Calls run. In debug builds (-debug) it runs under a tracking allocator and
 // reports leaks and bad frees on stderr, either of which turns exit code 0
 // into 1.
-run_tracked :: proc(schema_path: string, file_path: string, import_path: string, dump: Dump_Kind) -> int {
+run_tracked :: proc(schema_path: string, file_path: string, import_path: string, dump: Dump_Kind, offsets: bool) -> int {
 	when ODIN_DEBUG {
 		tracking_allocator: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&tracking_allocator, context.allocator)
 		tracking_allocator.bad_free_callback = mem.tracking_allocator_bad_free_callback_add_to_array
 		context.allocator = mem.tracking_allocator(&tracking_allocator)
 
-		exit_code := run(schema_path, file_path, import_path, dump)
+		exit_code := run(schema_path, file_path, import_path, dump, offsets)
 
 		if reset_tracking_allocator(&tracking_allocator) && exit_code == 0 {
 			exit_code = 1
@@ -85,16 +91,17 @@ run_tracked :: proc(schema_path: string, file_path: string, import_path: string,
 		mem.tracking_allocator_destroy(&tracking_allocator)
 		return exit_code
 	} else {
-		return run(schema_path, file_path, import_path, dump)
+		return run(schema_path, file_path, import_path, dump, offsets)
 	}
 }
 
 // Loads the format from schema_path, with absolute imports found in the
 // directories of the list import_path, decodes file_path with it and writes
-// the decoded tree to stdout as a text dump or JSON. Errors are reported on
-// stderr, and nothing is written to stdout unless decoding succeeds.
-// Returns 0 on success, 1 on a load, parse or output error.
-run :: proc(schema_path: string, file_path: string, import_path: string, dump: Dump_Kind) -> int {
+// the decoded tree to stdout as a text dump, with each value's offset when
+// offsets is set, or JSON. Errors are reported on stderr, and nothing is
+// written to stdout unless decoding succeeds. Returns 0 on success, 1 on a
+// load, parse or output error.
+run :: proc(schema_path: string, file_path: string, import_path: string, dump: Dump_Kind, offsets: bool) -> int {
 	file_format: mdat.File_Format
 	defer mdat.destroy_file_format(&file_format)
 
@@ -105,7 +112,7 @@ run :: proc(schema_path: string, file_path: string, import_path: string, dump: D
 	// the tree may be partially filled after a parse error; free it either way
 	defer fld.destroy_value_tree(&tree)
 
-	_, parse_err := rdr.read(file_path, &file_format, &tree)
+	_, parse_err := rdr.read(file_path, &file_format, &tree, spans = offsets)
 	defer rdr.destroy_parse_error(&parse_err)
 
 	if parse_err.kind == .File_Read_Failed {
@@ -124,7 +131,7 @@ run :: proc(schema_path: string, file_path: string, import_path: string, dump: D
 	write_err: io.Error
 	switch dump {
 	case .Tree:
-		write_err = dmp.write_text(w, &file_format, &tree)
+		write_err = dmp.write_text(w, &file_format, &tree, offsets)
 	case .JSON:
 		write_err = dmp.write_json(w, &file_format, &tree)
 	}

@@ -169,7 +169,8 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		instance := base.(^fld.Instance)
 		values := instance.slots[x.slot]
 		if x.node.pos != nil && raw_data(values) == nil {
-			read_parse_instance(d, instance, x.node, x.slot) or_return
+			if d.spans do read_parse_instance(d, instance, x.node, x.slot, true) or_return
+			else do read_parse_instance(d, instance, x.node, x.slot, false) or_return
 			values = instance.slots[x.slot]
 		}
 		if e.type == .Array do return values[:], .None

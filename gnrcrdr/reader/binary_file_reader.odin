@@ -10,9 +10,10 @@ import "core:slice"
 // Reads the file name into tree's arena, closes it, and decodes it into
 // tree, which must be zero or destroyed. Strings and blobs are views of that
 // copy, so the tree owns its input: it needs neither the file nor the
-// schema once read returns.
+// schema once read returns. With spans, the tree records the span of each
+// value (field.value_span), which costs memory and time.
 @(require_results)
-read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
+read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read: tree must be zero or destroyed")
 	f, open_err := os.open(name)
 	if open_err != nil {
@@ -26,18 +27,18 @@ read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree) ->
 	if read_err != nil {
 		return 0, Parse_Error{kind = .File_Read_Failed, os_error = read_err}
 	}
-	return decode(data, format, tree)
+	return decode(data, format, tree, spans)
 }
 
 // Decodes data into tree, which must be zero or destroyed. Strings and
 // blobs are views of data, which the tree borrows: keep data alive and
 // unchanged for as long as the tree is used. The tree references nothing
-// in the schema.
+// in the schema. spans is as for read.
 @(require_results)
-read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
+read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
 	init_arena(tree, len(data))
-	return decode(data, format, tree)
+	return decode(data, format, tree, spans)
 }
 
 // Sizes the first block of tree's arena for an input of input_size bytes.
@@ -48,19 +49,22 @@ init_arena :: proc(tree: ^fld.Value_Tree, input_size: int) {
 	arn.arena_init(&tree.arena, max(16 * uint(max(input_size, 0)), arn.ARENA_BLOCK_SIZE))
 }
 
-// Decodes data into tree, whose arena init_arena has sized.
+// Decodes data into tree, whose arena init_arena has sized. The decoder is
+// compiled twice, with and without spans, so that a decode without them
+// pays nothing for them.
 @(private = "file", require_results)
-decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
+decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans: bool) -> (consumed: int, err: Parse_Error) {
 	allocator := arn.arena_allocator(&tree.arena)
+	tree.spans = spans
 
-	d := Decoder{arena = &tree.arena, allocator = allocator}
+	d := Decoder{arena = &tree.arena, allocator = allocator, spans = spans}
 	d.path = make([dynamic]Path_Segment, allocator)
 	d.frames = make([dynamic]Frame, allocator)
 	d.streams = make([dynamic]Stream, allocator)
 	dat.reader_init(&d.r, data)
 
 	root := Sink{slots = ([^][]fld.Value)(&tree.root)[:1]}
-	rerr := read_values(&d, &root, format.root)
+	rerr := spans ? read_values(&d, &root, format.root, true) : read_values(&d, &root, format.root, false)
 	if rerr != .None && d.err.kind == .None {
 		fail(&d, rerr, d.r.pos)
 	}
@@ -78,12 +82,28 @@ Sink :: struct {
 	cap:   int,
 }
 
+// An array with room for n values, and with SPANS, for their spans before
+// it (field.value_span).
+@(private = "file")
+make_values :: #force_inline proc(d: ^Decoder, n: int, $SPANS: bool) -> []fld.Value {
+	when SPANS {
+		#assert(size_of(fld.Span) % size_of(rawptr) == 0 && size_of(fld.Value) % size_of(rawptr) == 0)
+		SPAN_WORDS :: size_of(fld.Span) / size_of(rawptr)
+		VALUE_WORDS :: size_of(fld.Value) / size_of(rawptr)
+		if n <= 0 do return nil
+		words := raw_data(arn.arena_make(d.arena, rawptr, n * (SPAN_WORDS + VALUE_WORDS)))
+		return ([^]fld.Value)(&words[n * SPAN_WORDS])[:n]
+	} else {
+		return arn.arena_make(d.arena, fld.Value, n)
+	}
+}
+
 // Makes room for n values in each slot of s, which must be empty: the cells
 // when n is at most 1, else an array of exactly n.
 @(private = "file")
-reserve_exactly :: proc(d: ^Decoder, s: ^Sink, n: int) {
+reserve_exactly :: proc(d: ^Decoder, s: ^Sink, n: int, $SPANS: bool) {
 	for &slot, k in s.slots {
-		slot = n <= 1 && s.cells != nil ? s.cells[k:k] : arn.arena_make(d.arena, fld.Value, n)[:0]
+		slot = n <= 1 && s.cells != nil ? s.cells[k:k] : make_values(d, n, SPANS)[:0]
 	}
 	s.cap = n
 }
@@ -91,12 +111,15 @@ reserve_exactly :: proc(d: ^Decoder, s: ^Sink, n: int) {
 // Makes room for at least n values in each slot of s, doubling, for a count
 // that is not known in advance.
 @(private = "file")
-reserve_growing :: proc(d: ^Decoder, s: ^Sink, n: int) {
+reserve_growing :: proc(d: ^Decoder, s: ^Sink, n: int, $SPANS: bool) {
 	if n <= s.cap do return
 	s.cap = max(8, 2 * s.cap, n)
 	for &slot in s.slots {
-		grown := arn.arena_make(d.arena, fld.Value, s.cap)
+		grown := make_values(d, s.cap, SPANS)
 		copy(grown, slot)
+		when SPANS {
+			if len(slot) > 0 do copy(([^]fld.Span)(fld.array_span(grown, len(slot) - 1))[:len(slot)], ([^]fld.Span)(fld.array_span(slot, len(slot) - 1))[:len(slot)])
+		}
 		slot = grown[:len(slot)]
 	}
 }
@@ -110,11 +133,29 @@ push :: #force_inline proc(s: ^Sink, k: int, v: fld.Value) {
 	s.slots[k][len(slot)] = v
 }
 
+// Records the span of the last value of slot k of s, in a tree read with
+// spans: from start, a position in the stream being read, to the stream's
+// position. A value in a cell is in the instance of the innermost frame,
+// which keeps the cells' spans (field.value_span).
+@(private = "file")
+set_span :: proc(d: ^Decoder, s: ^Sink, k: int, start: int) {
+	slot := s.slots[k]
+	span := fld.Span{d.base + start, d.r.pos - start}
+	if s.cells == nil || raw_data(slot) != &s.cells[k] {
+		fld.array_span(slot, len(slot) - 1)^ = span
+		return
+	}
+	instance := d.frames[len(d.frames) - 1].instance
+	cells := fld.instance_cells(instance)
+	assert(uintptr(raw_data(slot)) >= uintptr(raw_data(cells)) && uintptr(raw_data(slot)) < uintptr(raw_data(cells)) + uintptr(len(cells) * size_of(fld.Value)), "set_span: the cell is not the innermost instance's")
+	fld.cell_spans(instance)[(uintptr(raw_data(slot)) - uintptr(raw_data(cells))) / size_of(fld.Value)] = span
+}
+
 // Reads every value of node into s: the instances of a set, or the elements
 // of any other field, with their bit fields. A parse instance is read at
 // its pos, which moves the stream: read_parse_instance puts it back.
 @(private = "file", require_results)
-read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error {
+read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, $SPANS: bool) -> dat.Read_Error {
 	if node.align do dat.align_to_byte(&d.r)
 
 	if node.cond != nil {
@@ -148,20 +189,20 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error 
 	case mdata.Marker_Count:
 		count = markers_match(&d.r, c.markers) ? 1 : 0
 	case mdata.Repeat_Count:
-		return read_repeat(d, s, node, c)
+		return read_repeat(d, s, node, c, SPANS)
 	case mdata.Eos_Count:
 		for i := 0; !dat.at_eof(&d.r); i += 1 {
 			start, start_bits := d.r.pos, dat.bit_pos(&d.r)
-			reserve_growing(d, s, i + 1)
-			read_element(d, s, node, i) or_return
+			reserve_growing(d, s, i + 1, SPANS)
+			read_element(d, s, node, i, SPANS) or_return
 			if dat.bit_pos(&d.r) == start_bits do return no_progress(d, node, i, start)
 		}
 		return .None
 	case mdata.Until_Count:
 		for i := 0;; i += 1 {
 			start, start_bits := d.r.pos, dat.bit_pos(&d.r)
-			reserve_growing(d, s, i + 1)
-			read_element(d, s, node, i) or_return
+			reserve_growing(d, s, i + 1, SPANS)
+			read_element(d, s, node, i, SPANS) or_return
 
 			values := s.slots[0]
 			done, err := eval_bool(d, c.expr, element = values[len(values) - 1])
@@ -175,14 +216,14 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error 
 	// elements that consume input cannot outnumber the bytes left, so a
 	// larger count, which may come from the input, grows as it is read
 	if count <= 1 || count <= len(d.r.data) - d.r.pos {
-		reserve_exactly(d, s, count)
+		reserve_exactly(d, s, count, SPANS)
 		for i in 0 ..< count {
-			read_element(d, s, node, i) or_return
+			read_element(d, s, node, i, SPANS) or_return
 		}
 	} else {
 		for i in 0 ..< count {
-			reserve_growing(d, s, i + 1)
-			read_element(d, s, node, i) or_return
+			reserve_growing(d, s, i + 1, SPANS)
+			read_element(d, s, node, i, SPANS) or_return
 		}
 	}
 	return .None
@@ -192,7 +233,7 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error 
 // terminator is found. The terminator is required, and every element must
 // consume input.
 @(private = "file", require_results)
-read_repeat :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, repeat: mdata.Repeat_Count) -> dat.Read_Error {
+read_repeat :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, repeat: mdata.Repeat_Count, $SPANS: bool) -> dat.Read_Error {
 	for {
 		value, peek_err := dat.peek_integer_at(&d.r, d.r.pos, repeat.type, repeat.order)
 
@@ -205,8 +246,8 @@ read_repeat :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, repeat: mdata.Repe
 
 		n := len(s.slots[0])
 		start, start_bits := d.r.pos, dat.bit_pos(&d.r)
-		reserve_growing(d, s, n + 1)
-		read_element(d, s, node, n) or_return
+		reserve_growing(d, s, n + 1, SPANS)
+		read_element(d, s, node, n, SPANS) or_return
 		if dat.bit_pos(&d.r) == start_bits do return no_progress(d, node, n, start)
 	}
 }
@@ -220,26 +261,31 @@ no_progress :: proc(d: ^Decoder, node: ^mdata.Node, index, start: int) -> dat.Re
 }
 
 // Reads element index of node into s, which has room for it: an instance of
-// a set, or a value of any other field and its bit fields.
+// a set, or a value of any other field and its bit fields, each with its
+// span when SPANS is set.
 @(private = "file", require_results)
-read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> dat.Read_Error {
+read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPANS: bool) -> dat.Read_Error {
 	// on error the segment is left pushed; fail has already copied the path
 	append(&d.path, Path_Segment{node.name, index})
 	start := d.r.pos
 
 	if node.type == .Set {
-		read_instance(d, s, node, index) or_return
+		read_instance(d, s, node, index, SPANS) or_return
+		// a switch-on that chooses no set reads nothing
+		when SPANS do if len(s.slots[0]) > index do set_span(d, s, 0, start)
 		pop(&d.path)
 		return .None
 	}
 
 	value := read_scalar(d, node, index) or_return
 	push(s, 0, value)
+	when SPANS do set_span(d, s, 0, start)
 	pop(&d.path)
 
 	for bit, b in node.bits {
 		bit_value := bit_field_value(value, bit)
 		push(s, 1 + b, bit_value)
+		when SPANS do set_span(d, s, 1 + b, start)
 
 		if e := check_valid(bit_value, bit.valid); e != .None {
 			append(&d.path, Path_Segment{bit.name, index})
@@ -255,7 +301,7 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> da
 // after the bytes of the substream. A switch-on that chooses no set reads
 // nothing.
 @(private = "file", require_results)
-read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> dat.Read_Error {
+read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPANS: bool) -> dat.Read_Error {
 	set := node
 	choice := 0
 	if sw := node.switch_on; sw != nil {
@@ -274,7 +320,7 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> d
 	if node.length == nil && node.terminator == nil {
 		args: []fld.Value
 		if len(set.args) > 0 do args = eval_args(d, set, index) or_return
-		return read_set_instance(d, s, set, choice, args)
+		return read_set_instance(d, s, set, choice, args, SPANS)
 	}
 
 	start := d.r.pos
@@ -293,7 +339,7 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> d
 	dat.reader_init(&d.r, bytes)
 	d.base += start
 
-	return read_set_instance(d, s, set, choice, args)
+	return read_set_instance(d, s, set, choice, args, SPANS)
 }
 
 // The values of the arguments of set, which has some, for instance index,
@@ -314,11 +360,11 @@ eval_args :: proc(d: ^Decoder, set: ^mdata.Node, index: int) -> (args: []fld.Val
 // field.Instance), with the values of its params, args, and reads its
 // children into it, then the parse instances that no expression has read.
 @(private = "file", require_results)
-read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int, args: []fld.Value) -> dat.Read_Error {
+read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int, args: []fld.Value, $SPANS: bool) -> dat.Read_Error {
 	when ODIN_DEBUG {
 		assert(node.slot_count == mdata.count_slots(node), "read_set_instance: the set's slot_count was not recorded")
 	}
-	instance, cells := fld.make_instance(d.arena, node.slot_count, choice)
+	instance, cells := fld.make_instance(d.arena, node.slot_count, choice, SPANS)
 	push(s, 0, instance)
 	for v, k in args {
 		slot := mdata.param_slot(node, k)
@@ -333,12 +379,12 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	for child in node.children {
 		n := 1 + len(child.bits)
 		child_sink := Sink{slots = instance.slots[slot:][:n], cells = cells[slot:][:n]}
-		read_values(d, &child_sink, child) or_return
+		read_values(d, &child_sink, child, SPANS) or_return
 		slot += n
 	}
 
 	for p, k in node.parse_instances {
-		if raw_data(instance.slots[k]) == nil do read_parse_instance(d, instance, p, k) or_return
+		if raw_data(instance.slots[k]) == nil do read_parse_instance(d, instance, p, k, SPANS) or_return
 	}
 
 	pop(&d.frames)
@@ -349,7 +395,7 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 // slot k: at its pos in the instance's stream, as the instance's frame
 // sees it. The stream, frames and path are then put back as they were.
 @(private, require_results)
-read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int) -> dat.Read_Error {
+read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int, $SPANS: bool) -> dat.Read_Error {
 	j := len(d.frames) - 1
 	for j >= 0 && d.frames[j].instance != instance do j -= 1
 	// an instance that is no longer decoded had its parse instances read
@@ -381,7 +427,7 @@ read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.N
 	}
 
 	s := Sink{slots = instance.slots[k:][:1], cells = cells[k:][:1]}
-	err := read_values(d, &s, node)
+	err := read_values(d, &s, node, SPANS)
 	if aside {
 		d.frames = frames
 		d.streams = streams
@@ -399,8 +445,10 @@ clone_dynamic :: proc(d: ^Decoder, values: []$T) -> [dynamic]T {
 }
 
 // Reads element index of node, a field that is not a set, and checks it.
+// Inlined into each read_element, with and without spans: a call for every
+// value costs 8% more decode instructions.
 @(private = "file", require_results)
-read_scalar :: proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.Value, err: dat.Read_Error) {
+read_scalar :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.Value, err: dat.Read_Error) {
 	start := d.r.pos
 
 	switch node.type {

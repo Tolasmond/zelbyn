@@ -21,22 +21,26 @@ GOLDEN_CONTEXT :: 60
 
 // Dumps a sample as text and as JSON from each schema, and compares each,
 // byte for byte, with <file name>.tree and .json: in tests/golden/ for
-// gif.ksy, in tests/golden/gif89a/ for gif89a.ksy.
+// gif.ksy, in tests/golden/gif89a/ for gif89a.ksy. A tree read with spans
+// must give the same dumps.
 @(private = "file")
 check_golden :: proc(t: ^testing.T, s: Sample) {
 	testing.set_fail_timeout(t, 30 * time.Second)
 
 	for source in Schema_Source {
 		for as_json in ([?]bool{false, true}) {
-			b := strings.builder_make()
-			defer strings.builder_destroy(&b)
-			if !dump_sample(t, s.path, as_json, &b, source) do continue
+			for spans in ([?]bool{false, true}) {
+				if GOLDEN_RECORD && spans do continue
+				b := strings.builder_make()
+				defer strings.builder_destroy(&b)
+				if !dump_sample(t, s.path, as_json, &b, source, spans) do continue
 
-			dir := source == .Kaitai ? GOLDEN_DIR : GOLDEN_DIR + "/gif89a"
-			golden_path := fmt.aprintf("%s/%s.%s", dir, filepath.base(s.path), as_json ? "json" : "tree")
-			defer delete(golden_path)
+				dir := source == .Kaitai ? GOLDEN_DIR : GOLDEN_DIR + "/gif89a"
+				golden_path := fmt.aprintf("%s/%s.%s", dir, filepath.base(s.path), as_json ? "json" : "tree")
+				defer delete(golden_path)
 
-			compare_golden(t, golden_path, strings.to_string(b), source)
+				compare_golden(t, golden_path, strings.to_string(b), source)
+			}
 		}
 	}
 }

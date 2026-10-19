@@ -1,7 +1,7 @@
 // Decodes files with the official Kaitai Struct compiler and JavaScript
 // runtime, for compare.py:
 //
-//     node decode.js <schema.json> [--imports <imports.json>] <file>...
+//     node decode.js <schema.json> [--imports <imports.json>] [--offsets] <file>...
 //
 // schema.json is a .ksy file converted to JSON. imports.json maps each
 // import, as the compiler asks for it ("rel:" or "abs:" and its name, with
@@ -15,6 +15,12 @@
 // members (_io, _parent, _root, _raw_*, _m_*) are left out; names are as
 // the generated code spells them (lowerCamelCase). A file that fails to
 // decode prints {"error": "..."}.
+//
+// With --offsets, the schema is compiled in debug mode, and each line maps
+// the path of every value that is not a set instance, as gnrcrdr's text
+// dump writes it (root[0].field[i]...), to the offset in the file that
+// the runtime's debug record gives it: where the read of the value
+// started.
 
 "use strict";
 
@@ -55,6 +61,26 @@ function value(v) {
   return v;
 }
 
+// The offsets of the values of obj, read in debug mode, added to out by
+// their paths below path; base is the offset of the root's stream.
+function offsets(obj, path, base, out) {
+  const m = MEMBERS[obj.constructor.name] || { parseInstances: [], params: new Set() };
+  const keys = Object.keys(obj).filter((k) => !k.startsWith("_") && !m.params.has(k));
+  for (const key of keys.concat(m.parseInstances)) {
+    const v = obj[key];
+    if (v === undefined || v === null) continue;
+    const debug = obj._debug[key] || obj._debug["_m_" + key];
+    const values = Array.isArray(v) ? v : [v];
+    values.forEach((x, i) => {
+      const d = Array.isArray(v) ? debug.arr[i] : debug;
+      const p = path + "." + key + "[" + i + "]";
+      if (typeof x === "object" && !(x instanceof Uint8Array)) offsets(x, p, base, out);
+      else out[p] = d.ioOffset + d.start - base;
+    });
+  }
+  return out;
+}
+
 function instance(obj) {
   const m = MEMBERS[obj.constructor.name] || { parseInstances: [], params: new Set() };
   const out = {};
@@ -79,9 +105,11 @@ async function main() {
     imports = JSON.parse(fs.readFileSync(args[1], "utf8"));
     args.splice(0, 2);
   }
+  const withOffsets = args[0] === "--offsets";
+  if (withOffsets) args.shift();
   const files = args;
   if (!schemaPath || files.length === 0) {
-    console.error("usage: node decode.js <schema.json> [--imports <imports.json>] <file>...");
+    console.error("usage: node decode.js <schema.json> [--imports <imports.json>] [--offsets] <file>...");
     process.exit(2);
   }
 
@@ -94,7 +122,7 @@ async function main() {
       return spec ? Promise.resolve(spec) : Promise.reject(new Error("no schema for import " + name));
     },
   };
-  const sources = await compiler.compile("javascript", ksy, importer, false);
+  const sources = await compiler.compile("javascript", ksy, importer, withOffsets);
 
   // each generated file is a module, which requires those of its imports
   const modules = {};
@@ -115,7 +143,13 @@ async function main() {
   for (const file of files) {
     try {
       const root = new Root(new KaitaiStream(fs.readFileSync(file)));
-      console.log(JSON.stringify(instance(root)));
+      if (withOffsets) {
+        // in debug mode, the constructor does not read
+        root._read();
+        console.log(JSON.stringify(offsets(root, lowerCamel(ksy.meta.id) + "[0]", root._io.byteOffset, {})));
+      } else {
+        console.log(JSON.stringify(instance(root)));
+      }
     } catch (e) {
       console.log(JSON.stringify({ error: String(e) }));
     }
