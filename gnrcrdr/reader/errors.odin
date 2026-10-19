@@ -28,6 +28,7 @@ Decoder :: struct {
 	path:      [dynamic]Path_Segment,
 	frames:    [dynamic]Frame,  // the set instances being decoded, outermost first
 	streams:   [dynamic]Stream, // the streams that substreams were taken from, outermost first, as they are now
+	spans:     bool,            // the tree records spans: read_parse_instance is called with SPANS
 	err:       Parse_Error,
 }
 

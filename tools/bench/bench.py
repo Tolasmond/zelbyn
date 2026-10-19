@@ -2,7 +2,7 @@
 """Measures gnrcrdr cold, one fresh process per measurement (decision record
 §10.2).
 
-    python3 tools/bench/bench.py [--runs N] [--schema S] [--cpp BIN] [file ...]
+    python3 tools/bench/bench.py [--runs N] [--schema S] [--spans] [--cpp BIN] [file ...]
 
 Run from the repository root; needs Odin. Builds gnrcrdr and the one-shot
 program in tools/bench with -o:speed, then runs each of these RUNS times
@@ -13,13 +13,15 @@ programs:
   it and writes its JSON dump to memory, timing each phase, and counts the
   page faults taken during the decode;
 - the CLI, `gnrcrdr <schema> <file> --dump json`, with its output discarded,
-  timed from spawn to exit;
+  timed from spawn to exit (with --spans, `--offsets`, the text dump with
+  each value's offset, instead);
 - the one-shot program with --start-only, which exits at once: the fixed
   cost of starting a process;
 - with --cpp, the Kaitai Struct C++ reference built by cpp/build.py, which
   reads the file and decodes it with the official runtime.
 
-Prints the median of every figure. The files default to the samples in
+With --spans the one-shot program decodes with spans. Prints the median
+of every figure. The files default to the samples in
 data/, and the schema to formats/gif.ksy; the C++ reference must have been
 built from the same schema. A program that fails stops the run.
 """
@@ -60,6 +62,7 @@ def main():
     p.add_argument('files', nargs='*')
     p.add_argument('--runs', type=int, default=200)
     p.add_argument('--schema', default='formats/gif.ksy')
+    p.add_argument('--spans', action='store_true', help='decode with spans; the CLI writes the text dump with --offsets')
     p.add_argument('--cpp', help='the Kaitai Struct C++ reference, from cpp/build.py')
     args = p.parse_args()
     files = args.files or sorted(f for f in glob.glob('data/*') if f.lower().endswith('.gif'))
@@ -73,17 +76,17 @@ def main():
         for _ in range(args.runs):
             for f in files:
                 r = results[f]
-                _, fields = run([oneshot, args.schema, f], True)
+                _, fields = run([oneshot, args.schema, f] + (['--spans'] if args.spans else []), True)
                 r['odin'].append(fields)
-                r['cli'].append({'wall': run([cli, args.schema, f, '--dump', 'json'], False)[0]})
+                r['cli'].append({'wall': run([cli, args.schema, f] + (['--offsets'] if args.spans else ['--dump', 'json']), False)[0]})
                 r['start'].append({'wall': run([oneshot, '--start-only'], False)[0]})
                 if args.cpp:
                     wall, fields = run([args.cpp, f], True)
                     fields['wall'] = wall
                     r['cpp'].append(fields)
 
-    print('schema %s, %d runs per file, medians; times in µs' % (args.schema, args.runs))
-    head = '%-14s %8s %8s %7s %8s %7s %8s %8s %9s' % ('file', 'input KB', 'tree KB', 'faults', 'compile', 'read', 'decode', 'json', 'CLI+json')
+    print('schema %s%s, %d runs per file, medians; times in µs' % (args.schema, ', with spans' if args.spans else '', args.runs))
+    head = '%-14s %8s %8s %7s %8s %7s %8s %8s %9s' % ('file', 'input KB', 'tree KB', 'faults', 'compile', 'read', 'decode', 'json', 'CLI+offs' if args.spans else 'CLI+json')
     if args.cpp:
         head += ' | %8s %7s %6s %9s' % ('C++ dec', 'faults', 'ratio', 'C++ proc')
     print(head)

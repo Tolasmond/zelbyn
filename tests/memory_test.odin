@@ -12,6 +12,7 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 
+// With spans or without.
 @(test)
 decode_uses_only_arena :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
@@ -19,7 +20,7 @@ decode_uses_only_arena :: proc(t: ^testing.T) {
 	defer mdat.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
-	for s in ([]Sample{SAMPLE_855, SAMPLE_CG89A}) {
+	for s in ([]Sample{SAMPLE_855, SAMPLE_CG89A}) do for spans in ([?]bool{false, true}) {
 		data, read_err := os.read_entire_file(s.path, context.allocator)
 		if !testing.expectf(t, read_err == nil, "reading %s: %v", s.path, read_err) do continue
 		defer delete(data)
@@ -33,12 +34,12 @@ decode_uses_only_arena :: proc(t: ^testing.T) {
 		{
 			context.allocator = mem.tracking_allocator(&track)
 			context.logger = log.nil_logger()
-			decode_bytes(&ff, data, &d)
+			decode_bytes(&ff, data, &d, spans)
 		}
 
 		testing.expectf(t, d.err.kind == .None, "%s: %v at 0x%08X in %s", s.path, d.err.kind, d.err.offset, d.err.path)
 		testing.expectf(t, d.consumed == s.consumed, "%s: consumed %v, want %v", s.path, d.consumed, s.consumed)
-		testing.expectf(t, track.total_allocation_count == 0, "%s: %v heap allocations, want 0", s.path, track.total_allocation_count)
+		testing.expectf(t, track.total_allocation_count == 0, "%s, spans %v: %v heap allocations, want 0", s.path, spans, track.total_allocation_count)
 		testing.expectf(t, d.tree.arena.block != nil && d.tree.arena.block.used > 0, "%s: arena unused", s.path)
 	}
 }

@@ -17,13 +17,15 @@ BLOB_PREVIEW :: 16
 // Children are taken in schema order, each followed by its bit fields, and
 // then the parse instances; those of a switch-on field are those of the
 // case each instance was read as. Value instances are not read, so they
-// are not written.
+// are not written. With offsets, which needs a tree read with spans, each
+// line ends with " @0x" and the value's offset in the input, in hex.
 @(require_results)
-write_text :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tree) -> io.Error {
+write_text :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tree, offsets := false) -> io.Error {
+	assert(!offsets || tree.spans, "write_text: offsets need a tree read with spans")
 	path := strings.builder_make()
 	defer strings.builder_destroy(&path)
 
-	return write_text_array(w, &path, format.root.name, set_of(format.root), tree.root[:])
+	return write_text_array(w, &path, format.root.name, set_of(format.root), tree.root[:], offsets ? tree : nil, nil, 0)
 }
 
 // Writes tree as compact JSON followed by a newline. A set instance is an
@@ -79,9 +81,11 @@ write_value :: proc(w: io.Writer, v: fld.Value) -> io.Error {
 }
 
 // Writes the values of the field called name. set is the field's node when
-// it is a set, else nil.
+// it is a set, else nil. The values are slot k of owner, or the root when
+// owner is nil. offsets is the tree when the lines end with offsets, else
+// nil.
 @(private = "file", require_results)
-write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set: ^mdat.Node, values: []fld.Value) -> io.Error {
+write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set: ^mdat.Node, values: []fld.Value, offsets: ^fld.Value_Tree, owner: ^fld.Instance, k: int) -> io.Error {
 	parent_len := strings.builder_len(path^)
 	defer resize(&path.buf, parent_len)
 
@@ -98,19 +102,24 @@ write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set
 			read_as := mdat.instance_set(set, instance)
 			slot := len(read_as.parse_instances)
 			for child in read_as.children {
-				write_text_array(w, path, child.name, set_of(child), instance.slots[slot][:]) or_return
+				write_text_array(w, path, child.name, set_of(child), instance.slots[slot][:], offsets, instance, slot) or_return
 				for bit, b in child.bits {
-					write_text_array(w, path, bit.name, nil, instance.slots[slot + 1 + b][:]) or_return
+					write_text_array(w, path, bit.name, nil, instance.slots[slot + 1 + b][:], offsets, instance, slot + 1 + b) or_return
 				}
 				slot += 1 + len(child.bits)
 			}
-			for p, k in read_as.parse_instances {
-				write_text_array(w, path, p.name, set_of(p), instance.slots[k][:]) or_return
+			for p, j in read_as.parse_instances {
+				write_text_array(w, path, p.name, set_of(p), instance.slots[j][:], offsets, instance, j) or_return
 			}
 		} else {
 			io.write_string(w, strings.to_string(path^)) or_return
 			io.write_string(w, " = ") or_return
 			write_value(w, v) or_return
+			if offsets != nil {
+				span := owner == nil ? fld.root_span(offsets, i) : fld.value_span(owner, k, i)
+				io.write_string(w, " @0x") or_return
+				write_hex_int(w, span.offset) or_return
+			}
 			io.write_byte(w, '\n') or_return
 		}
 	}
@@ -250,6 +259,20 @@ write_null :: proc(w: io.Writer) -> io.Error {
 write_float :: proc(w: io.Writer, f: $T) -> io.Error {
 	buf: [64]byte
 	_, err := io.write_string(w, fmt.bprintf(buf[:], "%v", f))
+	return err
+}
+
+// Writes n, which is not negative, in uppercase hex without leading zeros.
+@(private = "file", require_results)
+write_hex_int :: proc(w: io.Writer, n: int) -> io.Error {
+	digits := "0123456789ABCDEF"
+	buf: [16]byte
+	i := len(buf)
+	for x := u64(n); i == len(buf) || x > 0; x >>= 4 {
+		i -= 1
+		buf[i] = digits[x & 0xf]
+	}
+	_, err := io.write(w, buf[i:])
 	return err
 }
 

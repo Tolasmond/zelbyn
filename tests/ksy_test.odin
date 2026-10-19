@@ -1,6 +1,7 @@
 package tests
 
 import dmp "../gnrcrdr/dump"
+import fld "../gnrcrdr/field"
 import ksy "../gnrcrdr/ksy"
 import mdat "../gnrcrdr/metadata"
 import "core:fmt"
@@ -1024,4 +1025,88 @@ main[0].items[0].values[0] = 5
 main[0].items[0].values[1] = 6
 main[0].items[0].extra[0] = 7
 `)
+}
+
+@(test)
+ksy_spans :: proc(t: ^testing.T) {
+	// as Kaitai's debug mode records them: from the position before each
+	// value to the one after, so a bit type that takes only bits left over
+	// is empty (b), a strz holds its terminator, a bit field has its
+	// integer's, a set instance its substream, and a parse instance starts
+	// at its pos. bytes grows as it is read, keeping its spans
+	src := HEAD + `seq:
+  - id: a
+    type: b4
+  - id: b
+    type: b4
+  - id: name
+    type: strz
+    encoding: ASCII
+  - id: flags
+    type: u1
+    -bits:
+      - {id: lo, low: 0, high: 3}
+  - id: sub
+    type: sub
+    size: 3
+  - id: bytes
+    type: u1
+    repeat: eos
+instances:
+  peek:
+    pos: 1
+    type: u1
+types:
+  sub:
+    seq:
+      - id: x
+        type: u2
+`
+	input := []byte{0x12, 'h', 'i', 0, 0x35, 0xaa, 0xbb, 0xcc, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	err := ksy.compile(src, &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
+
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, input, &d, spans = true)
+	if !testing.expectf(t, d.err.kind == .None, "%v at %v in %s", d.err.kind, d.err.offset, d.err.path) do return
+
+	b := strings.builder_make(context.temp_allocator)
+	testing.expect(t, dmp.write_text(strings.to_writer(&b), &ff, &d.tree, offsets = true) == .None, "write_text failed")
+	expect_dump(t, "offsets", strings.to_string(b), `t[0].a[0] = 1 @0x0
+t[0].b[0] = 2 @0x1
+t[0].name[0] = "hi" @0x1
+t[0].flags[0] = 53 @0x4
+t[0].lo[0] = 5 @0x4
+t[0].sub[0].x[0] = 48042 @0x5
+t[0].bytes[0] = 1 @0x8
+t[0].bytes[1] = 2 @0x9
+t[0].bytes[2] = 3 @0xA
+t[0].bytes[3] = 4 @0xB
+t[0].bytes[4] = 5 @0xC
+t[0].bytes[5] = 6 @0xD
+t[0].bytes[6] = 7 @0xE
+t[0].bytes[7] = 8 @0xF
+t[0].bytes[8] = 9 @0x10
+t[0].bytes[9] = 10 @0x11
+t[0].peek[0] = 104 @0x1
+`)
+
+	r := root_instance(&ff, &d)
+	Want :: struct {
+		name:  string,
+		index: int,
+		span:  fld.Span,
+	}
+	for w in ([?]Want{{"a", 0, {0, 1}}, {"b", 0, {1, 0}}, {"name", 0, {1, 3}}, {"lo", 0, {4, 1}}, {"sub", 0, {5, 3}}, {"bytes", 9, {17, 1}}, {"peek", 0, {1, 1}}}) {
+		got := fld.value_span(r.instance, field_slot(r, w.name), w.index)
+		testing.expectf(t, got == w.span, "%s[%v]: span %v, want %v", w.name, w.index, got, w.span)
+	}
+	testing.expect_value(t, fld.root_span(&d.tree, 0), fld.Span{0, len(input)})
+	sub := field_instance(r, "sub")
+	testing.expect_value(t, fld.value_span(sub.instance, field_slot(sub, "x"), 0), fld.Span{5, 2})
 }

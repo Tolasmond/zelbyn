@@ -4,14 +4,15 @@
 // took. bench.py builds it and runs it in a new process for every
 // measurement; run that rather than this.
 //
-//     bench_oneshot <schema.ksy> <file>
+//     bench_oneshot <schema.ksy> <file> [--spans]
 //     bench_oneshot --start-only
 //
 // Prints one line of name=value pairs: compile_us, read_us, decode_us and
 // json_us; faults, the page faults taken during the decode (-1 where the
 // platform cannot count them); tree_bytes, the bytes the tree's arena handed
-// out, which do not include the input; and input_bytes. With --start-only
-// it exits at once, so that bench.py can time starting a process.
+// out, which do not include the input; and input_bytes. With --spans the
+// tree records the span of each value. With --start-only it exits at once,
+// so that bench.py can time starting a process.
 package bench
 
 import arn "../../gnrcrdr/arena"
@@ -27,8 +28,9 @@ import "core:time"
 
 main :: proc() {
 	if len(os.args) == 2 && os.args[1] == "--start-only" do return
-	if len(os.args) != 3 {
-		fmt.eprintln("usage: bench_oneshot <schema.ksy> <file> | --start-only")
+	spans := len(os.args) == 4 && os.args[3] == "--spans"
+	if len(os.args) != 3 && !spans {
+		fmt.eprintln("usage: bench_oneshot <schema.ksy> <file> [--spans] | --start-only")
 		os.exit(2)
 	}
 	schema, path := os.args[1], os.args[2]
@@ -50,7 +52,7 @@ main :: proc() {
 
 	faults_before := page_faults()
 	tree: fld.Value_Tree
-	_, err := rdr.read_from_bytes(data, &ff, &tree)
+	_, err := rdr.read_from_bytes(data, &ff, &tree, spans)
 	decode := time.tick_lap_time(&t)
 	faults := page_faults()
 	if err.kind != .None {

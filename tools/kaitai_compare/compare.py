@@ -2,7 +2,7 @@
 """Compares gnrcrdr's decode of files with the official Kaitai Struct
 runtime's, value by value (decision record §8, step 6).
 
-    python3 tools/kaitai_compare/compare.py [--import-path DIRS] <schema.ksy> <file>...
+    python3 tools/kaitai_compare/compare.py [--import-path DIRS] [--offsets] <schema.ksy> <file>...
 
 Run from the repository root, after `npm ci --prefix tools/kaitai_compare`.
 Needs Odin, Node.js and PyYAML. The schema is compiled with the official
@@ -12,10 +12,15 @@ array of its values, set instances objects, byte arrays hex. Parse
 instances (instances with pos) are compared as fields. A field with no
 values (not read because of if or switch-on, or an empty repeat) is left
 out on both sides, as are value instances and params, which gnrcrdr does
-not dump. Field names are compared as the generated code spells them. Imports are
-read relative to the importing schema, or for an absolute one, from the
-directories of --import-path (separated as in PATH), and given to both.
-Exits 1 if any file differs, or fails to decode on either side.
+not dump. Field names are compared as the generated code spells them.
+Imports are read relative to the importing schema, or for an absolute one,
+from the directories of --import-path (separated as in PATH), and given to
+both. Exits 1 if any file differs, or fails to decode on either side.
+
+With --offsets, the offsets of the values are compared instead: those of
+gnrcrdr's text dump with --offsets, and the starts that the runtime
+records in debug mode, which the Kaitai Web IDE shows, for every value
+that is not a set instance, by its path.
 """
 
 import argparse
@@ -92,9 +97,34 @@ def first_difference(a, b, path):
     return None if a == b and type(a) is type(b) else (path, a, b)
 
 
+def dump_offsets(text):
+    """The offsets in gnrcrdr's text dump with --offsets, by path, with
+    names as the generated code spells them."""
+    out = {}
+    for line in text.splitlines():
+        path = line.split(' = ', 1)[0]
+        segments = []
+        for s in path.split('.'):
+            name, index = s.split('[', 1)
+            segments.append(camel(name) + '[' + index)
+        out['.'.join(segments)] = int(line.rsplit(' @0x', 1)[1], 16)
+    return out
+
+
+def offsets_difference(a, b):
+    """The first path, in a's order, whose offset differs in b, and the two
+    offsets; None when they are equal. Also counts the offsets compared."""
+    for k in list(a) + [k for k in b if k not in a]:
+        if a.get(k) != b.get(k):
+            return k, a.get(k, '(absent)'), b.get(k, '(absent)')
+        offsets_difference.values += 1
+    return None
+
+
 def main():
     p = argparse.ArgumentParser(usage=__doc__)
     p.add_argument('--import-path', default='')
+    p.add_argument('--offsets', action='store_true')
     p.add_argument('schema')
     p.add_argument('files', nargs='+')
     args = p.parse_args()
@@ -116,7 +146,7 @@ def main():
         imports_json = os.path.join(tmp, 'imports.json')
         with open(imports_json, 'w') as f:
             json.dump(imports, f)
-        out = subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema_json, '--imports', imports_json] + files,
+        out = subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema_json, '--imports', imports_json] + (['--offsets'] if args.offsets else []) + files,
                              check=True, capture_output=True, text=True).stdout
         reference = [json.loads(line) for line in out.splitlines()]
 
@@ -124,11 +154,14 @@ def main():
         subprocess.run(['odin', 'build', '.', '-out:' + tool], check=True)
         mine = []
         for path in files:
-            cmd = [tool, schema, path, '--dump', 'json']
+            cmd = [tool, schema, path] + (['--offsets'] if args.offsets else ['--dump', 'json'])
             if args.import_path:
                 cmd += ['--import-path', args.import_path]
             r = subprocess.run(cmd, capture_output=True, text=True)
-            mine.append(json.loads(r.stdout) if r.returncode == 0 else {'error': r.stderr.strip()})
+            if r.returncode != 0:
+                mine.append({'error': r.stderr.strip()})
+            else:
+                mine.append(dump_offsets(r.stdout) if args.offsets else json.loads(r.stdout))
 
     failed = 0
     for path, a, b in zip(files, mine, reference):
@@ -136,13 +169,19 @@ def main():
             failed += 1
             print('FAILED: %s\n  gnrcrdr: %s\n  kaitai:  %s' % (path, a.get('error', 'ok'), b.get('error', 'ok')))
             continue
-        first_difference.values = 0
-        d = first_difference(ours(a[root_name][0]), theirs(b), root_name)
+        if args.offsets:
+            offsets_difference.values = 0
+            d = offsets_difference(a, b)
+            values = '%d offsets' % offsets_difference.values
+        else:
+            first_difference.values = 0
+            d = first_difference(ours(a[root_name][0]), theirs(b), root_name)
+            values = '%d values' % first_difference.values
         if d:
             failed += 1
             print('DIFFERS: %s at %s\n  gnrcrdr: %s\n  kaitai:  %s' % (path, d[0], json.dumps(d[1])[:200], json.dumps(d[2])[:200]))
         else:
-            print('agree: %s (%d values)' % (path, first_difference.values))
+            print('agree: %s (%s)' % (path, values))
 
     print('%d files: %d agree, %d differ or failed' % (len(files), len(files) - failed, failed))
     sys.exit(1 if failed else 0)

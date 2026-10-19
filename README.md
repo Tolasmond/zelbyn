@@ -14,7 +14,7 @@ This produces `gnrcrdr.exe` on Windows and `gnrcrdr.bin` on Linux. There are no 
 ## Usage
 
 ```
-gnrcrdr <schema.ksy> <file> [--dump tree|json] [--import-path dirs]
+gnrcrdr <schema.ksy> <file> [--dump tree|json] [--offsets] [--import-path dirs]
 ```
 
 Decodes `<file>` with the Kaitai Struct schema and writes the decoded tree to stdout. For example:
@@ -37,6 +37,15 @@ gif[0].logical_screen_descriptor[0].screen_width[0] = 500
 gif[0].global_color_table[0].entries[0].red[0] = 252
 gif[0].blocks[2].body[0].image_data[0].subblocks[0].entries[0].bytes[0] = <254 bytes> 80 42 29 83 84 83 56 3c 83 7e 29 8a 8c 8b 8e 8d ...
 ```
+
+With `--offsets`, each line ends with ` @0x` and the offset in the file, in hex, where the value was read:
+
+```
+gif[0].logical_screen_descriptor[0].screen_width[0] = 500 @0x6
+gif[0].blocks[2].body[0].image_data[0].subblocks[0].entries[0].bytes[0] = <254 bytes> 80 42 29 83 84 83 56 3c 83 7e 29 8a 8c 8b 8e 8d ... @0x1B4
+```
+
+The offset is the one Kaitai Struct's debug mode records, which the Web IDE shows: the stream's position when the value starts to be read. A bit type that only uses bits left over from the value before it starts where that value ended. `--offsets` applies only to `--dump tree`. To give the offsets, the decoder records the span of every value, so decoding takes about 30% longer, and the tree about 45% more memory.
 
 Integers are decimal, a `b1` field is `true` or `false`, and strings are quoted. A blob shows its length and its first 16 bytes in hex, followed by `...` if it is longer. A field with an `enum` shows its integer. Value instances (such as `has_color_table`) are not read from the file, so they are not shown. Parse instances (`instances` with `pos`) are read, and shown after the fields of their type, in the order of `instances`.
 
@@ -162,7 +171,7 @@ For each file it prints medians of:
 - the time to compile the schema, read the file, decode it and write the JSON dump to memory, each timed inside one process;
 - the whole-process time of `gnrcrdr <schema> <file> --dump json`, with its output discarded.
 
-It also prints the time to start a process that exits at once, which is part of every whole-process time. Options: `--runs N`, `--schema S` (default `formats/gif.ksy`), and the files (default the samples in `data/`).
+It also prints the time to start a process that exits at once, which is part of every whole-process time. Options: `--runs N`, `--schema S` (default `formats/gif.ksy`), `--spans` (decode with spans, and time the CLI with `--offsets` instead of `--dump json`), and the files (default the samples in `data/`).
 
 Run it before and after a change meant to make decoding faster or the tree smaller, in the same session, and give both sets of figures in the commit message. A sampling profiler may loop over one file to show where time goes, but its percentages leave out the cost of touching memory for the first time, so the figures come from this benchmark.
 
@@ -187,9 +196,10 @@ The generated parser and the binary go to `tools/bench/cpp/build/`, which is not
 npm ci --prefix tools/kaitai_compare
 python3 tools/kaitai_compare/compare.py formats/gif.ksy data/*.gif data/*.GIF
 python3 tools/kaitai_compare/compare.py --import-path ../kaitai_struct_formats ../kaitai_struct_formats/image/pcx_dcx.ksy file.dcx
+python3 tools/kaitai_compare/compare.py --offsets formats/gif.ksy data/*.gif data/*.GIF
 ```
 
-Both decodes are brought to one shape, every field an array of its values, and compared field by field. Parse instances are compared as fields; fields with no values are left out on both sides, as are value instances and params. The script reads the schemas the schema imports, and gives them to both decoders. The script exits 1 if any file differs or fails to decode. Run it when the decoder, the `.ksy` compiler or `formats/gif.ksy` changes.
+Both decodes are brought to one shape, every field an array of its values, and compared field by field. Parse instances are compared as fields; fields with no values are left out on both sides, as are value instances and params. The script reads the schemas the schema imports, and gives them to both decoders. With `--offsets` it compares offsets instead of values: those of gnrcrdr's `--offsets` dump, and those the runtime records in debug mode, for every value that is not a set instance. The script exits 1 if any file differs or fails to decode. Run it when the decoder, the `.ksy` compiler or `formats/gif.ksy` changes.
 
 ### YAML corpus check
 
