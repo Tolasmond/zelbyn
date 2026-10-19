@@ -5,8 +5,7 @@ import "core:strings"
 
 // e as text, with every unary, binary and ?: operation parenthesized, so
 // that the result shows how e was grouped. A resolved field reference is
-// written as its path (_parent.a.b), and a peek as peek(<type>, <pos>), with
-// the Kaitai name of the type (u1, u2le, s4be). Allocated with allocator.
+// written as its path (_parent.a.b). Allocated with allocator.
 to_string :: proc(e: ^mdata.Expr, allocator := context.allocator) -> string {
 	b := strings.builder_make(allocator)
 	write(&b, e)

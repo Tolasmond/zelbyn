@@ -53,8 +53,9 @@ make_instance :: proc(a: ^Tree_Arena, n: int, choice: int) -> (instance: ^Instan
 // allocated in arena, so the tree is freed with one destroy_value_tree, and
 // it never references the schema. Strings and blobs are views of the input:
 // reader.read puts the input in arena too, so that tree owns it, while
-// reader.read_from_bytes borrows the caller's bytes. Do not copy a
-// Value_Tree after decoding into it: its containers refer to &arena.
+// reader.read_from_bytes borrows the caller's bytes. arena holds the list
+// of the tree's blocks, so a copy of a Value_Tree shares them: destroy only
+// one of the copies.
 Value_Tree :: struct {
 	root:  []Value,
 	arena: Tree_Arena,
