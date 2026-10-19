@@ -9,7 +9,6 @@ import "core:encoding/endian"
 // own node, even when several fields have the same type, and the plan has
 // no cycles.
 Node :: struct {
-	id:              int,               // unique in the plan; tests find fields by it
 	name:            string,            // shown in the dump and in error paths: the .ksy -orig-id, or else the id
 	ref_name:        string,            // what expressions call it: the .ksy id
 	type:            dat.Data_Type,
@@ -226,7 +225,6 @@ Value_Instance :: struct {
 // field, are in their own slot of the set instance that holds that field,
 // after the field's slot (slot_of), and are dumped right after it.
 Bit_Field :: struct {
-	id:        int,
 	name:      string,
 	type:      dat.Data_Type,
 	low, high: int,
