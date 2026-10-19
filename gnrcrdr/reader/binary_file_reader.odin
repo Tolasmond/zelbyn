@@ -50,14 +50,14 @@ init_arena :: proc(tree: ^fld.Value_Tree, input_size: int) {
 @(private = "file", require_results)
 decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> (consumed: int, err: Parse_Error) {
 	allocator := fld.tree_arena_allocator(&tree.arena)
-	tree.root = make([dynamic]fld.Value, allocator)
 
-	d := Decoder{allocator = allocator}
+	d := Decoder{arena = &tree.arena, allocator = allocator}
 	d.path = make([dynamic]Path_Segment, allocator)
 	d.frames = make([dynamic]^fld.Instance, allocator)
 	dat.reader_init(&d.r, data)
 
-	rerr := read_values(&d, &tree.root, nil, 0, format.root)
+	root := Sink{slots = ([^][]fld.Value)(&tree.root)[:1]}
+	rerr := read_values(&d, &root, format.root)
 	if rerr != .None && d.err.kind == .None {
 		fail(&d, rerr, d.r.pos)
 	}
@@ -65,12 +65,52 @@ decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree) 
 	return d.r.pos, d.err
 }
 
-// Appends every value of node to values: the instances of a set, or the
-// elements of any other field. instance is the set instance that holds
-// values, in slot; the bit fields of each element go to the slots after
-// it. instance is nil for the root.
+// Where the values of one field go: its slot, then a slot for each of its
+// bit fields, in the instance that holds them, or the tree's root. Each
+// slot is a view of an array with room for cap values.
+@(private = "file")
+Sink :: struct {
+	slots: [][]fld.Value,
+	cells: []fld.Value, // the instance's cells for slots; nil for the root
+	cap:   int,
+}
+
+// Makes room for n values in each slot of s, which must be empty: the cells
+// when n is at most 1, else an array of exactly n.
+@(private = "file")
+reserve_exactly :: proc(d: ^Decoder, s: ^Sink, n: int) {
+	for &slot, k in s.slots {
+		slot = n <= 1 && s.cells != nil ? s.cells[k:k] : fld.tree_arena_make(d.arena, fld.Value, n)[:0]
+	}
+	s.cap = n
+}
+
+// Makes room for at least n values in each slot of s, doubling, for a count
+// that is not known in advance.
+@(private = "file")
+reserve_growing :: proc(d: ^Decoder, s: ^Sink, n: int) {
+	if n <= s.cap do return
+	s.cap = max(8, 2 * s.cap, n)
+	for &slot in s.slots {
+		grown := fld.tree_arena_make(d.arena, fld.Value, s.cap)
+		copy(grown, slot)
+		slot = grown[:len(slot)]
+	}
+}
+
+// Appends v to slot k of s, which has room for it.
+@(private = "file")
+push :: #force_inline proc(s: ^Sink, k: int, v: fld.Value) {
+	slot := s.slots[k]
+	assert(len(slot) < s.cap, "push: no room in the slot")
+	s.slots[k] = ([^]fld.Value)(raw_data(slot))[:len(slot) + 1]
+	s.slots[k][len(slot)] = v
+}
+
+// Reads every value of node into s: the instances of a set, or the elements
+// of any other field, with their bit fields.
 @(private = "file", require_results)
-read_values :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, instance: ^fld.Instance, slot: int, node: ^mdata.Node) -> dat.Read_Error {
+read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error {
 	if node.cond != nil {
 		read_it, err := eval_bool(d, node.cond)
 		if err != .None do return fail(d, err, d.r.pos)
@@ -89,17 +129,20 @@ read_values :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, instance: ^fld.Ins
 	case mdata.Marker_Count:
 		count = markers_match(&d.r, c.markers) ? 1 : 0
 	case mdata.Repeat_Count:
-		return read_repeat(d, values, instance, slot, node, c)
+		return read_repeat(d, s, node, c)
 	case mdata.Eos_Count:
 		for i := 0; d.r.pos < len(d.r.data); i += 1 {
-			read_element(d, values, instance, slot, node, i, must_progress = true) or_return
+			reserve_growing(d, s, i + 1)
+			read_element(d, s, node, i, must_progress = true) or_return
 		}
 		return .None
 	case mdata.Until_Count:
 		for i := 0;; i += 1 {
 			start := d.r.pos
-			read_element(d, values, instance, slot, node, i) or_return
+			reserve_growing(d, s, i + 1)
+			read_element(d, s, node, i) or_return
 
+			values := s.slots[0]
 			done, err := eval_bool(d, c.expr, element = values[len(values) - 1])
 			if err != .None do return fail(d, err, d.r.pos)
 			if done do return .None
@@ -111,14 +154,9 @@ read_values :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, instance: ^fld.Ins
 		}
 	}
 
-	// a known count is allocated once: appending to an empty array would
-	// reserve room for 8 values, and grow by copying
-	reserve(values, len(values) + count)
-	for _, b in node.bits {
-		reserve(&instance.slots[slot + 1 + b], count)
-	}
+	reserve_exactly(d, s, count)
 	for i in 0 ..< count {
-		read_element(d, values, instance, slot, node, i) or_return
+		read_element(d, s, node, i) or_return
 	}
 	return .None
 }
@@ -127,7 +165,7 @@ read_values :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, instance: ^fld.Ins
 // terminator is found. The terminator is required, the repeat count is
 // limited, and every element must consume input.
 @(private = "file", require_results)
-read_repeat :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, instance: ^fld.Instance, slot: int, node: ^mdata.Node, repeat: mdata.Repeat_Count) -> dat.Read_Error {
+read_repeat :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, repeat: mdata.Repeat_Count) -> dat.Read_Error {
 	for {
 		value, peek_err := dat.peek_integer_at(&d.r, d.r.pos, repeat.type, repeat.order)
 
@@ -138,45 +176,39 @@ read_repeat :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, instance: ^fld.Ins
 			if peek_err != .None || value != repeat.value do return .None
 		}
 
-		if e := check_count(len(values) + 1, repeat.max); e != .None {
+		n := len(s.slots[0])
+		if e := check_count(n + 1, repeat.max); e != .None {
 			return fail(d, e, d.r.pos)
 		}
 
-		read_element(d, values, instance, slot, node, len(values), must_progress = true) or_return
+		reserve_growing(d, s, n + 1)
+		read_element(d, s, node, n, must_progress = true) or_return
 	}
 }
 
-// Reads element index of node and appends it to values (an instance of a
-// set, or a value of any other field and its bit fields). With
+// Reads element index of node into s, which has room for it: an instance of
+// a set, or a value of any other field and its bit fields. With
 // must_progress, an element that consumes no input is an error.
 @(private = "file", require_results)
-read_element :: proc(
-	d: ^Decoder,
-	values: ^[dynamic]fld.Value,
-	instance: ^fld.Instance,
-	slot: int,
-	node: ^mdata.Node,
-	index: int,
-	must_progress := false,
-) -> dat.Read_Error {
+read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, must_progress := false) -> dat.Read_Error {
 	// on error the segment is left pushed; fail has already copied the path
 	append(&d.path, Path_Segment{node.name, index})
 	start := d.r.pos
 
 	if node.type == .Set {
-		read_instance(d, values, node, index) or_return
+		read_instance(d, s, node, index) or_return
 		if must_progress && d.r.pos == start do return fail(d, .No_Progress, start)
 		pop(&d.path)
 		return .None
 	}
 
 	value := read_scalar(d, node, index) or_return
-	append(values, value)
+	push(s, 0, value)
 	pop(&d.path)
 
 	for bit, b in node.bits {
 		bit_value := bit_field_value(value, bit)
-		append(&instance.slots[slot + 1 + b], bit_value)
+		push(s, 1 + b, bit_value)
 
 		if e := check_valid(bit_value, bit.valid); e != .None {
 			append(&d.path, Path_Segment{bit.name, index})
@@ -191,11 +223,11 @@ read_element :: proc(
 	return .None
 }
 
-// Reads instance index of set node and appends it to values: from a
-// substream when node has a length, and as the set its switch-on chooses.
-// A switch-on that chooses no set reads nothing.
+// Reads instance index of set node into s: from a substream when node has
+// a length, and as the set its switch-on chooses. A switch-on that chooses
+// no set reads nothing.
 @(private = "file", require_results)
-read_instance :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, node: ^mdata.Node, index: int) -> dat.Read_Error {
+read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> dat.Read_Error {
 	set := node
 	choice := 0
 	if sw := node.switch_on; sw != nil {
@@ -211,7 +243,7 @@ read_instance :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, node: ^mdata.Nod
 		if set == nil do return .None
 	}
 
-	if node.length == nil do return read_set_instance(d, values, set, choice)
+	if node.length == nil do return read_set_instance(d, s, set, choice)
 
 	start := d.r.pos
 	n, err := byte_length(d, node.length, index)
@@ -230,28 +262,28 @@ read_instance :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, node: ^mdata.Nod
 	dat.reader_init(&d.r, bytes)
 	d.base += start
 
-	return read_set_instance(d, values, set, choice)
+	return read_set_instance(d, s, set, choice)
 }
 
-// Appends one instance of set node to values, read as choice (see
+// Appends one instance of set node to s, read as choice (see
 // field.Instance), and reads its children into it.
 @(private = "file", require_results)
-read_set_instance :: proc(d: ^Decoder, values: ^[dynamic]fld.Value, node: ^mdata.Node, choice: int) -> dat.Read_Error {
-	instance := new(fld.Instance, d.allocator)
-	instance.choice = choice
-	instance.slots = make([][dynamic]fld.Value, mdata.slot_count(node), d.allocator)
-	for &s in instance.slots {
-		s = make([dynamic]fld.Value, d.allocator)
+read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int) -> dat.Read_Error {
+	when ODIN_DEBUG {
+		assert(node.slot_count == mdata.count_slots(node), "read_set_instance: the set's slot_count was not recorded")
 	}
-	append(values, instance)
+	instance, cells := fld.make_instance(d.arena, node.slot_count, choice)
+	push(s, 0, instance)
 
 	// on error the frame is left pushed, like the path segment
 	append(&d.frames, instance)
 
 	slot := 0
 	for child in node.children {
-		read_values(d, &instance.slots[slot], instance, slot, child) or_return
-		slot += 1 + len(child.bits)
+		n := 1 + len(child.bits)
+		child_sink := Sink{slots = instance.slots[slot:][:n], cells = cells[slot:][:n]}
+		read_values(d, &child_sink, child) or_return
+		slot += n
 	}
 
 	pop(&d.frames)

@@ -37,6 +37,26 @@ tree_arena_destroy :: proc(a: ^Tree_Arena) {
 	a^ = {}
 }
 
+// Allocates n values of T, zero and aligned for T, without going through
+// mem.Allocator: the decoder's allocations. A block's committed memory is
+// handed out inline; only committing more, or a new block, takes a call.
+// Panics when the operating system has no memory left.
+tree_arena_make :: #force_inline proc(a: ^Tree_Arena, $T: typeid, n: int) -> []T {
+	if n <= 0 do return nil
+	size, alignment := uint(n) * size_of(T), uint(align_of(T))
+	if b := a.block; b != nil {
+		top := uintptr(b.base) + uintptr(b.used)
+		start := uint((top + uintptr(alignment - 1)) &~ uintptr(alignment - 1) - uintptr(b.base))
+		if start + size <= b.committed {
+			b.used = start + size
+			return ([^]T)(&b.base[start])[:n]
+		}
+	}
+	data, err := tree_arena_alloc(a, size, alignment)
+	if err != nil do panic("tree arena: out of memory")
+	return ([^]T)(raw_data(data))[:n]
+}
+
 @(private = "file", require_results)
 tree_arena_alloc :: proc(a: ^Tree_Arena, size, alignment: uint) -> (data: []byte, err: mem.Allocator_Error) {
 	if a.block != nil {

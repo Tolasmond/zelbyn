@@ -20,11 +20,12 @@ Path_Segment :: struct {
 
 @(private)
 Decoder :: struct {
-	r:         dat.Reader, // the stream being read: the input, or a substream of it
-	base:      int,        // the offset in the input of r.data[0]
-	allocator: mem.Allocator, // the value tree's arena; also holds path
+	r:         dat.Reader,             // the stream being read: the input, or a substream of it
+	base:      int,                    // the offset in the input of r.data[0]
+	arena:     ^fld.Tree_Arena,        // the value tree's; the decoder allocates its values here directly
+	allocator: mem.Allocator,          // the same arena, for path and frames
 	path:      [dynamic]Path_Segment,
-	frames:    [dynamic]^fld.Instance, // the set instances being decoded, outermost first; also in allocator
+	frames:    [dynamic]^fld.Instance, // the set instances being decoded, outermost first
 	err:       Parse_Error,
 }
 

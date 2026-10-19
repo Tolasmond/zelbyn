@@ -474,6 +474,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 			set.children = children[:]
 		}
 	}
+	set.slot_count = mdata.count_slots(set)
 
 	for e, i in td.instances {
 		claim_id(c, &ids, e.key.text, e.key) or_return

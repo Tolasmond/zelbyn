@@ -9,19 +9,20 @@ import "core:encoding/endian"
 // own node, even when several fields have the same type, and the plan has
 // no cycles.
 Node :: struct {
-	id:        int,    // unique in the plan; tests find fields by it
-	name:      string, // shown in the dump and in error paths: the .ksy -orig-id, or else the id
-	ref_name:  string, // what expressions call it: the .ksy id
-	type:      dat.Data_Type,
-	order:     endian.Byte_Order, // integer and float types: the byte order they are read in
-	cond:      ^Expr,             // a Bool expression: the field is read only when it is true; nil when always read (Kaitai's if)
-	count:     Count,             // instances of a set, or elements of any other field
-	length:    Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from, or nil to read from the parent's stream
-	children:  []^Node,           // Set only, in order; nil when switch_on is set
-	switch_on: ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
-	instances: []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
-	bits:      []Bit_Field,       // integer types only: packed subfields, decoded from each element
-	valid:     Valid,             // checked on every element; nil when there is no check
+	id:         int,               // unique in the plan; tests find fields by it
+	name:       string,            // shown in the dump and in error paths: the .ksy -orig-id, or else the id
+	ref_name:   string,            // what expressions call it: the .ksy id
+	type:       dat.Data_Type,
+	order:      endian.Byte_Order, // integer and float types: the byte order they are read in
+	cond:       ^Expr,             // a Bool expression: the field is read only when it is true; nil when always read (Kaitai's if)
+	count:      Count,             // instances of a set, or elements of any other field
+	length:     Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from, or nil to read from the parent's stream
+	children:   []^Node,           // Set only, in order; nil when switch_on is set
+	slot_count: int,               // Set only: the slots in each instance (count_slots), recorded when children is set
+	switch_on:  ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
+	instances:  []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
+	bits:       []Bit_Field,       // integer types only: packed subfields, decoded from each element
+	valid:      Valid,             // checked on every element; nil when there is no check
 }
 
 // A value given in the schema, as the type of the field it belongs to: one
@@ -167,8 +168,8 @@ instance_set :: proc(node: ^Node, instance: ^fld.Instance) -> ^Node {
 }
 
 // The number of slots in an instance of set: one for each child and each
-// of its bit fields.
-slot_count :: proc(set: ^Node) -> int {
+// of its bit fields. A front end records it in set.slot_count.
+count_slots :: proc(set: ^Node) -> int {
 	n := len(set.children)
 	for child in set.children do n += len(child.bits)
 	return n
