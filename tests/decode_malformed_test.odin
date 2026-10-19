@@ -1,5 +1,6 @@
 package tests
 
+import ksy "../gnrcrdr/ksy"
 import mdat "../gnrcrdr/metadata"
 import rdr "../gnrcrdr/reader"
 import "core:os"
@@ -289,6 +290,32 @@ truncation_sweep_large :: proc(t: ^testing.T) {
 		for n := 0; n <= s.file_size; n += 997 do append(&lengths, n)
 		append(&lengths, s.file_size - 1, s.file_size)
 		sweep(t, &ff, s, lengths[:])
+	}
+}
+
+// A count read from the input, far above the bytes left, fails at the end
+// of the input as any short read does; it must not reserve room for every
+// element first.
+@(test)
+count_beyond_input :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	SRC :: "meta:\n  id: big\n  endian: le\nseq:\n  - id: n\n    type: u8\n  - id: items\n    type: u1\n    repeat: expr\n    repeat-expr: n\n"
+
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	err := ksy.compile(SRC, &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "%v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
+
+	for n in ([?]u64{0xffff_ffff, 1 << 62, u64(max(int))}) {
+		input: [10]byte
+		for i in 0 ..< 8 do input[i] = byte(n >> (8 * uint(i)))
+		input[8], input[9] = 1, 2
+
+		d: Decoded
+		decode_bytes(&ff, input[:], &d)
+		testing.expectf(t, d.err.kind == .Unexpected_EOF && d.err.offset == 10 && d.err.path == "big[0].items[2]", "n = %v: %v at %v in %s, want Unexpected_EOF at 10 in big[0].items[2]", n, d.err.kind, d.err.offset, d.err.path)
+		destroy_decoded(&d)
 	}
 }
 

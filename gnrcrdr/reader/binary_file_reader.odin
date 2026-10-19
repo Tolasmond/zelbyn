@@ -154,9 +154,18 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error 
 		}
 	}
 
-	reserve_exactly(d, s, count)
-	for i in 0 ..< count {
-		read_element(d, s, node, i) or_return
+	// elements that consume input cannot outnumber the bytes left, so a
+	// larger count, which may come from the input, grows as it is read
+	if count <= 1 || count <= len(d.r.data) - d.r.pos {
+		reserve_exactly(d, s, count)
+		for i in 0 ..< count {
+			read_element(d, s, node, i) or_return
+		}
+	} else {
+		for i in 0 ..< count {
+			reserve_growing(d, s, i + 1)
+			read_element(d, s, node, i) or_return
+		}
 	}
 	return .None
 }
