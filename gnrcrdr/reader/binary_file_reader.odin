@@ -250,8 +250,10 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> da
 }
 
 // Reads instance index of set node into s: from a substream when node has
-// a length or a terminator, and as the set its switch-on chooses. A
-// switch-on that chooses no set reads nothing.
+// a length or a terminator, and as the set its switch-on chooses, with
+// that set's arguments. As in Kaitai, they are evaluated in node's stream,
+// after the bytes of the substream. A switch-on that chooses no set reads
+// nothing.
 @(private = "file", require_results)
 read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> dat.Read_Error {
 	set := node
@@ -269,10 +271,16 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> d
 		if set == nil do return .None
 	}
 
-	if node.length == nil && node.terminator == nil do return read_set_instance(d, s, set, choice)
+	if node.length == nil && node.terminator == nil {
+		args: []fld.Value
+		if len(set.args) > 0 do args = eval_args(d, set, index) or_return
+		return read_set_instance(d, s, set, choice, args)
+	}
 
 	start := d.r.pos
 	bytes := element_bytes(d, node, index) or_return
+	args: []fld.Value
+	if len(set.args) > 0 do args = eval_args(d, set, index) or_return
 
 	// the parent's stream is already past the substream, whatever the
 	// instance consumes
@@ -285,19 +293,38 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> d
 	dat.reader_init(&d.r, bytes)
 	d.base += start
 
-	return read_set_instance(d, s, set, choice)
+	return read_set_instance(d, s, set, choice, args)
+}
+
+// The values of the arguments of set, which has some, for instance index,
+// in the tree's arena. The callers check that it has some: a call for
+// every instance costs more than the check.
+@(private = "file", require_results)
+eval_args :: proc(d: ^Decoder, set: ^mdata.Node, index: int) -> (args: []fld.Value, err: dat.Read_Error) {
+	args = arn.arena_make(d.arena, fld.Value, len(set.args))
+	for a, k in set.args {
+		v, e := eval_value(d, a, index)
+		if e != .None do return nil, fail(d, e, d.r.pos)
+		args[k] = v
+	}
+	return args, .None
 }
 
 // Appends one instance of set node to s, read as choice (see
-// field.Instance), and reads its children into it, then the parse
-// instances that no expression has read.
+// field.Instance), with the values of its params, args, and reads its
+// children into it, then the parse instances that no expression has read.
 @(private = "file", require_results)
-read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int) -> dat.Read_Error {
+read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int, args: []fld.Value) -> dat.Read_Error {
 	when ODIN_DEBUG {
 		assert(node.slot_count == mdata.count_slots(node), "read_set_instance: the set's slot_count was not recorded")
 	}
 	instance, cells := fld.make_instance(d.arena, node.slot_count, choice)
 	push(s, 0, instance)
+	for v, k in args {
+		slot := mdata.param_slot(node, k)
+		cells[slot] = v
+		instance.slots[slot] = cells[slot:][:1]
+	}
 
 	// on error the frame is left pushed, like the path segment
 	append(&d.frames, Frame{instance, len(d.streams), len(d.path)})

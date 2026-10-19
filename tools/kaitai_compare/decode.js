@@ -11,10 +11,10 @@
 // (instances with pos), each an array of its values (one for a field read
 // once), with byte arrays as lowercase hex. The runtime reads a parse
 // instance when it is first accessed, so each is accessed here. Fields
-// that were not read, value instances and the runtime's own members (_io,
-// _parent, _root, _raw_*, _m_*) are left out; names are as the generated
-// code spells them (lowerCamelCase). A file that fails to decode prints
-// {"error": "..."}.
+// that were not read, value instances, params and the runtime's own
+// members (_io, _parent, _root, _raw_*, _m_*) are left out; names are as
+// the generated code spells them (lowerCamelCase). A file that fails to
+// decode prints {"error": "..."}.
 
 "use strict";
 
@@ -33,19 +33,21 @@ function lowerCamel(name) {
   return u.slice(0, 1).toLowerCase() + u.slice(1);
 }
 
-// The names of the parse instances of each type in spec, by the name of
-// its generated class, added to out. Types of the same name share a list.
-function parseInstances(spec, name, out) {
+// The names of the parse instances and of the params of each type in spec,
+// by the name of its generated class, added to out. Types of the same name
+// share their lists.
+function members(spec, name, out) {
   const cls = upperCamel(name);
-  out[cls] = out[cls] || [];
+  out[cls] = out[cls] || { parseInstances: [], params: new Set() };
   for (const [id, inst] of Object.entries(spec.instances || {})) {
-    if (inst.value === undefined) out[cls].push(lowerCamel(id));
+    if (inst.value === undefined) out[cls].parseInstances.push(lowerCamel(id));
   }
-  for (const [id, type] of Object.entries(spec.types || {})) parseInstances(type, id, out);
+  for (const p of spec.params || []) out[cls].params.add(lowerCamel(p.id));
+  for (const [id, type] of Object.entries(spec.types || {})) members(type, id, out);
   return out;
 }
 
-let PARSE_INSTANCES = {};
+let MEMBERS = {};
 
 function value(v) {
   if (v instanceof Uint8Array) return Buffer.from(v).toString("hex");
@@ -54,13 +56,14 @@ function value(v) {
 }
 
 function instance(obj) {
+  const m = MEMBERS[obj.constructor.name] || { parseInstances: [], params: new Set() };
   const out = {};
   for (const key of Object.keys(obj)) {
     const v = obj[key];
-    if (key.startsWith("_") || v === undefined || v === null) continue;
+    if (key.startsWith("_") || m.params.has(key) || v === undefined || v === null) continue;
     out[key] = Array.isArray(v) ? v.map(value) : [value(v)];
   }
-  for (const key of PARSE_INSTANCES[obj.constructor.name] || []) {
+  for (const key of m.parseInstances) {
     const v = obj[key];
     if (v === undefined || v === null) continue;
     out[key] = Array.isArray(v) ? v.map(value) : [value(v)];
@@ -83,8 +86,8 @@ async function main() {
   }
 
   const ksy = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
-  PARSE_INSTANCES = parseInstances(ksy, ksy.meta.id, {});
-  for (const spec of Object.values(imports)) parseInstances(spec, spec.meta.id, PARSE_INSTANCES);
+  MEMBERS = members(ksy, ksy.meta.id, {});
+  for (const spec of Object.values(imports)) members(spec, spec.meta.id, MEMBERS);
   const importer = {
     importYaml(name, mode) {
       const spec = imports[mode + ":" + name];

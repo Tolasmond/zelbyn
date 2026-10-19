@@ -52,6 +52,21 @@ compile :: proc(text: string, scope: Scope, want: mdata.Expr_Type, allocator: me
 	return e, {}
 }
 
+// Parses text as parse_list does, and resolves each expression in scope,
+// whatever its type.
+@(require_results)
+compile_list :: proc(text: string, scope: Scope, allocator: mem.Allocator) -> (list: []^mdata.Expr, err: Error) {
+	list, err = parse_list(text, allocator)
+	if err.kind != .None do return nil, err
+
+	r := Resolver{scope = scope, allocator = allocator}
+	for e in list {
+		if !resolve(&r, e) do return nil, r.err
+		e.direct = direct_form(e)
+	}
+	return list, {}
+}
+
 // The direct form of e, a resolved expression, or nil when it has none
 // (mdata.Direct).
 direct_form :: proc(e: ^mdata.Expr) -> mdata.Direct {
@@ -113,7 +128,7 @@ fail :: proc(r: ^Resolver, kind: Error_Kind, offset: int, format: string, args: 
 	return false
 }
 
-@(private = "file")
+// An expression type in words, for errors: "an integer", "a set".
 type_name :: proc(t: mdata.Expr_Type) -> string {
 	switch t {
 	case .Unresolved:
@@ -258,8 +273,8 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 	return true
 }
 
-// Makes e a reference to the field, parse instance or value instance
-// called name in the set instance base.
+// Makes e a reference to the field, parse instance, param or value
+// instance called name in the set instance base.
 @(private = "file")
 resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: string) -> bool {
 	set := struct_node(base)
@@ -281,6 +296,14 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 			}
 			field, slot = p, k
 			break
+		}
+	}
+	if field == nil {
+		for p, k in set.params {
+			if p.ref_name == name {
+				field, slot = p, mdata.param_slot(set, k)
+				break
+			}
 		}
 	}
 	if field == nil {

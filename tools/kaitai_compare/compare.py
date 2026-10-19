@@ -11,8 +11,8 @@ with gnrcrdr's --dump json. Both are brought to one shape: every field an
 array of its values, set instances objects, byte arrays hex. Parse
 instances (instances with pos) are compared as fields. A field with no
 values (not read because of if or switch-on, or an empty repeat) is left
-out on both sides, as are value instances, which gnrcrdr does not dump.
-Field names are compared as the generated code spells them. Imports are
+out on both sides, as are value instances and params, which gnrcrdr does
+not dump. Field names are compared as the generated code spells them. Imports are
 read relative to the importing schema, or for an absolute one, from the
 directories of --import-path (separated as in PATH), and given to both.
 Exits 1 if any file differs, or fails to decode on either side.

@@ -44,6 +44,30 @@ parse :: proc(text: string, allocator: mem.Allocator) -> (e: ^mdata.Expr, err: E
 	return e, p.err
 }
 
+// Parses text as a list of expressions separated by commas, each as parse
+// parses one: the arguments of a type, t(a, b). Empty text is no
+// expressions.
+@(require_results)
+parse_list :: proc(text: string, allocator: mem.Allocator) -> (list: []^mdata.Expr, err: Error) {
+	p := Parser{text = text, allocator = allocator}
+	defer if p.err.kind != .None do list = nil
+
+	if !next(&p) do return nil, p.err
+	items := make([dynamic]^mdata.Expr, allocator)
+	for p.tok.kind != .EOF {
+		e := parse_expr(&p, 0) or_break
+		append(&items, e)
+		if p.tok.kind == .EOF do break
+		if p.tok.kind != .Comma {
+			fail(&p, .Syntax, p.tok.offset, "unexpected %s", describe(p.tok))
+			break
+		}
+		if !next(&p) do break
+		if p.tok.kind == .EOF do fail(&p, .Syntax, p.tok.offset, "expected an expression after ,")
+	}
+	return items[:], p.err
+}
+
 @(private = "file")
 Token_Kind :: enum {
 	EOF,

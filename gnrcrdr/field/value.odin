@@ -22,7 +22,7 @@ Value :: union {
 // A decoded set instance. slots holds the values of each field of the set
 // it was read as, by position: each of its parse instances, then each
 // child in order, each followed by its bit fields (metadata.slot_of gives
-// a child's slot). For an instance of a switch-on field, choice is the
+// a child's slot), then each of its params. For an instance of a switch-on field, choice is the
 // case it was read as: an index into the field's cases, or DEFAULT_CASE;
 // otherwise it is 0.
 //
