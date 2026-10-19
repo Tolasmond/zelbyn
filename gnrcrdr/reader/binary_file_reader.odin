@@ -54,7 +54,8 @@ decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree) 
 
 	d := Decoder{arena = &tree.arena, allocator = allocator}
 	d.path = make([dynamic]Path_Segment, allocator)
-	d.frames = make([dynamic]^fld.Instance, allocator)
+	d.frames = make([dynamic]Frame, allocator)
+	d.streams = make([dynamic]Stream, allocator)
 	dat.reader_init(&d.r, data)
 
 	root := Sink{slots = ([^][]fld.Value)(&tree.root)[:1]}
@@ -109,13 +110,24 @@ push :: #force_inline proc(s: ^Sink, k: int, v: fld.Value) {
 }
 
 // Reads every value of node into s: the instances of a set, or the elements
-// of any other field, with their bit fields.
+// of any other field, with their bit fields. A parse instance is read at
+// its pos, which moves the stream: read_parse_instance puts it back.
 @(private = "file", require_results)
 read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error {
 	if node.cond != nil {
 		read_it, err := eval_bool(d, node.cond)
 		if err != .None do return fail(d, err, d.r.pos)
 		if !read_it do return .None
+	}
+
+	if node.pos != nil {
+		pos, err := eval_int(d, node.pos)
+		if err == .None && (pos < 0 || pos > len(d.r.data)) do err = .Offset_Out_Of_Range
+		if err != .None {
+			append(&d.path, Path_Segment{node.name, 0})
+			return fail(d, err, d.r.pos)
+		}
+		d.r.pos = pos
 	}
 
 	count: int
@@ -260,10 +272,11 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> d
 
 	// the parent's stream is already past the substream, whatever the
 	// instance consumes
-	parent, parent_base := d.r, d.base
+	append(&d.streams, Stream{d.r, d.base})
 	defer {
-		d.r = parent
-		d.base = parent_base
+		parent := pop(&d.streams)
+		d.r = parent.r
+		d.base = parent.base
 	}
 	dat.reader_init(&d.r, bytes)
 	d.base += start
@@ -272,7 +285,8 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> d
 }
 
 // Appends one instance of set node to s, read as choice (see
-// field.Instance), and reads its children into it.
+// field.Instance), and reads its children into it, then the parse
+// instances that no expression has read.
 @(private = "file", require_results)
 read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int) -> dat.Read_Error {
 	when ODIN_DEBUG {
@@ -282,9 +296,9 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int)
 	push(s, 0, instance)
 
 	// on error the frame is left pushed, like the path segment
-	append(&d.frames, instance)
+	append(&d.frames, Frame{instance, len(d.streams), len(d.path)})
 
-	slot := 0
+	slot := len(node.parse_instances)
 	for child in node.children {
 		n := 1 + len(child.bits)
 		child_sink := Sink{slots = instance.slots[slot:][:n], cells = cells[slot:][:n]}
@@ -292,8 +306,65 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int)
 		slot += n
 	}
 
+	for p, k in node.parse_instances {
+		if raw_data(instance.slots[k]) == nil do read_parse_instance(d, instance, p, k) or_return
+	}
+
 	pop(&d.frames)
 	return .None
+}
+
+// Reads parse instance node of instance, a set instance being decoded, into
+// slot k: at its pos in the instance's stream, as the instance's frame
+// sees it. The stream, frames and path are then put back as they were.
+@(private, require_results)
+read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int) -> dat.Read_Error {
+	j := len(d.frames) - 1
+	for j >= 0 && d.frames[j].instance != instance do j -= 1
+	// an instance that is no longer decoded had its parse instances read
+	assert(j >= 0, "read_parse_instance: the instance is not being decoded")
+	frame := d.frames[j]
+
+	cells := fld.instance_cells(instance)
+	// from here on the slot is not nil, so the instance is read only once
+	instance.slots[k] = cells[k:k]
+
+	r, base := d.r, d.base
+	defer {
+		d.r = r
+		d.base = base
+	}
+	if frame.stream < len(d.streams) {
+		d.r = d.streams[frame.stream].r
+		d.base = d.streams[frame.stream].base
+	}
+
+	// the frames, streams and path above the instance's are set aside while
+	// it is read
+	frames, streams, path := d.frames, d.streams, d.path
+	aside := j < len(frames) - 1 || frame.stream < len(streams) || frame.path < len(path)
+	if aside {
+		d.frames = clone_dynamic(d, frames[:j + 1])
+		d.streams = clone_dynamic(d, streams[:frame.stream])
+		d.path = clone_dynamic(d, path[:frame.path])
+	}
+
+	s := Sink{slots = instance.slots[k:][:1], cells = cells[k:][:1]}
+	err := read_values(d, &s, node)
+	if aside {
+		d.frames = frames
+		d.streams = streams
+		d.path = path
+	}
+	return err
+}
+
+// A copy of values, in the tree's arena, to append to.
+@(private = "file")
+clone_dynamic :: proc(d: ^Decoder, values: []$T) -> [dynamic]T {
+	a := make([dynamic]T, len(values), max(len(values), 8), d.allocator)
+	copy(a[:], values)
+	return a
 }
 
 // Reads element index of node, a field that is not a set, and checks it.

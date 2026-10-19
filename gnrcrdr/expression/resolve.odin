@@ -15,10 +15,12 @@ Scope :: struct {
 	instance:  bool,        // a value instance's expression: it can use only the fields and value instances of the last type
 
 	// Called when an expression refers to a value instance whose expr is
-	// nil, to compile it; on failure the callback reports its own error.
-	// When nil, such a reference is an error.
-	compile_instance: proc(data: rawptr, set: ^mdata.Node, instance: ^mdata.Value_Instance) -> bool,
-	data:             rawptr,
+	// nil, or a parse instance whose pos is nil, to compile it; on failure
+	// the callback reports its own error. When nil, such a reference is an
+	// error.
+	compile_instance:       proc(data: rawptr, set: ^mdata.Node, instance: ^mdata.Value_Instance) -> bool,
+	compile_parse_instance: proc(data: rawptr, set: ^mdata.Node, instance: ^mdata.Node) -> bool,
+	data:                   rawptr,
 }
 
 // A schema's enum: its values, by name. An enum constant (name::value) is
@@ -251,16 +253,28 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 	return true
 }
 
-// Makes e a reference to the field or value instance called name in the
-// set instance base.
+// Makes e a reference to the field, parse instance or value instance
+// called name in the set instance base.
 @(private = "file")
 resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: string) -> bool {
 	set := struct_node(base)
 	field: ^mdata.Node
-	index: int
+	slot: int
 	for child, i in set.children {
 		if child.ref_name == name {
-			field, index = child, i
+			field, slot = child, mdata.slot_of(set, i)
+			break
+		}
+	}
+	if field == nil {
+		for p, k in set.parse_instances {
+			if p.ref_name != name do continue
+			if p.pos == nil {
+				if r.scope.compile_parse_instance == nil do return fail(r, .Invalid, e.offset, "instance %s cannot be used here", name)
+				if !r.scope.compile_parse_instance(r.scope.data, set, p) do return fail(r, .Invalid, e.offset, "instance %s is not valid", name)
+				assert(p.pos != nil, "resolve: compile_parse_instance left the instance uncompiled")
+			}
+			field, slot = p, k
 			break
 		}
 	}
@@ -278,7 +292,7 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 		e.type = value_type(r, e, field, name) or_return
 	}
 
-	e.variant = mdata.Field_Ref{base = base, node = field, slot = mdata.slot_of(set, index)}
+	e.variant = mdata.Field_Ref{base = base, node = field, slot = slot}
 	return true
 }
 

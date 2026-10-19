@@ -38,7 +38,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\n  -peek: [1]\n", .Invalid, 3, 3, "the extension -peek does not apply here"},
 	{HEAD + "types:\n  u:\n    meta:\n      endian: be\n", .Unsupported, 6, 5, "type u: meta in a type is not supported"},
 	{HEAD + "types:\n  unused:\n    seq:\n      - id: a\n        type: u1\n        pos: 0\n", .Unsupported, 9, 9, "attribute a: pos is not supported"},
-	{HEAD + "types:\n  unused:\n    instances:\n      x:\n        pos: 0\n        type: u1\n", .Unsupported, 8, 9, "instance x: pos is not supported"},
+	{HEAD + "types:\n  unused:\n    instances:\n      x:\n        pos: 0\n        type: u1\n        io: _root._io\n", .Unsupported, 10, 9, "instance x: io is not supported"},
 
 	// the top level and meta
 	{"# nothing\n", .Invalid, 0, 0, "the schema is empty"},
@@ -129,8 +129,16 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    repeat: expr\n    repeat-expr: 2\ntypes:\n  s: {}\n", .Unsupported, 7, 18, "a repeated switch-on without a _ case is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        _: s\n  - id: b\n    size: a.c\ntypes:\n  s:\n    seq:\n      - id: c\n        type: u1\n", .Unsupported, 11, 11, "size: a is a switch-on field; it cannot be used in expressions"},
 
-	// instances: value instances only, over their own type
-	{HEAD + "instances:\n  x:\n    doc: d\n", .Unsupported, 5, 3, "instance x: only value instances are supported"},
+	// instances: value instances, over their own type, and parse instances
+	{HEAD + "instances:\n  x:\n    doc: d\n", .Unsupported, 5, 3, "instance x: an instance without pos or value is not supported"},
+	{HEAD + "instances:\n  x:\n    size: 1\n", .Unsupported, 5, 3, "instance x: an instance without pos or value is not supported"},
+	{HEAD + "instances:\n  x:\n    value: 1\n    pos: 0\n", .Invalid, 7, 5, `instance x: unknown key "pos"`},
+	{HEAD + "instances:\n  x:\n    value: 1\n    if: true\n", .Unsupported, 7, 5, "instance x: if is not supported"},
+	{HEAD + "instances:\n  x:\n    pos: 0\n    type: u1\n    -bits:\n      - {id: b, low: 0, high: 0}\n", .Invalid, 8, 5, "the extension -bits does not apply here"},
+	{HEAD + "instances:\n  x:\n    pos: x\n    type: u1\n", .Invalid, 5, 3, "instance x refers to itself"},
+	{HEAD + "instances:\n  x:\n    pos: y\n    type: u1\n  y:\n    pos: 0\n    type: s\ntypes:\n  s:\n    seq:\n      - id: a\n        size: _parent.x\n", .Invalid, 5, 3, "instance x refers to itself"},
+	{HEAD + "instances:\n  x:\n    pos: 1 == 1\n    type: u1\n", .Invalid, 6, 12, "pos: expected an integer, found a boolean"},
+	{HEAD + "instances:\n  x:\n    pos: 0\n", .Invalid, 6, 5, "x needs a type, size, size-eos, terminator or contents"},
 	{HEAD + "instances:\n  x:\n    value: y\n  y:\n    value: x + 1\n", .Invalid, 6, 12, "value instance x refers to itself"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\ninstances:\n  a:\n    value: 1\n", .Invalid, 8, 3, "id a is already used (line 5, column 9)"},
 	{HEAD + "seq:\n  - id: b\n    size: 1\ninstances:\n  x:\n    value: b\n", .Unsupported, 9, 12, "value instance x: only integer and boolean values are supported"},
@@ -372,6 +380,108 @@ t[0].z[0] = -2
 	// -orig-id on a type documents its original name, as in
 	// kaitai_struct_formats; nothing shows it
 	expect_dump(t, "-orig-id on a type", ksy_dump(t, HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    -orig-id: S\n    seq:\n      - id: b\n        type: u1\n", {7}), "t[0].a[0].b[0] = 7\n")
+}
+
+// As ksy_dump, but the JSON dump.
+@(private = "file")
+ksy_json :: proc(t: ^testing.T, src: string, input: []byte) -> string {
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	err := ksy.compile(src, &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return ""
+
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, input, &d)
+	if d.err.kind != .None do return fmt.tprintf("error: %v at %v in %s", d.err.kind, d.err.offset, d.err.path)
+
+	b := strings.builder_make(context.temp_allocator)
+	werr := dmp.write_json(strings.to_writer(&b), &ff, &d.tree)
+	testing.expectf(t, werr == .None, "dump: %v", werr)
+	return strings.to_string(b)
+}
+
+@(test)
+ksy_parse_instances :: proc(t: ^testing.T) {
+	// parse instances are read at pos in their type's stream, which does
+	// not move: when an expression first refers to one (peek, from the
+	// field after it; here, from inside a substream; table, through a value
+	// instance), or else after their type's fields, in order. They are
+	// dumped after the fields. A repeat reads on from pos, a false if reads
+	// nothing, and in a substream pos and _io are the substream's
+	src := HEAD + `seq:
+  - id: ofs
+    type: u1
+  - id: kind
+    type: u1
+    if: peek != 0
+  - id: sub
+    type: sub
+    size: 3
+  - id: tail
+    size: n - 1
+instances:
+  peek:
+    pos: _io.pos
+    type: u1
+  here:
+    pos: _io.pos
+    type: u1
+  at_ofs:
+    pos: ofs
+    type: u2
+  table:
+    pos: 5
+    type: u1
+    repeat: expr
+    repeat-expr: 2
+  never:
+    pos: 0
+    type: u1
+    if: ofs == 0
+  n:
+    value: table.size
+types:
+  sub:
+    seq:
+      - id: a
+        type: u1
+      - id: b
+        type: u1
+        if: _parent.here == 0x20
+    instances:
+      last:
+        pos: _io.size - 1
+        type: u1
+      parent_ofs:
+        pos: _parent.ofs
+        type: u1
+`
+	expect_dump(t, "parse instances", ksy_dump(t, src, {1, 7, 0x10, 0x11, 0x12, 0x20, 0x21}), `t[0].ofs[0] = 1
+t[0].kind[0] = 7
+t[0].sub[0].a[0] = 16
+t[0].sub[0].b[0] = 17
+t[0].sub[0].last[0] = 18
+t[0].sub[0].parent_ofs[0] = 17
+t[0].tail[0] = <1 bytes> 20
+t[0].peek[0] = 7
+t[0].here[0] = 32
+t[0].at_ofs[0] = 4103
+t[0].table[0] = 32
+t[0].table[1] = 33
+`)
+
+	// a pos past the end of the stream, and a read at pos that runs past
+	// it, fail with the instance's path
+	expect_dump(t, "pos out of range", ksy_dump(t, src, {9, 7, 0x10, 0x11, 0x12, 0x20, 0x21}), "error: Offset_Out_Of_Range at 4 in t[0].sub[0].parent_ofs[0]")
+	expect_dump(t, "read past the end", ksy_dump(t, src, {2, 7, 0x10, 0x11, 0x12, 0x20}), "error: Unexpected_EOF at 6 in t[0].table[1]")
+
+	// in JSON, parse instances follow the fields, also when there are none
+	both := HEAD + "seq:\n  - id: a\n    type: u1\ninstances:\n  p:\n    pos: 0\n    type: u1\n  q:\n    pos: 0\n    size: 0\n    if: a == 0\n"
+	expect_dump(t, "json", ksy_json(t, both, {7}), `{"t":[{"a":[7],"p":[7],"q":[]}]}` + "\n")
+	only := HEAD + "instances:\n  p:\n    pos: 0\n    type: u1\n"
+	expect_dump(t, "json, no fields", ksy_json(t, only, {7}), `{"t":[{"p":[7]}]}` + "\n")
 }
 
 @(test)

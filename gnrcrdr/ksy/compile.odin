@@ -28,13 +28,14 @@ import "core:strings"
 //     byte arrays (no type) with size, size-eos or terminator, strz, user
 //     types (with size, size-eos or terminator, read from a substream), and
 //     switch-on whose cases are user types
-//   - value instances
+//   - value instances, and parse instances: instances with pos and the
+//     keys of an attribute
 //   - enums whose values are names (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
-// Not supported yet (Unsupported): bit types (b1-b64), instances other
-// than value instances, size, size-eos and terminator on a switch-on
-// field, and any valid constant that is not an integer or string literal.
+// Not supported yet (Unsupported): bit types (b1-b64), instances without
+// pos or value, io, size, size-eos and terminator on a switch-on field,
+// and any valid constant that is not an integer or string literal.
 
 Error_Kind :: enum {
 	None,
@@ -92,7 +93,8 @@ compile :: proc(src: string, file_format: ^mdata.File_Format) -> Error {
 	defer virtual.arena_destroy(&scratch)
 
 	c := Compiler{allocator = virtual.arena_allocator(&file_format.arena), scratch = virtual.arena_allocator(&scratch)}
-	c.instances = make(map[^mdata.Value_Instance]Instance_Source, c.scratch)
+	c.instances = make(map[^mdata.Value_Instance]^Instance_Source, c.scratch)
+	c.parse_instances = make(map[^mdata.Node]^Parse_Source, c.scratch)
 	if doc.root == nil {
 		fail(&c, .Invalid, nil, "the schema is empty")
 	} else {
@@ -103,22 +105,34 @@ compile :: proc(src: string, file_format: ^mdata.File_Format) -> Error {
 
 @(private = "file")
 Compiler :: struct {
-	allocator: mem.Allocator, // the File_Format's arena
-	scratch:   mem.Allocator, // freed after compiling
-	next_id:   int,
-	endian:    Maybe(endian.Byte_Order), // meta endian
-	encoding:  string,                   // meta encoding; "" when absent
-	instances: map[^mdata.Value_Instance]Instance_Source, // in scratch
-	err:       Error,
+	allocator:       mem.Allocator, // the File_Format's arena
+	scratch:         mem.Allocator, // freed after compiling
+	next_id:         int,
+	endian:          Maybe(endian.Byte_Order), // meta endian
+	encoding:        string,                   // meta encoding; "" when absent
+	instances:       map[^mdata.Value_Instance]^Instance_Source, // in scratch
+	parse_instances: map[^mdata.Node]^Parse_Source,              // in scratch
+	err:             Error,
 }
 
 // Where a value instance of a set comes from, to compile it when an
-// expression first refers to it.
+// expression first refers to it. Each is its own allocation, since
+// compiling one can add others to the map.
 @(private = "file")
 Instance_Source :: struct {
 	value:     ^yml.Node, // its value: key
 	td:        ^Type_Def,
 	set:       ^mdata.Node,
+	compiling: bool,
+}
+
+// Where a parse instance of a set comes from, to compile it when an
+// expression first refers to it; as for Instance_Source.
+@(private = "file")
+Parse_Source :: struct {
+	entry:     yml.Entry, // its key and spec in instances
+	td:        ^Type_Def,
+	scope:     expr.Scope, // that of the set's fields
 	compiling: bool,
 }
 
@@ -235,7 +249,7 @@ TOP_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "do
 TYPE_UNSUPPORTED :: []string{"params", "to-string"}
 
 @(private = "file")
-ATTR_ALLOWED :: []string{"id", "type", "size", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"}
+ATTR_ALLOWED :: []string{"id", "type", "size", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right"}
 
 @(private = "file")
 ATTR_UNSUPPORTED :: []string{"process", "io", "pos", "value", "parent"}
@@ -244,12 +258,20 @@ ATTR_UNSUPPORTED :: []string{"process", "io", "pos", "value", "parent"}
 @(private = "file")
 BYTES_KEYS :: []string{"size", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right"}
 
-// The keys of an instance; only value instances are supported, so the keys
-// of the others are Unsupported.
+// The keys of a value instance, and of a parse instance: those of an
+// attribute, with pos instead of id.
 @(private = "file")
-INSTANCE_KEYS :: Keys {
+VALUE_INSTANCE_KEYS :: Keys {
 	allowed     = {"value", "doc", "doc-ref"},
-	unsupported = {"pos", "io", "type", "size", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "terminator", "consume", "include", "eos-error", "pad-right", "size-eos", "process"},
+	unsupported = {"if", "enum"},
+	extensions  = {"-orig-id"},
+}
+
+@(private = "file")
+PARSE_INSTANCE_KEYS :: Keys {
+	allowed     = {"pos", "type", "size", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"},
+	unsupported = {"io", "process", "parent"},
+	extensions  = {"-orig-id"},
 }
 
 @(private = "file")
@@ -423,10 +445,12 @@ build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_De
 		for e in instances.entries {
 			inst_name := identifier(c, e.key, "instance name") or_return
 			expect_map(c, e.value, fmt.tprintf("instance %s", inst_name)) or_return
-			keys := INSTANCE_KEYS
+			keys := get(e.value, "value") != nil ? VALUE_INSTANCE_KEYS : PARSE_INSTANCE_KEYS
 			keys.what = fmt.tprintf("instance %s", inst_name)
 			check_keys(c, e.value, keys) or_return
-			if get(e.value, "value") == nil do return nil, fail(c, .Unsupported, e.key, "instance %s: only value instances are supported", inst_name)
+			if get(e.value, "value") == nil && get(e.value, "pos") == nil {
+				return nil, fail(c, .Unsupported, e.key, "instance %s: an instance without pos or value is not supported", inst_name)
+			}
 		}
 		td.instances = instances.entries
 	}
@@ -496,11 +520,10 @@ visible_enums :: proc(c: ^Compiler, td: ^Type_Def) -> []expr.Enum {
 	return list[:]
 }
 
-// Compiles the attributes and value instances of td as those of set, an
-// instance of td. chain is the scope: the sets enclosing set, outermost
-// first, then set. Each attribute's expressions can refer to the
-// attributes before it, and to any value instance whose expression refers
-// only to those.
+// Compiles the attributes and instances of td as those of set, an instance
+// of td. chain is the scope: the sets enclosing set, outermost first, then
+// set. Each attribute's expressions can refer to the attributes before it,
+// and to any instance whose expressions refer only to those.
 @(private = "file")
 compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^mdata.Node) -> bool {
 	if td.in_progress do return fail(c, .Unsupported, td.spec, "type %s contains itself; recursive types are not supported", td.name)
@@ -511,15 +534,27 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 
 	// each instance is compiled when an expression first refers to it, or
 	// after the attributes
-	instances := make([]^mdata.Value_Instance, len(td.instances), c.allocator)
-	for e, i in td.instances {
-		instances[i] = new(mdata.Value_Instance, c.allocator)
-		instances[i].name = strings.clone(e.key.text, c.allocator)
-		c.instances[instances[i]] = {value = get(e.value, "value"), td = td, set = set}
-	}
-	set.instances = instances
-
 	scope := scope_of(c, td, chain)
+	instances := make([dynamic]^mdata.Value_Instance, c.allocator)
+	parse_instances := make([dynamic]^mdata.Node, c.allocator)
+	for e in td.instances {
+		if value := get(e.value, "value"); value != nil {
+			inst := new(mdata.Value_Instance, c.allocator)
+			inst.name = strings.clone(e.key.text, c.allocator)
+			src := new(Instance_Source, c.scratch)
+			src^ = {value = value, td = td, set = set}
+			c.instances[inst] = src
+			append(&instances, inst)
+		} else {
+			p := new_node(c, display_name(c, e.value, e.key.text) or_return, e.key.text)
+			src := new(Parse_Source, c.scratch)
+			src^ = {entry = e, td = td, scope = scope}
+			c.parse_instances[p] = src
+			append(&parse_instances, p)
+		}
+	}
+	set.instances = instances[:]
+	set.parse_instances = parse_instances[:]
 	if seq := get(td.spec, "seq"); seq != nil {
 		children := make([dynamic]^mdata.Node, c.allocator)
 		for attr in seq.items {
@@ -530,9 +565,18 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 	}
 	set.slot_count = mdata.count_slots(set)
 
-	for e, i in td.instances {
+	next_value, next_parse := 0, 0
+	for e in td.instances {
 		claim_id(c, &ids, e.key.text, e.key) or_return
-		if instances[i].expr == nil do compile_instance(c, set, instances[i]) or_return
+		if get(e.value, "value") != nil {
+			inst := instances[next_value]
+			next_value += 1
+			if inst.expr == nil do compile_instance(c, set, inst) or_return
+		} else {
+			p := parse_instances[next_parse]
+			next_parse += 1
+			if p.pos == nil do compile_parse_instance(c, set, p) or_return
+		}
 	}
 	return true
 }
@@ -540,7 +584,13 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 // The scope of expressions in td, whose instance is the last of chain.
 @(private = "file")
 scope_of :: proc(c: ^Compiler, td: ^Type_Def, chain: []^mdata.Node) -> expr.Scope {
-	return {types = chain, enums = visible_enums(c, td), compile_instance = compile_instance_callback, data = c}
+	return {
+		types                  = chain,
+		enums                  = visible_enums(c, td),
+		compile_instance       = compile_instance_callback,
+		compile_parse_instance = compile_parse_instance_callback,
+		data                   = c,
+	}
 }
 
 @(private = "file")
@@ -548,11 +598,33 @@ compile_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^mdata.V
 	return compile_instance((^Compiler)(data), set, inst)
 }
 
+@(private = "file")
+compile_parse_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^mdata.Node) -> bool {
+	return compile_parse_instance((^Compiler)(data), set, inst)
+}
+
+// Compiles inst, a parse instance of set, as an attribute, then its pos. It
+// can use the fields of set compiled so far, and its instances. pos is
+// compiled last: until it is set, a reference to inst compiles it, so
+// that one from inst itself is found.
+@(private = "file")
+compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node) -> bool {
+	src := c.parse_instances[inst]
+	if src.compiling do return fail(c, .Invalid, src.entry.key, "instance %s refers to itself", inst.ref_name)
+	src.compiling = true
+	defer src.compiling = false
+
+	spec := src.entry.value
+	compile_field(c, src.td, spec, inst, src.scope, nil) or_return
+	inst.pos = compile_expr(c, get(spec, "pos"), "pos", src.scope, .Int) or_return
+	return true
+}
+
 // Compiles the expression of inst, a value instance of set. It can use the
 // fields of set compiled so far and its other value instances.
 @(private = "file")
 compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Instance) -> bool {
-	src := &c.instances[inst]
+	src := c.instances[inst]
 	if src.compiling do return fail(c, .Invalid, src.value, "value instance %s refers to itself", inst.name)
 	src.compiling = true
 	defer src.compiling = false
@@ -645,6 +717,7 @@ is_bit_type :: proc(name: string) -> bool {
 	return true
 }
 
+// A seq attribute: its id, then the rest as compile_field compiles it.
 @(private = "file")
 compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.Scope, ids: ^map[string]^yml.Node) -> (node: ^mdata.Node, ok: bool) {
 	id_node := get(attr, "id")
@@ -654,7 +727,16 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 
 	name := display_name(c, attr, id) or_return
 	node = new_node(c, name, id)
+	compile_field(c, td, attr, node, scope, ids) or_return
+	return node, true
+}
 
+// Compiles the keys of attr, an attribute or a parse instance, other than
+// its id and pos, into node, in scope. ids holds the ids of the type, which
+// bit fields claim; nil for a parse instance, which has none.
+@(private = "file")
+compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata.Node, scope: expr.Scope, ids: ^map[string]^yml.Node) -> bool {
+	id := node.ref_name
 	type_node := get(attr, "type")
 	contents := get(attr, "contents")
 	size := get(attr, "size")
@@ -669,26 +751,26 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 	if n := get(attr, "size-eos"); n != nil {
 		size_eos = boolean(c, n, "size-eos") or_return
 	}
-	if size != nil && size_eos do return nil, fail(c, .Invalid, get_key(attr, "size-eos"), "%s: size and size-eos cannot both be given", id)
+	if size != nil && size_eos do return fail(c, .Invalid, get_key(attr, "size-eos"), "%s: size and size-eos cannot both be given", id)
 	ends := size != nil || size_eos || get(attr, "terminator") != nil
 	bytes_key := first_key(attr, BYTES_KEYS)
 
 	switch {
 	case contents != nil:
-		if type_node != nil do return nil, fail(c, .Invalid, get_key(attr, "type"), "%s: contents cannot have a type", id)
-		if bytes_key != nil do return nil, fail(c, .Invalid, bytes_key, "%s: contents cannot have %s", id, bytes_key.text)
-		if valid != nil do return nil, fail(c, .Invalid, get_key(attr, "valid"), "%s: contents already checks the value; it cannot have valid", id)
+		if type_node != nil do return fail(c, .Invalid, get_key(attr, "type"), "%s: contents cannot have a type", id)
+		if bytes_key != nil do return fail(c, .Invalid, bytes_key, "%s: contents cannot have %s", id, bytes_key.text)
+		if valid != nil do return fail(c, .Invalid, get_key(attr, "valid"), "%s: contents already checks the value; it cannot have valid", id)
 		bytes := byte_list(c, contents, "contents") or_return
 		node.type = .Blob
 		node.length = mdata.Fixed_Length{len(bytes)}
 		node.valid = mdata.Valid_Eq{bytes}
 	case type_node == nil:
-		if !ends do return nil, fail(c, .Invalid, attr, "%s needs a type, size, size-eos, terminator or contents", id)
+		if !ends do return fail(c, .Invalid, attr, "%s needs a type, size, size-eos, terminator or contents", id)
 		node.type = .Blob
 	case type_node.kind == .Map:
 		node.type = .Set
 		switch_node = type_node
-		if bytes_key != nil do return nil, fail(c, .Unsupported, bytes_key, "%s: %s on a switch-on field is not supported", id, bytes_key.text)
+		if bytes_key != nil do return fail(c, .Unsupported, bytes_key, "%s: %s on a switch-on field is not supported", id, bytes_key.text)
 	case:
 		type_name := expect_scalar(c, type_node, "type") or_return
 		sizes := TYPE_SIZE
@@ -697,39 +779,39 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 			if o, has_order := order.?; has_order {
 				node.order = o
 			} else if sizes[prim] > 1 && c.endian == nil {
-				return nil, fail(c, .Invalid, type_node, "%s: %s needs le or be, or meta endian", id, type_name)
+				return fail(c, .Invalid, type_node, "%s: %s needs le or be, or meta endian", id, type_name)
 			}
-			if bytes_key != nil do return nil, fail(c, .Invalid, bytes_key, "%s: %s does not apply to %s", id, bytes_key.text, type_name)
+			if bytes_key != nil do return fail(c, .Invalid, bytes_key, "%s: %s does not apply to %s", id, bytes_key.text, type_name)
 		} else if type_name == "str" || type_name == "strz" {
 			node.type = .String
 			strz = type_name == "strz"
-			if !strz && !ends do return nil, fail(c, .Invalid, type_node, "%s: str needs size, size-eos or terminator", id)
+			if !strz && !ends do return fail(c, .Invalid, type_node, "%s: str needs size, size-eos or terminator", id)
 		} else if is_bit_type(type_name) {
-			return nil, fail(c, .Unsupported, type_node, "%s: type %s is not supported", id, type_name)
+			return fail(c, .Unsupported, type_node, "%s: type %s is not supported", id, type_name)
 		} else {
 			user = find_type(td, type_name)
-			if user == nil do return nil, fail(c, .Invalid, type_node, "%s: unknown type %s", id, type_name)
+			if user == nil do return fail(c, .Invalid, type_node, "%s: unknown type %s", id, type_name)
 			node.type = .Set
 		}
 	}
 
 	if n := get(attr, "encoding"); n != nil {
-		if node.type != .String do return nil, fail(c, .Invalid, get_key(attr, "encoding"), "%s: encoding applies only to str", id)
+		if node.type != .String do return fail(c, .Invalid, get_key(attr, "encoding"), "%s: encoding applies only to str", id)
 		_ = encoding(c, n) or_return
 	} else if node.type == .String && c.encoding == "" {
-		return nil, fail(c, .Invalid, type_node, "%s: str needs an encoding, or meta encoding", id)
+		return fail(c, .Invalid, type_node, "%s: str needs an encoding, or meta encoding", id)
 	}
 
 	if n := get(attr, "enum"); n != nil {
-		if node.type not_in INTEGER_TYPES do return nil, fail(c, .Invalid, get_key(attr, "enum"), "%s: enum applies only to integer types", id)
+		if node.type not_in INTEGER_TYPES do return fail(c, .Invalid, get_key(attr, "enum"), "%s: enum applies only to integer types", id)
 		enum_name := expect_scalar(c, n, "enum") or_return
-		if strings.contains(enum_name, "::") do return nil, fail(c, .Unsupported, n, "%s: an enum of another type (%s) is not supported", id, enum_name)
+		if strings.contains(enum_name, "::") do return fail(c, .Unsupported, n, "%s: an enum of another type (%s) is not supported", id, enum_name)
 		// the field keeps its integer, which the enum's constants are
 		found := false
 		for e in scope.enums {
 			if e.name == enum_name do found = true
 		}
-		if !found do return nil, fail(c, .Invalid, n, "%s: no enum %s", id, enum_name)
+		if !found do return fail(c, .Invalid, n, "%s: no enum %s", id, enum_name)
 	}
 
 	if n := get(attr, "if"); n != nil {
@@ -771,7 +853,7 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 		until_scope.element = node
 		node.count = mdata.Until_Count{compile_expr(c, get(attr, "repeat-until"), "repeat-until", until_scope, .Bool) or_return}
 	}
-	return node, true
+	return true
 }
 
 // types followed by node.
@@ -940,12 +1022,14 @@ compile_expr :: proc(c: ^Compiler, n: ^yml.Node, what: string, scope: expr.Scope
 	case .Invalid:
 		kind = .Invalid
 	}
+	// an instance compiled while resolving it may have recorded the error
+	first := c.err.kind == .None
 	fail(c, kind, n, "%s: %s", what, err.message)
 
 	// the escapes of a quoted scalar and the folds of a multi-line one move
 	// characters; only a plain or simple quoted scalar maps offsets exactly
 	simple := !strings.contains_any(text, "\n'\"\\") && (n.style == .Plain || n.style == .Single_Quoted || n.style == .Double_Quoted)
-	if simple && err.offset >= 0 {
+	if first && simple && err.offset >= 0 {
 		c.err.column += strings.rune_count(text[:err.offset]) + (n.style == .Plain ? 0 : 1)
 	}
 	return nil, false
@@ -958,36 +1042,34 @@ compile_expr :: proc(c: ^Compiler, n: ^yml.Node, what: string, scope: expr.Scope
 @(private = "file")
 compile_terminator :: proc(c: ^Compiler, attr: ^yml.Node, id: string, node: ^mdata.Node, strz: bool) -> bool {
 	sized := node.length != nil
-	if n := get(attr, "pad-right"); n != nil {
-		if !sized do return fail(c, .Invalid, get_key(attr, "pad-right"), "%s: pad-right needs size or size-eos", id)
-		node.pad_right = byte_value(c, n, id, "pad-right") or_return
+	t := mdata.Terminator{consume = true, eos_error = true}
+	terminated := strz
+	flag_key, sized_key: ^yml.Node // the first of consume, include and eos-error, and of consume and eos-error
+	for e in attr.entries {
+		switch e.key.text {
+		case "terminator":
+			t.value = byte_value(c, e.value, id, "terminator") or_return
+			terminated = true
+		case "pad-right":
+			if !sized do return fail(c, .Invalid, e.key, "%s: pad-right needs size or size-eos", id)
+			node.pad_right = byte_value(c, e.value, id, "pad-right") or_return
+		case "include":
+			t.include = boolean(c, e.value, e.key.text) or_return
+			if flag_key == nil do flag_key = e.key
+		case "consume", "eos-error":
+			v := boolean(c, e.value, e.key.text) or_return
+			if e.key.text == "consume" do t.consume = v
+			else do t.eos_error = v
+			if flag_key == nil do flag_key = e.key
+			if sized_key == nil do sized_key = e.key
+		}
 	}
 
-	term := get(attr, "terminator")
-	if term == nil && !strz {
-		if k := first_key(attr, {"consume", "include", "eos-error"}); k != nil {
-			return fail(c, .Invalid, k, "%s: %s applies only with terminator or strz", id, k.text)
-		}
+	if !terminated {
+		if flag_key != nil do return fail(c, .Invalid, flag_key, "%s: %s applies only with terminator or strz", id, flag_key.text)
 		return true
 	}
-
-	t := mdata.Terminator{consume = true, eos_error = true}
-	if term != nil do t.value = byte_value(c, term, id, "terminator") or_return
-	for e in attr.entries {
-		flag: ^bool
-		switch e.key.text {
-		case "include":
-			flag = &t.include
-		case "consume":
-			flag = &t.consume
-		case "eos-error":
-			flag = &t.eos_error
-		case:
-			continue
-		}
-		if sized && flag != &t.include do return fail(c, .Invalid, e.key, "%s: %s does not apply with a size", id, e.key.text)
-		flag^ = boolean(c, e.value, e.key.text) or_return
-	}
+	if sized && sized_key != nil do return fail(c, .Invalid, sized_key, "%s: %s does not apply with a size", id, sized_key.text)
 	node.terminator = t
 	return true
 }

@@ -90,7 +90,10 @@ field_values :: proc {
 }
 
 field_values_by_id :: proc(s: Set_Instance, id: int) -> []fld.Value {
-	slot := 0
+	for p, k in s.set.parse_instances {
+		if p.id == id do return s.instance.slots[k][:]
+	}
+	slot := len(s.set.parse_instances)
 	for child in s.set.children {
 		if child.id == id do return s.instance.slots[slot][:]
 		for bit, b in child.bits {

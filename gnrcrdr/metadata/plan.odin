@@ -9,22 +9,24 @@ import "core:encoding/endian"
 // own node, even when several fields have the same type, and the plan has
 // no cycles.
 Node :: struct {
-	id:         int,               // unique in the plan; tests find fields by it
-	name:       string,            // shown in the dump and in error paths: the .ksy -orig-id, or else the id
-	ref_name:   string,            // what expressions call it: the .ksy id
-	type:       dat.Data_Type,
-	order:      endian.Byte_Order, // integer and float types: the byte order they are read in
-	cond:       ^Expr,             // a Bool expression: the field is read only when it is true; nil when always read (Kaitai's if)
-	count:      Count,             // instances of a set, or elements of any other field
-	length:     Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from. nil for a terminator alone, or for a Set read from its parent's stream
-	terminator: Maybe(Terminator), // String, Blob and Set: the byte that ends each element's bytes (Kaitai's terminator, and strz)
-	pad_right:  Maybe(u8),         // String, Blob and Set with a length: removed from the end of each element's bytes (Kaitai's pad-right)
-	children:   []^Node,           // Set only, in order; nil when switch_on is set
-	slot_count: int,               // Set only: the slots in each instance (count_slots), recorded when children is set
-	switch_on:  ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
-	instances:  []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
-	bits:       []Bit_Field,       // integer types only: packed subfields, decoded from each element
-	valid:      Valid,             // checked on every element; nil when there is no check
+	id:              int,               // unique in the plan; tests find fields by it
+	name:            string,            // shown in the dump and in error paths: the .ksy -orig-id, or else the id
+	ref_name:        string,            // what expressions call it: the .ksy id
+	type:            dat.Data_Type,
+	order:           endian.Byte_Order, // integer and float types: the byte order they are read in
+	cond:            ^Expr,             // a Bool expression: the field is read only when it is true; nil when always read (Kaitai's if)
+	count:           Count,             // instances of a set, or elements of any other field
+	length:          Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from. nil for a terminator alone, or for a Set read from its parent's stream
+	terminator:      Maybe(Terminator), // String, Blob and Set: the byte that ends each element's bytes (Kaitai's terminator, and strz)
+	pad_right:       Maybe(u8),         // String, Blob and Set with a length: removed from the end of each element's bytes (Kaitai's pad-right)
+	children:        []^Node,           // Set only, in order; nil when switch_on is set
+	slot_count:      int,               // Set only: the slots in each instance (count_slots), recorded when children is set
+	switch_on:       ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
+	instances:       []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
+	parse_instances: []^Node,           // Set only: Kaitai's instances with pos, each read at an offset (see pos)
+	pos:             ^Expr,             // a parse instance only: an Int expression, the offset it is read at (see below); nil for every other field
+	bits:            []Bit_Field,       // integer types only: packed subfields, decoded from each element
+	valid:           Valid,             // checked on every element; nil when there is no check
 }
 
 // A value given in the schema, as the type of the field it belongs to: one
@@ -179,6 +181,15 @@ Switch_Case :: struct {
 	node:  ^Node,
 }
 
+// A parse instance of a set (Kaitai's instances with pos) is a field read
+// at offset pos, an Int expression, in the stream that the set instance it
+// belongs to is read from; reading it does not move that stream. Each is
+// read when an expression first refers to it, which can be from any field
+// of the set, or else after the set's children, in order, so that every
+// one is in the decoded tree. Its cond is evaluated before pos. Its values
+// are in its own slot of the set instance: those of the parse instances
+// come first, in order, before the children's.
+
 // The set instance was read as: node itself, or for a switch-on field the
 // case it records.
 instance_set :: proc(node: ^Node, instance: ^fld.Instance) -> ^Node {
@@ -188,17 +199,18 @@ instance_set :: proc(node: ^Node, instance: ^fld.Instance) -> ^Node {
 	return sw.cases[instance.choice].node
 }
 
-// The number of slots in an instance of set: one for each child and each
-// of its bit fields. A front end records it in set.slot_count.
+// The number of slots in an instance of set: one for each parse instance,
+// child and bit field. A front end records it in set.slot_count.
 count_slots :: proc(set: ^Node) -> int {
-	n := len(set.children)
+	n := len(set.parse_instances) + len(set.children)
 	for child in set.children do n += len(child.bits)
 	return n
 }
 
-// The slot of child index of set; its bit fields follow it, in order.
+// The slot of child index of set; its bit fields follow it, in order. Parse
+// instance k of set is in slot k.
 slot_of :: proc(set: ^Node, index: int) -> int {
-	slot := index
+	slot := len(set.parse_instances) + index
 	for child in set.children[:index] do slot += len(child.bits)
 	return slot
 }

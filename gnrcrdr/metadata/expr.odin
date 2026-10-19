@@ -120,7 +120,8 @@ Instance :: struct {
 
 // The values of field node in the instance base, from its slot there. A
 // field read once gives its value (type Int, Bytes or Struct), any other
-// field all of its values (Array).
+// field all of its values (Array). node can be a parse instance, which is
+// read first if it has not been.
 Field_Ref :: struct {
 	base: ^Expr,
 	node: ^Node,
