@@ -30,7 +30,6 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    pos: 1\n", .Unsupported, 7, 5, "attribute a: pos is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    process: xor(1)\n", .Unsupported, 7, 5, "process is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: str\n    terminator: 0\n", .Unsupported, 7, 5, "terminator is not supported"},
-	{HEAD + "seq:\n  - id: a\n    size-eos: true\n", .Unsupported, 6, 5, "size-eos is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    sizee: 1\n", .Invalid, 7, 5, `attribute a: unknown key "sizee"`},
 	{HEAD + "params:\n  - id: p\n", .Unsupported, 4, 1, "params is not supported"},
 	{HEAD + "sequence: []\n", .Invalid, 4, 1, `the top level: unknown key "sequence"`},
@@ -64,7 +63,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - type: u1\n", .Unsupported, 5, 5, "an attribute in type t has no id"},
 	{HEAD + "seq:\n  - id: A\n    type: u1\n", .Invalid, 5, 9, `id "A" is not an identifier`},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n  - id: a\n    type: u1\n", .Invalid, 7, 9, "id a is already used (line 5, column 9)"},
-	{HEAD + "seq:\n  - id: a\n", .Invalid, 5, 5, "a needs a type, a size or contents"},
+	{HEAD + "seq:\n  - id: a\n", .Invalid, 5, 5, "a needs a type, a size, size-eos or contents"},
+	{HEAD + "seq:\n  - id: a\n    size-eos: false\n", .Invalid, 5, 5, "a needs a type, a size, size-eos or contents"},
 
 	// types
 	{HEAD + "seq:\n  - id: a\n    type: u3\n", .Invalid, 6, 11, "a: unknown type u3"},
@@ -72,12 +72,19 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\nseq:\n  - id: a\n    type: u2\n", .Invalid, 5, 11, "a: u2 needs le or be, or meta endian"},
 	{HEAD + "seq:\n  - id: a\n    type: strz\n    encoding: ASCII\n", .Unsupported, 6, 11, "a: type strz is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: b3\n", .Unsupported, 6, 11, "a: type b3 is not supported"},
-	{HEAD + "seq:\n  - id: a\n    type: str\n    encoding: ASCII\n", .Unsupported, 6, 11, "a: str without size is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: str\n    encoding: ASCII\n", .Unsupported, 6, 11, "a: str without size or size-eos is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: str\n    size: 1\n", .Invalid, 6, 11, "a: str needs an encoding"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    encoding: ASCII\n", .Invalid, 7, 5, "a: encoding applies only to str"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    size: 2\n", .Invalid, 7, 5, "a: size does not apply to u1"},
 	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    seq:\n      - id: b\n        type: s\n", .Unsupported, 9, 5, "type s contains itself"},
 	{HEAD + "seq:\n  - id: a\n    contents: [1]\n    type: u1\n", .Invalid, 7, 5, "a: contents cannot have a type"},
+
+	// size-eos
+	{HEAD + "seq:\n  - id: a\n    size: 1\n    size-eos: true\n", .Invalid, 7, 5, "a: size and size-eos cannot both be given"},
+	{HEAD + "seq:\n  - id: a\n    size-eos: yes\n", .Invalid, 6, 15, `size-eos must be true or false, not "yes"`},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    size-eos: true\n", .Invalid, 7, 5, "a: size-eos does not apply to u1"},
+	{HEAD + "seq:\n  - id: a\n    contents: [1]\n    size-eos: true\n", .Invalid, 7, 5, "a: contents cannot have a size-eos"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    size-eos: true\ntypes:\n  s: {}\n", .Unsupported, 10, 5, "a: size-eos on a switch-on field is not supported"},
 	{HEAD + "seq:\n  - id: a\n    contents: 1\n", .Invalid, 6, 15, "contents: write a byte as a sequence, [1]"},
 	{HEAD + "seq:\n  - id: a\n    contents: [256]\n", .Invalid, 6, 16, "contents: 256 is not a byte"},
 
@@ -467,6 +474,36 @@ t[0].after[0] = 99
 `)
 	expect_dump(t, "substream end", ksy_dump(t, sub, {2, 10, 20, 30, 99}), "error: Unexpected_EOF at 2 in t[0].sub[0].wide[0]")
 	expect_dump(t, "substream too long", ksy_dump(t, sub, {5, 10, 20}), "error: Unexpected_EOF at 1 in t[0].sub[0]")
+
+	// size-eos: the rest of the stream, for a byte array, a str and a
+	// substream; inside a substream, the rest of the substream
+	eos := HEAD + `seq:
+  - id: len
+    type: u1
+  - id: sub
+    type: sub
+    size: len
+  - id: rest
+    type: sub
+    size-eos: true
+types:
+  sub:
+    seq:
+      - id: a
+        type: u1
+      - id: tail
+        size-eos: true
+`
+	expect_dump(t, "size-eos", ksy_dump(t, eos, {2, 1, 2, 3, 4, 5}), `t[0].len[0] = 2
+t[0].sub[0].a[0] = 1
+t[0].sub[0].tail[0] = <1 bytes> 02
+t[0].rest[0].a[0] = 3
+t[0].rest[0].tail[0] = <2 bytes> 04 05
+`)
+	expect_dump(t, "size-eos empty", ksy_dump(t, eos, {1, 1}), "error: Unexpected_EOF at 2 in t[0].rest[0].a[0]")
+	str_eos := HEAD + "seq:\n  - id: s\n    type: str\n    encoding: ASCII\n    size-eos: true\n"
+	expect_dump(t, "str size-eos", ksy_dump(t, str_eos, {'h', 'i'}), "t[0].s[0] = \"hi\"\n")
+	expect_dump(t, "str size-eos empty", ksy_dump(t, str_eos, {}), "t[0].s[0] = \"\"\n")
 
 	// every count on primitives: an expression, -peek, repeat: eos and
 	// repeat: until over _

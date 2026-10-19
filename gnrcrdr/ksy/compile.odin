@@ -21,16 +21,18 @@ import "core:strings"
 //   - meta: id, endian, bit-endian, encoding, ks-version (checked against
 //     KS_VERSION), and title, application, file-extension, xref, license
 //     and tags (ignored); seq, types, instances, enums and doc, doc-ref
-//   - attributes: id, type, size, contents, if, enum, valid, repeat (expr,
-//     eos, until) with repeat-expr and repeat-until, encoding, doc, doc-ref
+//   - attributes: id, type, size, size-eos, contents, if, enum, valid,
+//     repeat (expr, eos, until) with repeat-expr and repeat-until, encoding,
+//     doc, doc-ref
 //   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), str with
-//     size, byte arrays (size without type), user types (with size, read
-//     from a substream), and switch-on whose cases are user types
+//     size or size-eos, byte arrays (size or size-eos without type), user
+//     types (with size or size-eos, read from a substream), and switch-on
+//     whose cases are user types
 //   - value instances
 //   - enums whose values are names (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
-// Not supported yet (Unsupported): terminator, strz, size-eos, bit types
+// Not supported yet (Unsupported): terminator, strz, bit types
 // (b1-b64), instances other than value instances, size on a switch-on
 // field, and any valid constant that is not an integer or string literal.
 
@@ -224,10 +226,10 @@ TOP_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "do
 TYPE_UNSUPPORTED :: []string{"params", "to-string"}
 
 @(private = "file")
-ATTR_ALLOWED :: []string{"id", "type", "size", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"}
+ATTR_ALLOWED :: []string{"id", "type", "size", "size-eos", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"}
 
 @(private = "file")
-ATTR_UNSUPPORTED :: []string{"terminator", "consume", "include", "eos-error", "pad-right", "size-eos", "process", "io", "pos", "value", "parent"}
+ATTR_UNSUPPORTED :: []string{"terminator", "consume", "include", "eos-error", "pad-right", "process", "io", "pos", "value", "parent"}
 
 // The keys of an instance; only value instances are supported, so the keys
 // of the others are Unsupported.
@@ -647,22 +649,32 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 	user: ^Type_Def
 	switch_node: ^yml.Node
 
+	// size-eos: false is the same as no size-eos
+	size_eos := false
+	if n := get(attr, "size-eos"); n != nil {
+		size_eos = boolean(c, n, "size-eos") or_return
+	}
+	size_eos_key := size_eos ? get_key(attr, "size-eos") : nil
+	if size != nil && size_eos do return nil, fail(c, .Invalid, size_eos_key, "%s: size and size-eos cannot both be given", id)
+	// the key of size or size-eos, whichever is given; nil when neither is
+	size_key := size != nil ? get_key(attr, "size") : size_eos_key
+
 	switch {
 	case contents != nil:
 		if type_node != nil do return nil, fail(c, .Invalid, get_key(attr, "type"), "%s: contents cannot have a type", id)
-		if size != nil do return nil, fail(c, .Invalid, get_key(attr, "size"), "%s: contents cannot have a size", id)
+		if size_key != nil do return nil, fail(c, .Invalid, size_key, "%s: contents cannot have a %s", id, size_key.text)
 		if valid != nil do return nil, fail(c, .Invalid, get_key(attr, "valid"), "%s: contents already checks the value; it cannot have valid", id)
 		bytes := byte_list(c, contents, "contents") or_return
 		node.type = .Blob
 		node.length = mdata.Fixed_Length{len(bytes)}
 		node.valid = mdata.Valid_Eq{bytes}
 	case type_node == nil:
-		if size == nil do return nil, fail(c, .Invalid, attr, "%s needs a type, a size or contents", id)
+		if size_key == nil do return nil, fail(c, .Invalid, attr, "%s needs a type, a size, size-eos or contents", id)
 		node.type = .Blob
 	case type_node.kind == .Map:
 		node.type = .Set
 		switch_node = type_node
-		if size != nil do return nil, fail(c, .Unsupported, get_key(attr, "size"), "%s: size on a switch-on field is not supported", id)
+		if size_key != nil do return nil, fail(c, .Unsupported, size_key, "%s: %s on a switch-on field is not supported", id, size_key.text)
 	case:
 		type_name := expect_scalar(c, type_node, "type") or_return
 		sizes := TYPE_SIZE
@@ -673,10 +685,10 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 			} else if sizes[prim] > 1 && c.endian == nil {
 				return nil, fail(c, .Invalid, type_node, "%s: %s needs le or be, or meta endian", id, type_name)
 			}
-			if size != nil do return nil, fail(c, .Invalid, get_key(attr, "size"), "%s: size does not apply to %s", id, type_name)
+			if size_key != nil do return nil, fail(c, .Invalid, size_key, "%s: %s does not apply to %s", id, size_key.text, type_name)
 		} else if type_name == "str" {
 			node.type = .String
-			if size == nil do return nil, fail(c, .Unsupported, type_node, "%s: str without size is not supported", id)
+			if size_key == nil do return nil, fail(c, .Unsupported, type_node, "%s: str without size or size-eos is not supported", id)
 		} else if type_name == "strz" || is_bit_type(type_name) {
 			return nil, fail(c, .Unsupported, type_node, "%s: type %s is not supported", id, type_name)
 		} else {
@@ -717,6 +729,8 @@ compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.S
 
 	if size != nil {
 		node.length = compile_length(c, size, id, element_scope) or_return
+	} else if size_eos {
+		node.length = mdata.Eos_Length{}
 	}
 
 	if valid != nil {
@@ -919,6 +933,21 @@ compile_expr :: proc(c: ^Compiler, n: ^yml.Node, what: string, scope: expr.Scope
 		c.err.column += strings.rune_count(text[:err.offset]) + (n.style == .Plain ? 0 : 1)
 	}
 	return nil, false
+}
+
+// A boolean: true or false.
+@(private = "file")
+boolean :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (value: bool, ok: bool) {
+	text := expect_scalar(c, n, what) or_return
+	if n.style == .Plain {
+		switch text {
+		case "true":
+			return true, true
+		case "false":
+			return false, true
+		}
+	}
+	return false, fail(c, .Invalid, n, "%s must be true or false, not %q", what, text)
 }
 
 // contents (and the peek extensions): a string, whose UTF-8 bytes are

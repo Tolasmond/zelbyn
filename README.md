@@ -94,14 +94,14 @@ error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]
 |---|---|
 | Top level | `meta`, `seq`, `types`, `instances`, `enums`, `doc`, `doc-ref` |
 | `meta` | `id`, `endian`, `bit-endian`, `encoding`, `ks-version` (0.11 or older, the Kaitai version gnrcrdr follows); `title`, `application`, `file-extension`, `xref`, `license`, `tags` (ignored) |
-| Attributes | `id`, `type`, `size`, `contents`, `if`, `enum`, `valid` (a constant, or `eq`, `min`/`max`, `any-of`), `repeat` (`expr` with `repeat-expr`, `eos`, `until` with `repeat-until`), `encoding`, `doc`, `doc-ref` |
-| Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `str` with `size` (ASCII or UTF-8, kept as bytes, NULs included), byte arrays, user types (not recursive; with `size`, read from a substream of that many bytes), `switch-on` with `cases` whose types are user types, including the `_` default case |
+| Attributes | `id`, `type`, `size`, `size-eos`, `contents`, `if`, `enum`, `valid` (a constant, or `eq`, `min`/`max`, `any-of`), `repeat` (`expr` with `repeat-expr`, `eos`, `until` with `repeat-until`), `encoding`, `doc`, `doc-ref` |
+| Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `str` with `size` or `size-eos` (ASCII or UTF-8, kept as bytes, NULs included), byte arrays, user types (not recursive; with `size` or `size-eos`, read from a substream of those bytes), `switch-on` with `cases` whose types are user types, including the `_` default case |
 | Instances | value instances (`value:`), over the fields and other value instances of their own type. Expressions anywhere can refer to them; they are evaluated each time, and not dumped |
 | Expressions | integer and boolean operators, `?:`, field references, `_parent`, `_root`, `_io.pos`, `_io.size`, `_io.eof` (of the substream, inside one), `.size`, `_index`, `_` in `repeat-until`, enum constants (`kinds::two`) |
 
 A field read once whose `switch-on` matches no case, without a `_` case, is not read, as in Kaitai; a repeated `switch-on` needs a `_` case. Expressions cannot refer to a `switch-on` field. Each element read by `repeat: eos` must consume input, and so must each element of `repeat: until` but the last.
 
-Not supported yet: `terminator`, `strz`, `size-eos`, bit types (`b1`–`b64`), instances other than value instances (`pos`, `io`), `params`, `imports`, attributes without an `id`, `size` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
+Not supported yet: `terminator`, `strz`, bit types (`b1`–`b64`), instances other than value instances (`pos`, `io`), `params`, `imports`, attributes without an `id`, `size` or `size-eos` on a `switch-on` field, cases that are not user types, an `enum` of another type (`a::b`), and `valid` constants other than integer and string literals.
 
 Keys starting with `-` are extensions. The official Kaitai tools ignore them, and gnrcrdr ignores the ones it does not know, as well as `-orig-id` on a type. gnrcrdr's own extensions let `formats/gif89a.ksy` give the same dumps as the SQLite schema it was ported from:
 
