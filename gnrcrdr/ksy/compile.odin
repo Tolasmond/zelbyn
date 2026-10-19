@@ -18,9 +18,9 @@ import "core:strings"
 // ignored, as the official tools ignore them.
 //
 // Supported:
-//   - meta: id, endian, bit-endian, encoding, and title, file-extension,
-//     xref and license (ignored); seq, types, instances, enums and doc,
-//     doc-ref
+//   - meta: id, endian, bit-endian, encoding, ks-version (checked against
+//     KS_VERSION), and title, application, file-extension, xref, license
+//     and tags (ignored); seq, types, instances, enums and doc, doc-ref
 //   - attributes: id, type, size, contents, if, enum, valid, repeat (expr,
 //     eos, until) with repeat-expr and repeat-until, encoding, doc, doc-ref
 //   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), str with
@@ -209,8 +209,8 @@ check_keys :: proc(c: ^Compiler, m: ^yml.Node, keys: Keys) -> bool {
 @(private = "file")
 META_KEYS :: Keys {
 	what        = "meta",
-	allowed     = {"id", "endian", "bit-endian", "encoding", "title", "file-extension", "xref", "license"},
-	unsupported = {"application", "imports", "ks-version", "ks-debug", "ks-opaque-types", "tags"},
+	allowed     = {"id", "endian", "bit-endian", "encoding", "ks-version", "title", "application", "file-extension", "xref", "license", "tags"},
+	unsupported = {"imports", "ks-debug", "ks-opaque-types"},
 	extensions  = {"-orig-id"},
 }
 
@@ -283,6 +283,9 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 	if n := get(meta, "encoding"); n != nil {
 		c.encoding = encoding(c, n) or_return
 	}
+	if n := get(meta, "ks-version"); n != nil {
+		check_ks_version(c, n) or_return
+	}
 
 	top := build_type(c, id, root, nil) or_return
 
@@ -319,6 +322,42 @@ encoding :: proc(c: ^Compiler, n: ^yml.Node) -> (name: string, ok: bool) {
 		return name, true
 	}
 	return "", fail(c, .Unsupported, n, "encoding %q is not supported; only ASCII and UTF-8 are", name)
+}
+
+// The Kaitai Struct version gnrcrdr follows: that of the official compiler
+// tools/kaitai_compare checks it against.
+@(private = "file")
+KS_VERSION :: [3]int{0, 11, 0}
+
+// ks-version is the oldest Kaitai compiler a schema needs, as one to three
+// numbers separated by dots (0.9, 0.10.1). A schema that needs a newer one
+// than KS_VERSION is Unsupported, as the official compiler rejects it.
+@(private = "file")
+check_ks_version :: proc(c: ^Compiler, n: ^yml.Node) -> bool {
+	text := expect_scalar(c, n, "ks-version") or_return
+	version: [3]int
+	count, digits := 1, 0
+	for ch in transmute([]byte)text {
+		switch {
+		case ch == '.' && digits > 0 && count < len(version):
+			count += 1
+			digits = 0
+		// a number past max(int) is not a version, as in Kaitai
+		case ch >= '0' && ch <= '9' && version[count - 1] <= (max(int) - 9) / 10:
+			version[count - 1] = version[count - 1] * 10 + int(ch - '0')
+			digits += 1
+		case:
+			return fail(c, .Invalid, n, "ks-version %q is not a version", text)
+		}
+	}
+	if digits == 0 do return fail(c, .Invalid, n, "ks-version %q is not a version", text)
+
+	follows := KS_VERSION
+	for v, i in version {
+		if v < follows[i] do break
+		if v > follows[i] do return fail(c, .Unsupported, n, "ks-version %s is newer than %v.%v, the Kaitai version gnrcrdr follows", text, follows[0], follows[1])
+	}
+	return true
 }
 
 // -orig-id when the mapping has one, else id.
