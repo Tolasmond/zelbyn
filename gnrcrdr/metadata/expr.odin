@@ -8,6 +8,7 @@ Expr :: struct {
 	type:    Expr_Type,
 	offset:  int, // byte offset in the source text, for errors; -1 when built by a front end
 	variant: Expr_Variant,
+	direct:  Direct, // set on a whole expression by expression.compile; nil on its subexpressions
 }
 
 Expr_Type :: enum {
@@ -149,6 +150,37 @@ Repeat_Element :: struct {
 Value_Ref :: struct {
 	base:     ^Expr,
 	instance: ^Value_Instance,
+}
+
+// A form of a whole expression that the decoder evaluates without walking
+// the tree (§10.5), kept alongside it. It gives what the tree gives
+// whenever the field it reads has a value that fits an int; otherwise the
+// decoder evaluates the tree, which reports the error.
+Direct :: union {
+	Direct_Constant,
+	Direct_Field,
+	Direct_Compare,
+}
+
+// An Int literal, or a Bool one as 0 or 1.
+Direct_Constant :: struct {
+	value: int,
+}
+
+// An Int: the value of an integer field read at most once, in slot of the
+// set instance being decoded, or of _ (the element of a repeat-until just
+// read) when of_element is set.
+Direct_Field :: struct {
+	slot:       int,
+	of_element: bool,
+}
+
+// A Bool: field op constant, where op is a comparison (.Eq to .Ge). A
+// constant on the left is moved to the right, and op reversed.
+Direct_Compare :: struct {
+	field:    Direct_Field,
+	op:       Binary_Op,
+	constant: int,
 }
 
 // True when the field is read at most once in each instance of its parent,
