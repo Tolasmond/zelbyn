@@ -305,15 +305,17 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 @(private = "file")
 value_type :: proc(r: ^Resolver, e: ^mdata.Expr, field: ^mdata.Node, name: string) -> (t: mdata.Expr_Type, ok: bool) {
 	#partial switch field.type {
-	case .Int8, .UInt8, .Int16, .UInt16, .Int32, .UInt32, .Int64, .UInt64:
+	case .Int8, .UInt8, .Int16, .UInt16, .Int32, .UInt32, .Int64, .UInt64, .Bits:
 		return .Int, true
 	case .Blob:
 		return .Bytes, true
+	case .Bool:
+		return .Bool, true
 	case .Set:
 		if field.switch_on != nil do return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a switch-on field; it cannot be used in expressions", name)
 		return .Struct, true
 	}
-	return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a %v; only integer, blob and set fields can be used in expressions", name, field.type)
+	return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a %v; only integer, boolean, blob and set fields can be used in expressions", name, field.type)
 }
 
 @(private = "file")

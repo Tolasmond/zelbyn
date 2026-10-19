@@ -115,6 +115,8 @@ push :: #force_inline proc(s: ^Sink, k: int, v: fld.Value) {
 // its pos, which moves the stream: read_parse_instance puts it back.
 @(private = "file", require_results)
 read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error {
+	if node.align do dat.align_to_byte(&d.r)
+
 	if node.cond != nil {
 		read_it, err := eval_bool(d, node.cond)
 		if err != .None do return fail(d, err, d.r.pos)
@@ -129,6 +131,9 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error 
 			return fail(d, err, d.r.pos)
 		}
 		d.r.pos = pos
+		// unlike Kaitai's runtimes, which keep the bits left over from
+		// whatever was read before the instance
+		dat.align_to_byte(&d.r)
 	}
 
 	count: int
@@ -145,14 +150,16 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error 
 	case mdata.Repeat_Count:
 		return read_repeat(d, s, node, c)
 	case mdata.Eos_Count:
-		for i := 0; d.r.pos < len(d.r.data); i += 1 {
+		for i := 0; !dat.at_eof(&d.r); i += 1 {
+			start, start_bits := d.r.pos, dat.bit_pos(&d.r)
 			reserve_growing(d, s, i + 1)
-			read_element(d, s, node, i, must_progress = true) or_return
+			read_element(d, s, node, i) or_return
+			if dat.bit_pos(&d.r) == start_bits do return no_progress(d, node, i, start)
 		}
 		return .None
 	case mdata.Until_Count:
 		for i := 0;; i += 1 {
-			start := d.r.pos
+			start, start_bits := d.r.pos, dat.bit_pos(&d.r)
 			reserve_growing(d, s, i + 1)
 			read_element(d, s, node, i) or_return
 
@@ -161,10 +168,7 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error 
 			if err != .None do return fail(d, err, d.r.pos)
 			if done do return .None
 
-			if d.r.pos == start {
-				append(&d.path, Path_Segment{node.name, i})
-				return fail(d, .No_Progress, start)
-			}
+			if dat.bit_pos(&d.r) == start_bits do return no_progress(d, node, i, start)
 		}
 	}
 
@@ -200,23 +204,31 @@ read_repeat :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, repeat: mdata.Repe
 		}
 
 		n := len(s.slots[0])
+		start, start_bits := d.r.pos, dat.bit_pos(&d.r)
 		reserve_growing(d, s, n + 1)
-		read_element(d, s, node, n, must_progress = true) or_return
+		read_element(d, s, node, n) or_return
+		if dat.bit_pos(&d.r) == start_bits do return no_progress(d, node, n, start)
 	}
 }
 
+// Fails with .No_Progress for element index of node, which started at
+// start and consumed no input.
+@(private = "file")
+no_progress :: proc(d: ^Decoder, node: ^mdata.Node, index, start: int) -> dat.Read_Error {
+	append(&d.path, Path_Segment{node.name, index})
+	return fail(d, .No_Progress, start)
+}
+
 // Reads element index of node into s, which has room for it: an instance of
-// a set, or a value of any other field and its bit fields. With
-// must_progress, an element that consumes no input is an error.
+// a set, or a value of any other field and its bit fields.
 @(private = "file", require_results)
-read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, must_progress := false) -> dat.Read_Error {
+read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> dat.Read_Error {
 	// on error the segment is left pushed; fail has already copied the path
 	append(&d.path, Path_Segment{node.name, index})
 	start := d.r.pos
 
 	if node.type == .Set {
 		read_instance(d, s, node, index) or_return
-		if must_progress && d.r.pos == start do return fail(d, .No_Progress, start)
 		pop(&d.path)
 		return .None
 	}
@@ -233,11 +245,6 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, must_
 			append(&d.path, Path_Segment{bit.name, index})
 			return fail(d, e, start)
 		}
-	}
-
-	if must_progress && d.r.pos == start {
-		append(&d.path, Path_Segment{node.name, index})
-		return fail(d, .No_Progress, start)
 	}
 	return .None
 }
@@ -396,6 +403,8 @@ read_scalar :: proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.V
 		value = fld.Value(element_bytes(d, node, index) or_return)
 	case .Set:
 		panic("read_scalar: called for a set")
+	case .Bool, .Bits:
+		value, err = read_bit_type(d, node)
 	}
 
 	if err == .None do err = check_valid(value, node.valid)
@@ -437,6 +446,22 @@ trim_bytes :: proc(node: ^mdata.Node, bytes: []byte) -> []byte {
 		if i, found := slice.linear_search(bytes, t.value); found do bytes = bytes[:i + int(t.include)]
 	}
 	return bytes
+}
+
+// Reads an element of node, a bit type.
+@(private = "file", require_results)
+read_bit_type :: proc(d: ^Decoder, node: ^mdata.Node) -> (value: fld.Value, err: dat.Read_Error) {
+	bits := dat.read_bits(&d.r, int(node.width), node.order) or_return
+	if node.type == .Bool do return bits != 0, .None
+	#partial switch mdata.bits_type(int(node.width)) {
+	case .UInt8:
+		return u8(bits), .None
+	case .UInt16:
+		return u16(bits), .None
+	case .UInt32:
+		return u32(bits), .None
+	}
+	return bits, .None
 }
 
 @(private = "file", require_results)

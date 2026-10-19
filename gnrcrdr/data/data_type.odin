@@ -1,6 +1,6 @@
 package data
 
-Data_Type :: enum {
+Data_Type :: enum u8 {
 	Set,
 	Int8,
 	UInt8,
@@ -14,4 +14,6 @@ Data_Type :: enum {
 	Float64,
 	String,
 	Blob,
+	Bool, // a bit type of 1 bit (b1)
+	Bits, // any other bit type (and b1 with an enum): an unsigned integer of Node.width bits, whose values are of the smallest unsigned type that holds them
 }
