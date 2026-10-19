@@ -524,7 +524,9 @@ parse_block_seq :: proc(p: ^Parser, col: int) -> ^Node {
 @(private = "file")
 parse_plain :: proc(p: ^Parser, indent: int, flow: bool) -> (node: ^Node, multiline: bool) {
 	start := mark(p)
-	b := strings.builder_make(p.allocator)
+	// until a line break is folded, the text is the source from start to end
+	b: strings.Builder
+	folded := false
 
 	// blanks and line breaks seen since the last character of the scalar
 	spaces_from, spaces_to := 0, 0
@@ -542,17 +544,24 @@ parse_plain :: proc(p: ^Parser, indent: int, flow: bool) -> (node: ^Node, multil
 			if flow && is_flow_indicator(c) do break scan
 
 			if pending {
-				switch breaks {
-				case 0:
-					strings.write_string(&b, p.src[spaces_from:spaces_to])
-				case 1:
-					strings.write_byte(&b, ' ')
-				case:
-					for _ in 1 ..< breaks do strings.write_byte(&b, '\n')
+				if breaks > 0 && !folded {
+					b = strings.builder_make(p.allocator)
+					strings.write_string(&b, p.src[start.pos:end.pos])
+					folded = true
+				}
+				if folded {
+					switch breaks {
+					case 0:
+						strings.write_string(&b, p.src[spaces_from:spaces_to])
+					case 1:
+						strings.write_byte(&b, ' ')
+					case:
+						for _ in 1 ..< breaks do strings.write_byte(&b, '\n')
+					}
 				}
 				pending, breaks = false, 0
 			}
-			strings.write_byte(&b, c)
+			if folded do strings.write_byte(&b, c)
 			advance(p)
 			end = mark(p)
 		}
@@ -583,7 +592,8 @@ parse_plain :: proc(p: ^Parser, indent: int, flow: bool) -> (node: ^Node, multil
 
 	// leave the reader right after the last character
 	reset(p, end)
-	return new_scalar(p, start, .Plain, strings.to_string(b)), end.line != start.line
+	text := folded ? strings.to_string(b) : strings.clone(p.src[start.pos:end.pos], p.allocator)
+	return new_scalar(p, start, .Plain, text), end.line != start.line
 }
 
 // A single- or double-quoted scalar. Line breaks fold as in a plain
@@ -594,7 +604,11 @@ parse_quoted :: proc(p: ^Parser) -> ^Node {
 	quote := peek(p)
 	style: Style = quote == '"' ? .Double_Quoted : .Single_Quoted
 	advance(p)
-	b := strings.builder_make(p.allocator)
+	// until an escape or a folded line break, the text is the source from
+	// from to the reader; then it is built in b
+	from := p.pos
+	b: strings.Builder
+	built := false
 
 	for {
 		if p.pos >= len(p.src) do return fail_at(p, .Syntax, start, "unterminated quoted scalar")
@@ -607,12 +621,14 @@ parse_quoted :: proc(p: ^Parser) -> ^Node {
 			c := peek(p)
 			if quote == '\'' && c == '\'' {
 				if peek(p, 1) != '\'' do break
+				build_from(p, &b, &built, from)
 				strings.write_byte(&b, '\'')
 				advance(p)
 				advance(p)
 			} else if c == quote {
 				break
 			} else if quote == '"' && c == '\\' {
+				build_from(p, &b, &built, from)
 				if is_break(peek(p, 1)) {
 					// an escaped line break: join the lines with nothing
 					advance(p)
@@ -622,24 +638,30 @@ parse_quoted :: proc(p: ^Parser) -> ^Node {
 				}
 				if !write_escape(p, &b) do return nil
 			} else {
-				strings.write_byte(&b, c)
+				if built do strings.write_byte(&b, c)
 				advance(p)
 			}
 		}
 
 		if peek(p) == quote {
+			text := built ? strings.to_string(b) : strings.clone(p.src[from:p.pos], p.allocator)
 			advance(p)
-			break
+			return new_scalar(p, start, style, text)
 		}
 
 		// blanks and line breaks: kept within a line, folded across lines
 		spaces_from := p.pos
 		for is_blank(peek(p)) do advance(p)
 		if !is_break(peek(p)) {
-			strings.write_string(&b, p.src[spaces_from:p.pos])
+			if built do strings.write_string(&b, p.src[spaces_from:p.pos])
 			continue
 		}
 
+		if !built {
+			b = strings.builder_make(p.allocator)
+			strings.write_string(&b, p.src[from:spaces_from])
+			built = true
+		}
 		breaks := 0
 		for is_blank(peek(p)) || is_break(peek(p)) {
 			if is_break(peek(p)) {
@@ -655,8 +677,16 @@ parse_quoted :: proc(p: ^Parser) -> ^Node {
 			for _ in 1 ..< breaks do strings.write_byte(&b, '\n')
 		}
 	}
+}
 
-	return new_scalar(p, start, style, strings.to_string(b))
+// Starts building a quoted scalar's text in b, from the source from from to
+// the reader, unless it is built already.
+@(private = "file")
+build_from :: proc(p: ^Parser, b: ^strings.Builder, built: ^bool, from: int) {
+	if built^ do return
+	b^ = strings.builder_make(p.allocator)
+	strings.write_string(b, p.src[from:p.pos])
+	built^ = true
 }
 
 // Writes the character a backslash escape stands for, with the reader at
