@@ -18,11 +18,11 @@ decode_byte_order :: proc(t: ^testing.T) {
 	a := arn.arena_allocator(&ff.arena)
 
 	// n: u2be; le: u2le; data: n bytes
-	n := plan_node(2, "n", .UInt16, a)
+	n := plan_node("n", .UInt16, a)
 	n.order = .Big
-	le := plan_node(3, "le", .UInt16, a)
-	data := plan_node(4, "data", .Blob, a)
-	ff.root = plan_node(1, "r", .Set, a, n, le, data)
+	le := plan_node("le", .UInt16, a)
+	data := plan_node("data", .Blob, a)
+	ff.root = plan_node("r", .Set, a, n, le, data)
 	data.length = mdat.Rule_Length{expr = must_compile(t, &ff, "n", ff.root)}
 
 	d: Decoded
@@ -32,9 +32,9 @@ decode_byte_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, d.consumed, 6)
 
 	r := root_instance(&ff, &d)
-	testing.expect_value(t, field_values(r, 2)[0].(u16), 2)
-	testing.expect_value(t, field_values(r, 3)[0].(u16), 0x1234)
-	testing.expect_value(t, len(field_values(r, 4)[0].([]byte)), 2)
+	testing.expect_value(t, field_values(r, "n")[0].(u16), 2)
+	testing.expect_value(t, field_values(r, "le")[0].(u16), 0x1234)
+	testing.expect_value(t, len(field_values(r, "data")[0].([]byte)), 2)
 }
 
 // One field f of type, with count elements, a fixed length for String and
@@ -81,11 +81,11 @@ decode_checks :: proc(t: ^testing.T) {
 		defer mdat.destroy_file_format(&ff)
 		a := arn.arena_allocator(&ff.arena)
 
-		f := plan_node(2, "f", c.type, a)
+		f := plan_node("f", c.type, a)
 		f.count = mdat.Fixed_Count{c.count}
 		f.valid = c.valid
 		if c.type == .String || c.type == .Blob do f.length = mdat.Fixed_Length{c.length}
-		ff.root = plan_node(1, "r", .Set, a, f)
+		ff.root = plan_node("r", .Set, a, f)
 
 		d: Decoded
 		defer destroy_decoded(&d)
@@ -106,15 +106,15 @@ decode_checks :: proc(t: ^testing.T) {
 make_bits_plan :: proc(ff: ^mdat.File_Format) -> (p: ^mdat.Node) {
 	a := arn.arena_allocator(&ff.arena)
 
-	p = plan_node(2, "p", .Int8, a)
+	p = plan_node("p", .Int8, a)
 	p.count = mdat.Fixed_Count{2}
-	p.bits = slice.clone([]mdat.Bit_Field{{id = 3, name = "lo", type = .UInt8, low = 0, high = 3}, {id = 4, name = "hi", type = .Int32, low = 4, high = 7}}, a)
+	p.bits = slice.clone([]mdat.Bit_Field{{name = "lo", type = .UInt8, low = 0, high = 3}, {name = "hi", type = .Int32, low = 4, high = 7}}, a)
 
-	w := plan_node(5, "w", .UInt64, a)
-	w.bits = slice.clone([]mdat.Bit_Field{{id = 6, name = "top", type = .UInt8, low = 60, high = 63}, {id = 7, name = "all", type = .UInt64, low = 0, high = 63}}, a)
+	w := plan_node("w", .UInt64, a)
+	w.bits = slice.clone([]mdat.Bit_Field{{name = "top", type = .UInt8, low = 60, high = 63}, {name = "all", type = .UInt64, low = 0, high = 63}}, a)
 
 	ff.name = "r"
-	ff.root = plan_node(1, "r", .Set, a, p, w)
+	ff.root = plan_node("r", .Set, a, p, w)
 	return
 }
 
@@ -134,20 +134,20 @@ decode_bit_fields :: proc(t: ^testing.T) {
 
 	r := root_instance(&ff, &d)
 	Want :: struct {
-		id:     int,
+		name:   string,
 		values: []fld.Value,
 	}
 	for w in ([?]Want {
-		{2, {i8(-91), i8(0x0f)}},
-		{3, {u8(0x5), u8(0xf)}},
-		{4, {i32(0xa), i32(0)}},
-		{6, {u8(0xf)}},
-		{7, {u64(0xf123_4567_89ab_cdef)}},
+		{"p", {i8(-91), i8(0x0f)}},
+		{"lo", {u8(0x5), u8(0xf)}},
+		{"hi", {i32(0xa), i32(0)}},
+		{"top", {u8(0xf)}},
+		{"all", {u64(0xf123_4567_89ab_cdef)}},
 	}) {
-		got := field_values(r, w.id)
-		if !testing.expectf(t, len(got) == len(w.values), "field %v: %v values, want %v", w.id, len(got), len(w.values)) do continue
+		got := field_values(r, w.name)
+		if !testing.expectf(t, len(got) == len(w.values), "field %v: %v values, want %v", w.name, len(got), len(w.values)) do continue
 		for v, i in got {
-			testing.expectf(t, variant_equal(v, w.values[i]), "field %v[%v] = %v (%T), want %v (%T)", w.id, i, v, v, w.values[i], w.values[i])
+			testing.expectf(t, variant_equal(v, w.values[i]), "field %v[%v] = %v (%T), want %v (%T)", w.name, i, v, v, w.values[i], w.values[i])
 		}
 	}
 

@@ -28,9 +28,9 @@ EXPR_INPUT := []byte{0x05, 0x34, 0x12, 0x03, 0xee, 0xee, 0x0a, 0x0b, 0x0c, 0xd0,
 DATA_POS :: 9 // where data starts in EXPR_INPUT
 
 @(private)
-plan_node :: proc(id: int, name: string, type: dat.Data_Type, a: mem.Allocator, children: ..^mdat.Node) -> ^mdat.Node {
+plan_node :: proc(name: string, type: dat.Data_Type, a: mem.Allocator, children: ..^mdat.Node) -> ^mdat.Node {
 	n := new(mdat.Node, a)
-	n^ = {id = id, name = name, ref_name = name, type = type, count = mdat.Fixed_Count{1}}
+	n^ = {name = name, ref_name = name, type = type, count = mdat.Fixed_Count{1}}
 	if len(children) > 0 do n.children = slice_clone(children, a)
 	n.slot_count = mdat.count_slots(n) // the children's bit fields must be set first
 	return n
@@ -58,11 +58,11 @@ must_compile :: proc(t: ^testing.T, ff: ^mdat.File_Format, text: string, scope: 
 make_expr_plan :: proc(t: ^testing.T, p: ^Expr_Plan) {
 	a := arn.arena_allocator(&p.ff.arena)
 
-	tag := plan_node(12, "tag", .Blob, a)
-	p.hdr = plan_node(10, "hdr", .Set, a, plan_node(11, "n", .UInt8, a), tag)
-	items := plan_node(20, "items", .Set, a, plan_node(21, "v", .UInt8, a))
-	p.data = plan_node(30, "data", .Blob, a)
-	p.root = plan_node(1, "r", .Set, a, plan_node(2, "a", .UInt8, a), plan_node(3, "b", .UInt16, a), p.hdr, items, p.data, plan_node(31, "later", .UInt8, a))
+	tag := plan_node("tag", .Blob, a)
+	p.hdr = plan_node("hdr", .Set, a, plan_node("n", .UInt8, a), tag)
+	items := plan_node("items", .Set, a, plan_node("v", .UInt8, a))
+	p.data = plan_node("data", .Blob, a)
+	p.root = plan_node("r", .Set, a, plan_node("a", .UInt8, a), plan_node("b", .UInt16, a), p.hdr, items, p.data, plan_node("later", .UInt8, a))
 	p.ff.name = "r"
 	p.ff.root = p.root
 
@@ -84,10 +84,10 @@ expression_field_references :: proc(t: ^testing.T) {
 	testing.expect_value(t, d.consumed, DATA_POS + 2)
 
 	r := root_instance(&p.ff, &d)
-	testing.expect_value(t, len(field_values(r, 20)), 3) // items: hdr.n instances
-	tag := field_values(field_instance(r, 10), 12)[0].([]byte)
+	testing.expect_value(t, len(field_values(r, "items")), 3) // items: hdr.n instances
+	tag := field_values(field_instance(r, "hdr"), "tag")[0].([]byte)
 	testing.expect(t, len(tag) == 2 && tag[0] == 0xee && tag[1] == 0xee, "hdr.tag is not the 2 bytes _parent.a - 3")
-	testing.expect_value(t, len(field_values(r, 30)[0].([]byte)), 1) // data: 3 - 2
+	testing.expect_value(t, len(field_values(r, "data")[0].([]byte)), 1) // data: 3 - 2
 }
 
 @(test)
@@ -96,9 +96,9 @@ expression_repeat_index :: proc(t: ^testing.T) {
 	defer mdat.destroy_file_format(&ff)
 	a := arn.arena_allocator(&ff.arena)
 
-	s := plan_node(2, "s", .Blob, a)
+	s := plan_node("s", .Blob, a)
 	s.count = mdat.Fixed_Count{3}
-	ff.root = plan_node(1, "r", .Set, a, s)
+	ff.root = plan_node("r", .Set, a, s)
 	s.length = mdat.Rule_Length{expr = must_compile(t, &ff, "_index", ff.root, in_repeat = true)}
 
 	d: Decoded
@@ -106,7 +106,7 @@ expression_repeat_index :: proc(t: ^testing.T) {
 	decode_bytes(&ff, {1, 2, 3}, &d)
 	if !testing.expectf(t, d.err.kind == .None, "decode: %v at %v (%s)", d.err.kind, d.err.offset, d.err.path) do return
 
-	values := field_values(root_instance(&ff, &d), 2)
+	values := field_values(root_instance(&ff, &d), "s")
 	for v, i in values {
 		testing.expectf(t, len(v.([]byte)) == i, "s[%v] has %v bytes, want %v", i, len(v.([]byte)), i)
 	}
@@ -217,10 +217,10 @@ expression_absent_set :: proc(t: ^testing.T) {
 	a := arn.arena_allocator(&ff.arena)
 
 	// opt: present only when the input starts with 0x21
-	opt := plan_node(2, "opt", .Set, a, plan_node(3, "n", .UInt8, a))
+	opt := plan_node("opt", .Set, a, plan_node("n", .UInt8, a))
 	opt.count = mdat.Marker_Count{markers = slice_marker(mdat.Marker{0, .UInt8, 0x21, .Little}, a)}
-	data := plan_node(4, "data", .Blob, a)
-	ff.root = plan_node(1, "r", .Set, a, opt, data)
+	data := plan_node("data", .Blob, a)
+	ff.root = plan_node("r", .Set, a, opt, data)
 	data.length = mdat.Rule_Length{expr = must_compile(t, &ff, "opt.n - 0x21", ff.root)}
 
 	present: Decoded

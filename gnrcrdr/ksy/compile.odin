@@ -101,7 +101,6 @@ compile :: proc(src: string, file_format: ^mdata.File_Format, path := "", import
 Compiler :: struct {
 	allocator:       mem.Allocator, // the File_Format's arena
 	scratch:         mem.Allocator, // for what only compiling needs: the YAML documents, types, maps; the File_Format's arena too, freed with it, so the plan uses the documents' strings as they are
-	next_id:         int,
 	schema:          ^Schema,              // the one whose types are being compiled
 	imported:        map[string]^Type_Def, // the top-level type of each schema read from a file, by its cleaned path; in scratch
 	import_paths:    []string,
@@ -525,9 +524,8 @@ display_name :: proc(c: ^Compiler, m: ^yml.Node, id: string) -> (name: string, o
 
 @(private = "file")
 new_node :: proc(c: ^Compiler, name, ref_name: string) -> ^mdata.Node {
-	c.next_id += 1
 	node := new(mdata.Node, c.allocator)
-	node^ = {id = c.next_id, name = name, ref_name = ref_name, order = c.schema.endian.? or_else .Little}
+	node^ = {name = name, ref_name = ref_name, order = c.schema.endian.? or_else .Little}
 	return node
 }
 
@@ -1452,9 +1450,8 @@ compile_bits :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Type
 			return nil, fail(c, .Invalid, item, "%s: %s has bits %v to %v, not within 0 to %v", id, bit_id, low, high, width - 1)
 		}
 
-		c.next_id += 1
 		name := display_name(c, item, bit_id) or_return
-		bits[i] = {id = c.next_id, name = name, low = low, high = high}
+		bits[i] = {name = name, low = low, high = high}
 		switch count := high - low + 1; {
 		case count <= 8:
 			bits[i].type = .UInt8

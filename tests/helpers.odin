@@ -65,7 +65,7 @@ destroy_decoded :: proc(d: ^Decoded) {
 }
 
 // A decoded set instance and the set it was read as, so that tests can
-// look its fields up by node id or name.
+// look its fields up by name.
 Set_Instance :: struct {
 	instance: ^fld.Instance,
 	set:      ^mdat.Node,
@@ -82,51 +82,27 @@ root_instance :: proc(ff: ^mdat.File_Format, d: ^Decoded) -> Set_Instance {
 	return instance_of(d.tree.root[0], ff.root)
 }
 
-// The values of a field of s: by node id (a field or bit field) or by
-// .ksy id (a field). nil when the set has none.
-field_values :: proc {
-	field_values_by_id,
-	field_values_by_name,
-}
-
-field_values_by_id :: proc(s: Set_Instance, id: int) -> []fld.Value {
+// The values of a field of s: a parse instance or a field by its .ksy id,
+// or a bit field by its name. nil when the set has none.
+field_values :: proc(s: Set_Instance, name: string) -> []fld.Value {
 	for p, k in s.set.parse_instances {
-		if p.id == id do return s.instance.slots[k][:]
+		if p.ref_name == name do return s.instance.slots[k][:]
 	}
 	slot := len(s.set.parse_instances)
 	for child in s.set.children {
-		if child.id == id do return s.instance.slots[slot][:]
+		if child.ref_name == name do return s.instance.slots[slot][:]
 		for bit, b in child.bits {
-			if bit.id == id do return s.instance.slots[slot + 1 + b][:]
+			if bit.name == name do return s.instance.slots[slot + 1 + b][:]
 		}
 		slot += 1 + len(child.bits)
 	}
 	return nil
 }
 
-field_values_by_name :: proc(s: Set_Instance, name: string) -> []fld.Value {
+// Instance index of a set field of s, by .ksy id.
+field_instance :: proc(s: Set_Instance, name: string, index := 0) -> Set_Instance {
 	for child in s.set.children {
-		if child.ref_name == name do return field_values_by_id(s, child.id)
-	}
-	return nil
-}
-
-// Instance index of a set field of s, by node id or by .ksy id.
-field_instance :: proc {
-	field_instance_by_id,
-	field_instance_by_name,
-}
-
-field_instance_by_id :: proc(s: Set_Instance, id: int, index := 0) -> Set_Instance {
-	for child in s.set.children {
-		if child.id == id do return instance_of(field_values(s, id)[index], child)
-	}
-	panic("field_instance: no such set field")
-}
-
-field_instance_by_name :: proc(s: Set_Instance, name: string, index := 0) -> Set_Instance {
-	for child in s.set.children {
-		if child.ref_name == name do return instance_of(field_values(s, child.id)[index], child)
+		if child.ref_name == name do return instance_of(field_values(s, name)[index], child)
 	}
 	panic("field_instance: no such set field")
 }
