@@ -27,8 +27,9 @@ markers_match :: proc(r: ^dat.Reader, markers: []mdata.Marker) -> bool {
 	return true
 }
 
-// The byte length of element index of a String or Blob field. A computed
-// length must lie within the rule's bounds.
+// The byte length of element index of a String or Blob field, or of the
+// substream of instance index of a Set. A computed length must lie within
+// the rule's bounds.
 @(private, require_results)
 byte_length :: proc(d: ^Decoder, length: mdata.Length, index: int) -> (n: int, err: dat.Read_Error) {
 	switch l in length {
@@ -38,6 +39,8 @@ byte_length :: proc(d: ^Decoder, length: mdata.Length, index: int) -> (n: int, e
 		n = eval_int(d, l.expr, index) or_return
 		if max_length, ok := l.max.?; ok && n > max_length do return 0, .Invalid_Length
 		if min_length, ok := l.min.?; ok && n < min_length do return 0, .Invalid_Length
+	case mdata.Eos_Length:
+		n = len(d.r.data) - d.r.pos
 	}
 
 	if n < 0 do return 0, .Invalid_Length

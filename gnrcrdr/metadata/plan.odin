@@ -124,10 +124,12 @@ Marker :: struct {
 	order:  endian.Byte_Order,
 }
 
-// The byte length of each String or Blob element.
+// The byte length of each String or Blob element, or of the substream of
+// each Set instance.
 Length :: union {
 	Fixed_Length,
 	Rule_Length,
+	Eos_Length,
 }
 
 Fixed_Length :: struct {
@@ -140,6 +142,9 @@ Rule_Length :: struct {
 	expr:     ^Expr,
 	min, max: Maybe(int),
 }
+
+// The rest of the stream being read (Kaitai's size-eos).
+Eos_Length :: struct {}
 
 // A field whose type is chosen by a value (Kaitai's switch-on): each
 // instance is one of the set of the first case whose value equals on, or of
