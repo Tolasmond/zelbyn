@@ -247,7 +247,8 @@ expect_scalar :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (text: string
 // extensions; any other - key is ignored unless gnrcrdr uses it elsewhere.
 @(private = "file")
 Keys :: struct {
-	what:        string, // for errors: "meta", "attribute \"x\"", ...
+	what:        string, // for errors: "meta", or a format of name, "attribute %s", formatted only for an error
+	name:        string,
 	allowed:     []string,
 	unsupported: []string, // Kaitai keys outside the subset
 	extensions:  []string,
@@ -263,16 +264,21 @@ check_keys :: proc(c: ^Compiler, m: ^yml.Node, keys: Keys) -> bool {
 		switch {
 		case slice.contains(keys.allowed, k), slice.contains(keys.extensions, k):
 		case slice.contains(keys.unsupported, k):
-			return fail(c, .Unsupported, e.key, "%s: %s is not supported", keys.what, k)
+			return fail(c, .Unsupported, e.key, "%s: %s is not supported", keys_what(keys), k)
 		case slice.contains(EXTENSIONS, k):
-			return fail(c, .Invalid, e.key, "%s: the extension %s does not apply here", keys.what, k)
+			return fail(c, .Invalid, e.key, "%s: the extension %s does not apply here", keys_what(keys), k)
 		case strings.has_prefix(k, "-"):
 			// an extension gnrcrdr does not know
 		case:
-			return fail(c, .Invalid, e.key, "%s: unknown key %q", keys.what, k)
+			return fail(c, .Invalid, e.key, "%s: unknown key %q", keys_what(keys), k)
 		}
 	}
 	return true
+}
+
+@(private = "file")
+keys_what :: proc(keys: Keys) -> string {
+	return strings.contains_rune(keys.what, '%') ? fmt.tprintf(keys.what, keys.name) : keys.what
 }
 
 @(private = "file")
@@ -537,19 +543,19 @@ build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_De
 	td^ = {name = name, spec = spec, schema = c.schema, parent = parent}
 
 	if parent != nil {
-		expect_map(c, spec, fmt.tprintf("type %s", name)) or_return
+		if spec.kind != .Map do return nil, fail(c, .Invalid, spec, "type %s must be a mapping", name)
 		if k := get_key(spec, "meta"); k != nil do return nil, fail(c, .Unsupported, k, "type %s: meta in a type is not supported", name)
 		// -orig-id on a type documents its original name; nothing shows it
-		check_keys(c, spec, {what = fmt.tprintf("type %s", name), allowed = TYPE_ALLOWED, unsupported = TYPE_UNSUPPORTED, extensions = {"-orig-id"}}) or_return
+		check_keys(c, spec, {what = "type %s", name = name, allowed = TYPE_ALLOWED, unsupported = TYPE_UNSUPPORTED, extensions = {"-orig-id"}}) or_return
 	}
 
 	if seq := get(spec, "seq"); seq != nil {
 		if seq.kind != .Seq do return nil, fail(c, .Invalid, seq, "seq must be a sequence")
 		for attr in seq.items {
 			expect_map(c, attr, "an attribute") or_return
-			what := "an attribute"
-			if id := get(attr, "id"); id != nil && id.kind == .Scalar do what = fmt.tprintf("attribute %s", id.text)
-			check_keys(c, attr, {what = what, allowed = ATTR_ALLOWED, unsupported = ATTR_UNSUPPORTED, extensions = EXTENSIONS}) or_return
+			keys := Keys{what = "an attribute", allowed = ATTR_ALLOWED, unsupported = ATTR_UNSUPPORTED, extensions = EXTENSIONS}
+			if id := get(attr, "id"); id != nil && id.kind == .Scalar do keys.what, keys.name = "attribute %s", id.text
+			check_keys(c, attr, keys) or_return
 		}
 	}
 
@@ -557,9 +563,9 @@ build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_De
 		expect_map(c, instances, "instances") or_return
 		for e in instances.entries {
 			inst_name := identifier(c, e.key, "instance name") or_return
-			expect_map(c, e.value, fmt.tprintf("instance %s", inst_name)) or_return
+			if e.value.kind != .Map do return nil, fail(c, .Invalid, e.value, "instance %s must be a mapping", inst_name)
 			keys := get(e.value, "value") != nil ? VALUE_INSTANCE_KEYS : PARSE_INSTANCE_KEYS
-			keys.what = fmt.tprintf("instance %s", inst_name)
+			keys.what, keys.name = "instance %s", inst_name
 			check_keys(c, e.value, keys) or_return
 			if get(e.value, "value") == nil && get(e.value, "pos") == nil {
 				return nil, fail(c, .Unsupported, e.key, "instance %s: an instance without pos or value is not supported", inst_name)
@@ -591,7 +597,7 @@ build_enums :: proc(c: ^Compiler, n: ^yml.Node) -> (enums: []expr.Enum, ok: bool
 
 	for e, i in n.entries {
 		name := identifier(c, e.key, "enum name") or_return
-		expect_map(c, e.value, fmt.tprintf("enum %s", name)) or_return
+		if e.value.kind != .Map do return nil, fail(c, .Invalid, e.value, "enum %s must be a mapping", name)
 
 		values := make([]expr.Enum_Value, len(e.value.entries), c.allocator)
 		for v, j in e.value.entries {
@@ -1008,7 +1014,7 @@ chain_with :: proc(c: ^Compiler, types: []^mdata.Node, node: ^mdata.Node) -> []^
 @(private = "file")
 compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, node: ^mdata.Node, scope: expr.Scope) -> bool {
 	keys := SWITCH_KEYS
-	keys.what = fmt.tprintf("%s: type", id)
+	keys.what, keys.name = "%s: type", id
 	check_keys(c, n, keys) or_return
 	on := get(n, "switch-on")
 	if on == nil do return fail(c, .Invalid, n, "%s: a type mapping needs switch-on", id)
@@ -1276,7 +1282,7 @@ compile_valid :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Typ
 	case .Map:
 	}
 
-	check_keys(c, n, {what = fmt.tprintf("%s: valid", id), allowed = {"eq", "min", "max", "any-of"}, unsupported = {"expr", "in-enum"}}) or_return
+	check_keys(c, n, {what = "%s: valid", name = id, allowed = {"eq", "min", "max", "any-of"}, unsupported = {"expr", "in-enum"}}) or_return
 
 	eq, lo, hi, any_of := get(n, "eq"), get(n, "min"), get(n, "max"), get(n, "any-of")
 	forms := int(eq != nil) + int(lo != nil || hi != nil) + int(any_of != nil)
