@@ -34,8 +34,8 @@ import "core:strings"
 //     with size, size-eos or terminator, strz, user types (with size,
 //     size-eos or terminator, read from a substream), and switch-on whose
 //     cases are user types
-//   - value instances, and parse instances: instances with pos and the
-//     keys of an attribute
+//   - value instances, with if and enum, and parse instances: instances
+//     with pos and the keys of an attribute
 //   - params of integer types, bool and bytes, in types and at the top
 //     level of an imported schema, given as t(a, b)
 //   - enums, whose values are names or mappings of id, doc and doc-ref
@@ -165,7 +165,7 @@ parse_schema :: proc(c: ^Compiler, src: string) -> (root: ^yml.Node, ok: bool) {
 // compiling one can add others to the map.
 @(private = "file")
 Instance_Source :: struct {
-	value:     ^yml.Node, // its value: key
+	spec:      ^yml.Node, // its mapping in instances, which has a value key
 	td:        ^Type_Def,
 	set:       ^mdata.Node,
 	compiling: bool,
@@ -324,9 +324,8 @@ BYTES_KEYS :: []string{"size", "size-eos", "terminator", "consume", "include", "
 // attribute, with pos instead of id.
 @(private = "file")
 VALUE_INSTANCE_KEYS :: Keys {
-	allowed     = {"value", "doc", "doc-ref"},
-	unsupported = {"if", "enum"},
-	extensions  = {"-orig-id"},
+	allowed    = {"value", "if", "enum", "doc", "doc-ref"},
+	extensions = {"-orig-id"},
 }
 
 @(private = "file")
@@ -748,11 +747,11 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 	instances := make([dynamic]^mdata.Value_Instance, c.allocator)
 	parse_instances := make([dynamic]^mdata.Node, c.allocator)
 	for e in td.instances {
-		if value := get(e.value, "value"); value != nil {
+		if get(e.value, "value") != nil {
 			inst := new(mdata.Value_Instance, c.allocator)
 			inst.name = e.key.text
 			src := new(Instance_Source, c.scratch)
-			src^ = {value = value, td = td, set = set}
+			src^ = {spec = e.value, td = td, set = set}
 			c.instances[inst] = src
 			append(&instances, inst)
 		} else {
@@ -865,15 +864,17 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 	return true
 }
 
-// Compiles the expression of inst, a value instance of set. It can use the
-// fields of set compiled so far and its other value instances.
+// Compiles the if and the expression of inst, a value instance of set.
+// They can use the fields of set compiled so far and its other value
+// instances. An enum keeps the integer, as on an attribute.
 @(private = "file")
 compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Instance) -> bool {
 	src := c.instances[inst]
 	schema := c.schema
 	defer c.schema = schema
 	c.schema = src.td.schema
-	if src.compiling do return fail(c, .Invalid, src.value, "value instance %s refers to itself", inst.name)
+	value := get(src.spec, "value")
+	if src.compiling do return fail(c, .Invalid, value, "value instance %s refers to itself", inst.name)
 	src.compiling = true
 	defer src.compiling = false
 
@@ -882,9 +883,16 @@ compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Inst
 	scope := scope_of(c, src.td, types)
 	scope.instance = true
 
-	e := compile_expr(c, src.value, "value", scope, .Unresolved) or_return
+	if n := get(src.spec, "if"); n != nil {
+		inst.cond = compile_expr(c, n, "if", scope, .Bool) or_return
+	}
+	e := compile_expr(c, value, "value", scope, .Unresolved) or_return
 	if e.type != .Int && e.type != .Bool {
-		return fail(c, .Unsupported, src.value, "value instance %s: only integer and boolean values are supported", inst.name)
+		return fail(c, .Unsupported, value, "value instance %s: only integer and boolean values are supported", inst.name)
+	}
+	if n := get(src.spec, "enum"); n != nil {
+		if e.type != .Int do return fail(c, .Invalid, get_key(src.spec, "enum"), "value instance %s: enum applies only to integer values", inst.name)
+		check_enum(c, n, inst.name, scope.enums) or_return
 	}
 	inst.expr = e
 	return true

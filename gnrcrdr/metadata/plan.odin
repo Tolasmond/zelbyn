@@ -237,9 +237,12 @@ slot_of :: proc(set: ^Node, index: int) -> int {
 // A value instance of a set (Kaitai's instances with value:): an
 // expression over the set's fields and other value instances. It is
 // evaluated for an instance of the set each time an expression refers to
-// it, and is not read, so it has no values in the decoded tree.
+// it, and is not read, so it has no values in the decoded tree. When cond
+// is false it has no value, and a reference to it fails as one to a field
+// with none does (Absent_Field).
 Value_Instance :: struct {
 	name: string, // the .ksy id
+	cond: ^Expr,  // a Bool expression over the same fields, evaluated first; nil when it always has a value (Kaitai's if)
 	expr: ^Expr,  // Int or Bool; nil only while the schema is being compiled
 }
 
