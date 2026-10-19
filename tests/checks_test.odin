@@ -1,10 +1,10 @@
 package tests
 
+import arn "../gnrcrdr/arena"
 import dat "../gnrcrdr/data"
 import dmp "../gnrcrdr/dump"
 import fld "../gnrcrdr/field"
 import mdat "../gnrcrdr/metadata"
-import "core:mem/virtual"
 import "core:slice"
 import "core:strings"
 import "core:testing"
@@ -15,7 +15,7 @@ import "core:testing"
 decode_byte_order :: proc(t: ^testing.T) {
 	ff: mdat.File_Format
 	defer mdat.destroy_file_format(&ff)
-	a := virtual.arena_allocator(&ff.arena)
+	a := arn.arena_allocator(&ff.arena)
 
 	// n: u2be; le: u2le; data: n bytes
 	n := plan_node(2, "n", .UInt16, a)
@@ -79,7 +79,7 @@ decode_checks :: proc(t: ^testing.T) {
 	for c in CHECK_CASES {
 		ff: mdat.File_Format
 		defer mdat.destroy_file_format(&ff)
-		a := virtual.arena_allocator(&ff.arena)
+		a := arn.arena_allocator(&ff.arena)
 
 		f := plan_node(2, "f", c.type, a)
 		f.count = mdat.Fixed_Count{c.count}
@@ -104,7 +104,7 @@ decode_checks :: proc(t: ^testing.T) {
 // (bits 4-7, an s4), and w (a u8) has top (bits 60-63) and all (0-63).
 @(private = "file")
 make_bits_plan :: proc(ff: ^mdat.File_Format) -> (p: ^mdat.Node) {
-	a := virtual.arena_allocator(&ff.arena)
+	a := arn.arena_allocator(&ff.arena)
 
 	p = plan_node(2, "p", .Int8, a)
 	p.count = mdat.Fixed_Count{2}

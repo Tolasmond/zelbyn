@@ -1,5 +1,6 @@
 package ksy
 
+import arn "../arena"
 import dat "../data"
 import expr "../expression"
 import mdata "../metadata"
@@ -7,7 +8,6 @@ import yml "../yaml"
 import "core:encoding/endian"
 import "core:fmt"
 import "core:mem"
-import "core:mem/virtual"
 import "core:os"
 import "core:path/filepath"
 import "core:slice"
@@ -81,10 +81,10 @@ read_file_format :: proc(path: string, file_format: ^mdata.File_Format, import_p
 // it is "", relative imports are found in the current directory.
 @(require_results)
 compile :: proc(src: string, file_format: ^mdata.File_Format, path := "", import_paths: []string = nil) -> Error {
-	scratch: virtual.Arena
-	defer virtual.arena_destroy(&scratch)
+	scratch: arn.Arena
+	defer arn.arena_destroy(&scratch)
 
-	c := Compiler{allocator = virtual.arena_allocator(&file_format.arena), scratch = virtual.arena_allocator(&scratch), import_paths = import_paths}
+	c := Compiler{allocator = arn.arena_allocator(&file_format.arena), scratch = arn.arena_allocator(&scratch), import_paths = import_paths}
 	c.instances = make(map[^mdata.Value_Instance]^Instance_Source, c.scratch)
 	c.parse_instances = make(map[^mdata.Node]^Parse_Source, c.scratch)
 	c.imported = make(map[string]^Type_Def, c.scratch)

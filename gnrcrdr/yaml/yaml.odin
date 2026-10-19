@@ -1,8 +1,8 @@
 package yaml
 
+import arn "../arena"
 import "core:fmt"
 import "core:mem"
-import "core:mem/virtual"
 import "core:strings"
 
 // The subset of YAML that .ksy files use (decision record §7.1): block
@@ -51,11 +51,11 @@ Entry :: struct {
 // in arena; root is nil for a stream with no document.
 Document :: struct {
 	root:  ^Node,
-	arena: virtual.Arena,
+	arena: arn.Arena,
 }
 
 destroy_document :: proc(doc: ^Document) {
-	virtual.arena_destroy(&doc.arena)
+	arn.arena_destroy(&doc.arena)
 	doc^ = {}
 }
 
@@ -81,8 +81,8 @@ destroy_error :: proc(err: ^Error) {
 // to src. On error doc may be partly filled; destroy it either way.
 @(require_results)
 parse :: proc(src: string, doc: ^Document) -> Error {
-	assert(doc.arena.curr_block == nil && doc.root == nil, "parse: doc must be zero or destroyed")
-	p := Parser{src = src, line = 1, allocator = virtual.arena_allocator(&doc.arena)}
+	assert(doc.arena.block == nil && doc.root == nil, "parse: doc must be zero or destroyed")
+	p := Parser{src = src, line = 1, allocator = arn.arena_allocator(&doc.arena)}
 
 	if strings.has_prefix(src, "\xef\xbb\xbf") do p.pos, p.line_start = 3, 3
 
