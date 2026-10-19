@@ -9,8 +9,7 @@ Read_Error :: enum {
 	Unexpected_EOF,        // a read needs more bytes than remain
 	Offset_Out_Of_Range,   // a peek offset is outside [0, len(data)), or a parse instance's pos outside [0, len(data)]
 	Unsupported_Type,      // the data type cannot be read as an integer (Set, UInt64, floats, String, Blob)
-	Invalid_Length,        // a computed count or length is negative, or outside its field's bounds
-	Repeat_Limit_Exceeded, // a count exceeds its field's maximum
+	Invalid_Length,        // a computed count or length is negative
 	No_Progress,           // an element of a repeat that must consume input consumed none
 	Division_By_Zero,      // an expression divides by zero, or takes a remainder by zero
 	Integer_Overflow,      // an expression's result, or an integer field it reads, does not fit in an int

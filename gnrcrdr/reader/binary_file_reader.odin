@@ -137,7 +137,7 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error 
 		count = c.n
 	case mdata.Rule_Count:
 		n, err := eval_int(d, c.expr)
-		if err == .None do err = check_count(n, c.max)
+		if err == .None && n < 0 do err = .Invalid_Length
 		if err != .None do return fail(d, err, d.r.pos)
 		count = n
 	case mdata.Marker_Count:
@@ -185,8 +185,8 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node) -> dat.Read_Error 
 }
 
 // Reads elements of node while its continuator is present or until its
-// terminator is found. The terminator is required, the repeat count is
-// limited, and every element must consume input.
+// terminator is found. The terminator is required, and every element must
+// consume input.
 @(private = "file", require_results)
 read_repeat :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, repeat: mdata.Repeat_Count) -> dat.Read_Error {
 	for {
@@ -200,10 +200,6 @@ read_repeat :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, repeat: mdata.Repe
 		}
 
 		n := len(s.slots[0])
-		if e := check_count(n + 1, repeat.max); e != .None {
-			return fail(d, e, d.r.pos)
-		}
-
 		reserve_growing(d, s, n + 1)
 		read_element(d, s, node, n, must_progress = true) or_return
 	}
