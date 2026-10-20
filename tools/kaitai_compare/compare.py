@@ -12,7 +12,10 @@ array of its values, set instances objects, byte arrays hex. Parse
 instances (instances with pos) are compared as fields. A field with no
 values (not read because of if or switch-on, or an empty repeat) is left
 out on both sides, as are value instances and params, which gnrcrdr does
-not dump. Field names are compared as the generated code spells them.
+not dump. Field names are compared as the generated code spells them,
+from their ids: gnrcrdr's names, which are the -orig-id where there is
+one, are mapped back to the id. Integers beyond 2^53, which the
+JavaScript runtime holds as doubles, are compared as doubles.
 Imports are read relative to the importing schema, or for an absolute one,
 from the directories of --import-path (separated as in PATH), and given to
 both. Exits 1 if any file differs, or fails to decode on either side.
@@ -41,10 +44,38 @@ def camel(name):
     return first + ''.join(p[:1].upper() + p[1:] for p in rest)
 
 
+# The id of each -orig-id in the schema and its imports, and every id
+# (orig_ids).
+ORIG_IDS = {}
+IDS = set()
+
+
+def orig_ids(ksy):
+    """Adds the -orig-id of every attribute and instance of ksy, and of its
+    types, to ORIG_IDS, mapped to its id, and every id to IDS."""
+    entries = [(a.get('id'), a) for a in ksy.get('seq') or [] if isinstance(a, dict)]
+    entries += list((ksy.get('instances') or {}).items())
+    for id, spec in entries:
+        IDS.add(id)
+        orig = isinstance(spec, dict) and spec.get('-orig-id')
+        if not orig or orig == id:
+            continue
+        if ORIG_IDS.setdefault(orig, id) != id:
+            sys.exit('-orig-id %s is given to %s and %s, which this script cannot tell apart' % (orig, ORIG_IDS[orig], id))
+    for t in (ksy.get('types') or {}).values():
+        if isinstance(t, dict):
+            orig_ids(t)
+
+
+def name(dumped):
+    """A name in gnrcrdr's dump as the generated code spells it."""
+    return camel(ORIG_IDS.get(dumped, dumped))
+
+
 def ours(value):
     """gnrcrdr's JSON dump of a set instance in decode.js's shape."""
     if isinstance(value, dict):
-        return {camel(k): [ours(x) for x in v] for k, v in value.items() if v}
+        return {name(k): [ours(x) for x in v] for k, v in value.items() if v}
     return value
 
 
@@ -94,6 +125,8 @@ def first_difference(a, b, path):
                     return d
         return None
     first_difference.values += 1
+    if type(a) is int and type(b) is int and max(abs(a), abs(b)) > 2**53:
+        return None if float(a) == float(b) else (path, a, b)
     return None if a == b and type(a) is type(b) else (path, a, b)
 
 
@@ -105,8 +138,8 @@ def dump_offsets(text):
         path = line.split(' = ', 1)[0]
         segments = []
         for s in path.split('.'):
-            name, index = s.split('[', 1)
-            segments.append(camel(name) + '[' + index)
+            field, index = s.split('[', 1)
+            segments.append(name(field) + '[' + index)
         out['.'.join(segments)] = int(line.rsplit(' @0x', 1)[1], 16)
     return out
 
@@ -138,6 +171,11 @@ def main():
     root_name = ksy['meta']['id']
     imports = {}
     read_imports(schema, ksy, import_paths, imports, {})
+    for k in [ksy] + list(imports.values()):
+        orig_ids(k)
+    for orig in ORIG_IDS:
+        if orig in IDS:
+            sys.exit('%s is both an id and an -orig-id, which this script cannot tell apart' % orig)
 
     with tempfile.TemporaryDirectory() as tmp:
         schema_json = os.path.join(tmp, 'schema.json')
