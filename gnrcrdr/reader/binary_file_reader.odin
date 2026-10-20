@@ -284,7 +284,11 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 	if node.type == .Set {
 		read_instance(d, s, node, index, SPANS) or_return
 		// a switch-on that chooses no set reads nothing
-		when SPANS do if len(s.slots[0]) > index do set_span(d, s, 0, start)
+		read := len(s.slots[0]) > index
+		when SPANS do if read do set_span(d, s, 0, start)
+		if node.valid != nil && read {
+			if e := check_valid(d, s.slots[0][index], node.valid, index); e != .None do return fail(d, e, start)
+		}
 		pop(&d.path)
 		return .None
 	}
@@ -292,6 +296,9 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 	value := read_scalar(d, node, index) or_return
 	push(s, 0, value)
 	when SPANS do set_span(d, s, 0, start)
+	if node.valid != nil {
+		if e := check_valid(d, value, node.valid, index); e != .None do return fail(d, e, start)
+	}
 	pop(&d.path)
 
 	for bit, b in node.bits {
@@ -299,9 +306,11 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 		push(s, 1 + b, bit_value)
 		when SPANS do set_span(d, s, 1 + b, start)
 
-		if e := check_valid(bit_value, bit.valid); e != .None {
-			append(&d.path, Path_Segment{bit.name, index})
-			return fail(d, e, start)
+		if bit.valid != nil {
+			if e := check_constant(bit_value, bit.valid); e != .None {
+				append(&d.path, Path_Segment{bit.name, index})
+				return fail(d, e, start)
+			}
 		}
 	}
 	return .None
@@ -495,7 +504,7 @@ clone_dynamic :: proc(d: ^Decoder, values: []$T) -> [dynamic]T {
 	return a
 }
 
-// Reads element index of node, a field that is not a set, and checks it.
+// Reads element index of node, a field that is not a set.
 // Inlined into each read_element, with and without spans: a call for every
 // value costs 8% more decode instructions.
 @(private = "file", require_results)
@@ -533,7 +542,6 @@ read_scalar :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) ->
 		value, err = read_bit_type(d, node)
 	}
 
-	if err == .None do err = check_valid(value, node.valid)
 	if err != .None do return nil, fail(d, err, start)
 	return value, .None
 }

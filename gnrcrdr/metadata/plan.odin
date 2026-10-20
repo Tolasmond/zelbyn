@@ -52,13 +52,16 @@ Scalar :: union {
 }
 
 // A check on every value of a field (Kaitai's contents and valid), applied
-// as the value is read. Every constant has the field's type. A value that
-// fails it is a decode error: .Not_Equal, .Less_Than_Min,
-// .Greater_Than_Max or .Not_Any_Of.
+// as the value is read, after it is in the tree. Every constant has the
+// field's type. A value that fails it is a decode error: .Not_Equal,
+// .Less_Than_Min, .Greater_Than_Max, .Not_Any_Of, .Not_In_Enum or
+// .Expr_False.
 Valid :: union {
 	Valid_Eq,
 	Valid_Range,
 	Valid_Any_Of,
+	Valid_In_Enum,
+	Valid_Expr,
 }
 
 Valid_Eq :: struct {
@@ -73,6 +76,25 @@ Valid_Range :: struct {
 
 Valid_Any_Of :: struct {
 	values: []Scalar,
+}
+
+// An integer field with an enum: the value is one of the enum's (Kaitai's
+// in-enum). values is sorted.
+Valid_In_Enum :: struct {
+	values: []int,
+}
+
+// A check that needs expressions: valid: expr, or eq, min, max or any-of
+// with a value that is not a literal. Each cond is a Bool expression in
+// which _ is the value (Repeat_Element), evaluated in order; the first
+// that is false fails the value with its err.
+Valid_Expr :: struct {
+	checks: []Valid_Check,
+}
+
+Valid_Check :: struct {
+	cond: ^Expr,
+	err:  dat.Read_Error,
 }
 
 // How many instances (Set) or elements (other types) a field has in each
@@ -265,5 +287,5 @@ Bit_Field :: struct {
 	name:      string,
 	type:      dat.Data_Type,
 	low, high: int,
-	valid:     Valid, // as for Node
+	valid:     Valid, // as for Node, but only Valid_Eq, Valid_Range or Valid_Any_Of
 }

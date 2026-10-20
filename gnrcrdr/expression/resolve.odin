@@ -11,9 +11,9 @@ Scope :: struct {
 	types:     []^mdata.Node,
 	own_root:  bool,        // types[0] is the top level of an imported schema, its _root, but not the root of the decoded tree
 	in_repeat: bool,        // the expression is evaluated for each element of a repeated field, so _index is defined
-	element:   ^mdata.Node, // repeat-until: the field whose element _ is; nil elsewhere
+	element:   ^mdata.Node, // repeat-until and valid: the field whose element _ is; nil elsewhere
 	enums:     []Enum,      // the enums enum constants may name; the first with a name is used
-	instance:  bool,        // a value instance's expression: it can use only the fields and value instances of the last type
+	instance:  bool,        // a value instance's expression, which cannot use _io
 
 	// Called when an expression refers to a value instance whose expr is
 	// nil, or a parse instance whose pos is nil, to compile it; on failure
@@ -267,9 +267,9 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 	types := r.scope.types
 	assert(len(types) > 0, "resolve: empty scope")
 
-	if r.scope.instance && len(name) > 0 && name[0] == '_' {
-		return fail(r, .Unsupported, e.offset, "%s in a value instance is not supported; it can use only the fields and value instances of its type", name)
-	}
+	// a value instance is evaluated for instances that may no longer be
+	// decoded, whose streams are not kept
+	if r.scope.instance && name == "_io" do return fail(r, .Unsupported, e.offset, "_io in a value instance is not supported")
 
 	switch name {
 	case "_root":
