@@ -319,13 +319,24 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPA
 	set := node
 	choice := 0
 	if sw := node.switch_on; sw != nil {
-		on, err := eval_int(d, sw.on, index)
-		if err != .None do return fail(d, err, d.r.pos)
 		set, choice = sw.default, fld.DEFAULT_CASE
-		for c, i in sw.cases {
-			if c.value == on {
-				set, choice = c.node, i
-				break
+		if sw.on.type == .String {
+			on, err := eval_string(d, sw.on, index)
+			if err != .None do return fail(d, err, d.r.pos)
+			for c, i in sw.cases {
+				if c.text == on {
+					set, choice = c.node, i
+					break
+				}
+			}
+		} else {
+			on, err := eval_int(d, sw.on, index)
+			if err != .None do return fail(d, err, d.r.pos)
+			for c, i in sw.cases {
+				if c.value == on {
+					set, choice = c.node, i
+					break
+				}
 			}
 		}
 		if set == nil do return read_unchosen(d, s, node, index)

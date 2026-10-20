@@ -792,13 +792,16 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 		children := make([dynamic]^mdata.Node, c.allocator)
 		after_bits := false
 		for attr in seq.items {
-			child := compile_attr(c, td, attr, scope, &ids) or_return
+			child := new_attr(c, td, attr, &ids) or_return
+			// a field's own expressions can refer to it, as in Kaitai: in a
+			// repeat, to the elements read so far
+			append(&children, child)
+			set.children = children[:]
+			compile_field(c, td, attr, child, scope, &ids) or_return
 			// as in Kaitai, a field that follows a bit type, and is not one,
 			// starts at a byte
 			child.align = after_bits && child.width == 0
 			after_bits = child.width > 0
-			append(&children, child)
-			set.children = children[:]
 		}
 	}
 	slots := mdata.count_slots(set)
@@ -890,8 +893,8 @@ compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Inst
 		inst.cond = compile_expr(c, n, "if", scope, .Bool) or_return
 	}
 	e := compile_expr(c, value, "value", scope, .Unresolved) or_return
-	if e.type != .Int && e.type != .Bool {
-		return fail(c, .Unsupported, value, "value instance %s: only integer and boolean values are supported", inst.name)
+	if e.type != .Int && e.type != .Bool && e.type != .String {
+		return fail(c, .Unsupported, value, "value instance %s: only integer, boolean and string values are supported", inst.name)
 	}
 	if n := get(src.spec, "enum"); n != nil {
 		if e.type != .Int do return fail(c, .Invalid, get_key(src.spec, "enum"), "value instance %s: enum applies only to integer values", inst.name)
@@ -985,18 +988,17 @@ bit_type :: proc(name: string) -> (width: int, order: Maybe(endian.Byte_Order), 
 	return width, order, width <= 64
 }
 
-// A seq attribute: its id, then the rest as compile_field compiles it.
+// The node of a seq attribute, with its id and name, for compile_field to
+// compile the rest into.
 @(private = "file")
-compile_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, scope: expr.Scope, ids: ^[dynamic]^yml.Node) -> (node: ^mdata.Node, ok: bool) {
+new_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, ids: ^[dynamic]^yml.Node) -> (node: ^mdata.Node, ok: bool) {
 	id_node := get(attr, "id")
 	if id_node == nil do return nil, fail(c, .Unsupported, attr, "an attribute in type %s has no id; attributes without one are not supported", td.name)
 	id := identifier(c, id_node, "id") or_return
 	claim_id(c, ids, id, id_node) or_return
 
 	name := display_name(c, attr, id) or_return
-	node = new_node(c, name, id)
-	compile_field(c, td, attr, node, scope, ids) or_return
-	return node, true
+	return new_node(c, name, id), true
 }
 
 // Compiles the keys of attr, an attribute or a parse instance, other than
@@ -1110,9 +1112,11 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 		node.bits = compile_bits(c, bits, id, node.type, ids) or_return
 	}
 
+	// the arguments after the type's fields, which they can refer to: in a
+	// repeat, through the elements read so far
 	if user != nil {
-		node.args = compile_args(c, type_node, id, user, call, element_scope) or_return
 		compile_fields(c, user, node, chain_of(c, scope.types, user, node)) or_return
+		node.args = compile_args(c, type_node, id, user, call, element_scope) or_return
 	}
 	if switch_node != nil {
 		compile_switch(c, td, switch_node, id, node, element_scope) or_return
@@ -1148,8 +1152,8 @@ chain_with :: proc(c: ^Compiler, types: []^mdata.Node, node: ^mdata.Node) -> []^
 
 // type: switch-on and cases, on node, a set, whose length and terminator
 // are already compiled. Each case is a user type, compiled as a set with
-// node's names; a case value is an integer or enum constant, or _ for the
-// default.
+// node's names. switch-on is an integer or a string; a case value is an
+// integer or enum constant, or a string literal, or _ for the default.
 @(private = "file")
 compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, node: ^mdata.Node, scope: expr.Scope) -> bool {
 	keys := SWITCH_KEYS
@@ -1162,16 +1166,29 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, no
 	expect_map(c, cases, "cases") or_return
 
 	sw := new(mdata.Switch, c.allocator)
-	sw.on = compile_expr(c, on, "switch-on", scope, .Int) or_return
+	sw.on = compile_expr(c, on, "switch-on", scope, .Unresolved) or_return
+	by_text := sw.on.type == .String
+	if !by_text && sw.on.type != .Int {
+		return fail(c, .Unsupported, on, "%s: switch-on over %s is not supported; only over an integer or a string", id, expr.type_name(sw.on.type))
+	}
 
 	list := make([dynamic]mdata.Switch_Case, c.allocator)
 	seen := make(map[int]^yml.Node, c.scratch)
+	seen_text := make(map[string]^yml.Node, c.scratch)
 	default_key: ^yml.Node
 	for e in cases.entries {
 		is_default := e.key.text == "_" && e.key.style == .Plain
 		value: int
+		text: string
 		if is_default {
 			default_key = e.key
+		} else if by_text {
+			key := compile_expr(c, e.key, "a case", scope, .String) or_return
+			lit, is_literal := key.variant.(mdata.String_Literal)
+			if !is_literal do return fail(c, .Unsupported, e.key, "%s: a case must be a string literal", id)
+			text = lit.value
+			if prev, dup := seen_text[text]; dup do return fail(c, .Invalid, e.key, "%s: case %s is already given (line %v, column %v)", id, e.key.text, prev.line, prev.column)
+			seen_text[text] = e.key
 		} else {
 			key := compile_expr(c, e.key, "a case", scope, .Int) or_return
 			lit, is_literal := key.variant.(mdata.Int_Literal)
@@ -1198,13 +1215,13 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, no
 		case_node := new_node(c, node.name, node.ref_name)
 		case_node.type = .Set
 		case_node.count = mdata.Fixed_Count{1}
-		case_node.args = compile_args(c, e.value, id, user, call, scope) or_return
 		compile_fields(c, user, case_node, chain_of(c, scope.types, user, case_node)) or_return
+		case_node.args = compile_args(c, e.value, id, user, call, scope) or_return
 
 		if is_default {
 			sw.default = case_node
 		} else {
-			append(&list, mdata.Switch_Case{value, case_node})
+			append(&list, mdata.Switch_Case{value, text, case_node})
 		}
 	}
 	sw.cases = list[:]
@@ -1220,7 +1237,7 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, no
 
 // The count from repeat (with repeat-expr or repeat-until), or from -peek,
 // -while-peek or -until-peek. A repeat-until count is returned without
-// its expression, which compile_attr compiles.
+// its expression, which compile_field compiles.
 @(private = "file")
 compile_count :: proc(c: ^Compiler, attr: ^yml.Node, id: string, scope: expr.Scope) -> (count: mdata.Count, ok: bool) {
 	repeat := get(attr, "repeat")

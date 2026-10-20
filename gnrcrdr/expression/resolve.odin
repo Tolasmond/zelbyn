@@ -139,6 +139,8 @@ type_name :: proc(t: mdata.Expr_Type) -> string {
 		return "a boolean"
 	case .Bytes:
 		return "a byte array"
+	case .String:
+		return "a string"
 	case .Array:
 		return "an array"
 	case .Struct:
@@ -158,6 +160,8 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		e.type = .Int
 	case mdata.Bool_Literal:
 		e.type = .Bool
+	case mdata.String_Literal:
+		e.type = .String
 	case mdata.Unary:
 		resolve(r, x.operand) or_return
 		want: mdata.Expr_Type = x.op == .Not ? .Bool : .Int
@@ -172,16 +176,30 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		resolve(r, x.then) or_return
 		resolve(r, x.otherwise) or_return
 		expect(r, x.cond, .Bool) or_return
-		if x.then.type != .Int && x.then.type != .Bool && x.then.type != .Stream do return fail(r, .Unsupported, x.then.offset, "?: on %s is not supported", type_name(x.then.type))
+		if x.then.type != .Int && x.then.type != .Bool && x.then.type != .String && x.then.type != .Stream do return fail(r, .Unsupported, x.then.offset, "?: on %s is not supported", type_name(x.then.type))
 		expect(r, x.otherwise, x.then.type) or_return
 		e.type = x.then.type
+	case mdata.Index:
+		resolve(r, x.operand) or_return
+		resolve(r, x.index) or_return
+		expect(r, x.index, .Int) or_return
+		#partial switch x.operand.type {
+		case .Bytes:
+			e.type = .Int
+		case .Array:
+			// an Array is only ever all the values of a field
+			field := x.operand.variant.(mdata.Field_Ref).node
+			e.type = value_type(r, e, field, field.ref_name) or_return
+		case:
+			return fail(r, .Invalid, e.offset, "%s cannot be indexed; only an array and a byte array can", type_name(x.operand.type))
+		}
 	case mdata.Name:
 		return resolve_name(r, e, x.name)
 	case mdata.Member:
 		return resolve_member(r, e, x)
 	case mdata.Enum_Constant:
 		return resolve_enum_constant(r, e, x)
-	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref:
+	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.String_Length, mdata.To_S, mdata.To_I, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref:
 		assert(e.type != .Unresolved, "resolve: a resolved variant without a type")
 	case:
 		panic("resolve: empty expression")
@@ -214,16 +232,24 @@ expect :: proc(r: ^Resolver, e: ^mdata.Expr, want: mdata.Expr_Type) -> bool {
 @(private = "file")
 binary_type :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Binary) -> (t: mdata.Expr_Type, ok: bool) {
 	switch x.op {
-	case .Mul, .Div, .Mod, .Add, .Sub, .Shl, .Shr, .And, .Xor, .Or:
+	case .Add:
+		if x.left.type == .String {
+			expect(r, x.right, .String) or_return
+			return .String, true
+		}
+		expect(r, x.left, .Int) or_return
+		expect(r, x.right, .Int) or_return
+		return .Int, true
+	case .Mul, .Div, .Mod, .Sub, .Shl, .Shr, .And, .Xor, .Or:
 		expect(r, x.left, .Int) or_return
 		expect(r, x.right, .Int) or_return
 		return .Int, true
 	case .Lt, .Le, .Gt, .Ge:
-		expect(r, x.left, .Int) or_return
-		expect(r, x.right, .Int) or_return
+		if x.left.type != .String do expect(r, x.left, .Int) or_return
+		expect(r, x.right, x.left.type) or_return
 		return .Bool, true
 	case .Eq, .Ne:
-		if x.left.type != .Int && x.left.type != .Bool {
+		if x.left.type != .Int && x.left.type != .Bool && x.left.type != .String {
 			return .Unresolved, fail(r, .Unsupported, e.offset, "comparing %s is not supported", type_name(x.left.type))
 		}
 		expect(r, x.right, x.left.type) or_return
@@ -317,6 +343,9 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 		}
 		return fail(r, .Invalid, e.offset, "%s has no field %s", set.ref_name, name)
 	}
+	// a field is visible to its own expressions, but its if and count are
+	// evaluated before it has any value
+	if field.count == nil do return fail(r, .Invalid, e.offset, "%s cannot be used in its own if or repeat-expr; it has no value there", name)
 
 	if !mdata.is_single(field) {
 		if field.switch_on != nil do return fail(r, .Unsupported, e.offset, "%s is a switch-on field; it cannot be used in expressions", name)
@@ -337,13 +366,15 @@ value_type :: proc(r: ^Resolver, e: ^mdata.Expr, field: ^mdata.Node, name: strin
 		return .Int, true
 	case .Blob:
 		return .Bytes, true
+	case .String:
+		return .String, true
 	case .Bool:
 		return .Bool, true
 	case .Set:
 		if field.switch_on != nil do return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a switch-on field; it cannot be used in expressions", name)
 		return .Struct, true
 	}
-	return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a %v; only integer, boolean, blob and set fields can be used in expressions", name, field.type)
+	return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a %v; only integer, boolean, blob, string and set fields can be used in expressions", name, field.type)
 }
 
 @(private = "file")
@@ -368,6 +399,8 @@ struct_node :: proc(e: ^mdata.Expr) -> ^mdata.Node {
 		return x.node
 	case mdata.Repeat_Element:
 		return x.node
+	case mdata.Index:
+		return struct_node(x.operand)
 	}
 	panic("struct_node: not a set")
 }
@@ -430,6 +463,23 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 			e.type = .Int
 			return true
 		}
+	case .String:
+		switch m.name {
+		case "length":
+			e.variant = mdata.String_Length{operand}
+			e.type = .Int
+			return true
+		case "to_i":
+			e.variant = mdata.To_I{operand}
+			e.type = .Int
+			return true
+		}
+	case .Int:
+		if m.name == "to_s" {
+			e.variant = mdata.To_S{operand}
+			e.type = .String
+			return true
+		}
 	}
-	return fail(r, .Unsupported, e.offset, "%s has no member %s (of methods, only .size is supported)", type_name(operand.type), m.name)
+	return fail(r, .Unsupported, e.offset, "%s has no member %s (of methods, only .size, .length, .to_i and .to_s are supported)", type_name(operand.type), m.name)
 }

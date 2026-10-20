@@ -176,13 +176,15 @@ Terminator :: struct {
 // The compiler allows a field that is not read only when it is read at
 // most once.
 Switch :: struct {
-	on:      ^Expr, // an Int expression
+	on:      ^Expr, // an Int or String expression
 	cases:   []Switch_Case,
 	default: ^Node, // nil when there is no _ case
 }
 
+// value for a Switch whose on is an Int, text for one whose on is a String.
 Switch_Case :: struct {
 	value: int,
+	text:  string,
 	node:  ^Node,
 }
 

@@ -16,6 +16,7 @@ Expr_Type :: enum {
 	Int,
 	Bool,
 	Bytes,  // a Blob value
+	String, // a String value, or a string made by an expression; kept as bytes, as the input has them
 	Array,  // every value of a repeated field
 	Struct, // an instance of a set
 	Stream, // the stream a set instance is read from (Kaitai's _io); only io and ?: have this type
@@ -25,9 +26,11 @@ Expr_Variant :: union {
 	// syntax and resolved
 	Int_Literal,
 	Bool_Literal,
+	String_Literal,
 	Unary,
 	Binary,
 	Ternary,
+	Index,
 
 	// syntax only
 	Name,
@@ -38,6 +41,9 @@ Expr_Variant :: union {
 	Instance,
 	Field_Ref,
 	Size,
+	String_Length,
+	To_S,
+	To_I,
 	Io,
 	Io_Pos,
 	Io_Size,
@@ -55,6 +61,13 @@ Bool_Literal :: struct {
 	value: bool,
 }
 
+// A string in quotes: '...' as it is, or "..." with Kaitai's escapes
+// (\a \b \t \n \v \f \r \e \" \' \\, octal \0 to \377, and \uXXXX in
+// UTF-8) replaced.
+String_Literal :: struct {
+	value: string,
+}
+
 Unary_Op :: enum {
 	Neg,     // -
 	Bit_Not, // ~
@@ -70,14 +83,14 @@ Binary_Op :: enum {
 	Mul, // *
 	Div, // /, rounding toward negative infinity
 	Mod, // %, with the sign of the divisor
-	Add, // +
+	Add, // +, which also joins two strings
 	Sub, // -
 	Shl, // <<
 	Shr, // >>, arithmetic
 	And, // &
 	Xor, // ^
 	Or,  // |
-	Eq,  // ==
+	Eq,  // ==; this and the other comparisons also compare two strings, byte by byte
 	Ne,  // !=
 	Lt,  // <
 	Le,  // <=
@@ -94,6 +107,13 @@ Binary :: struct {
 
 Ternary :: struct {
 	cond, then, otherwise: ^Expr,
+}
+
+// operand[index]: an element of an Array, with the type of one value of
+// its field, or a byte of Bytes, as an Int. index is an Int expression;
+// one outside the array or bytes is Index_Out_Of_Range.
+Index :: struct {
+	operand, index: ^Expr,
 }
 
 // An identifier: a field name, or one of _root, _parent, _io, _ and _index.
@@ -141,6 +161,22 @@ Size :: struct {
 // stream of the instance being decoded.
 Io :: struct {
 	instance: ^Expr,
+}
+
+// .length of a String: its characters, the code points of its UTF-8.
+String_Length :: struct {
+	operand: ^Expr,
+}
+
+// .to_s of an Int: its decimal digits, with a - when it is negative.
+To_S :: struct {
+	operand: ^Expr,
+}
+
+// .to_i of a String: the decimal integer it is, with an optional sign;
+// Invalid_Number when it is not one, Integer_Overflow when it does not fit.
+To_I :: struct {
+	operand: ^Expr,
 }
 
 // _io.pos, _io.size and _io.eof: the position in the stream of the set

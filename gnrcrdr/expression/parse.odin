@@ -29,8 +29,9 @@ destroy_error :: proc(err: ^Error) {
 // Every binary operator is left-associative, except that ?: is
 // right-associative and a comparison cannot be an operand of another
 // comparison. Integer literals are decimal, 0x hex, 0b binary or 0o octal,
-// with _ allowed between digits. Float, string and array literals, indexing,
-// method calls and casts are rejected as Unsupported.
+// with _ allowed between digits; string literals are as String_Literal
+// describes. Float and array literals, method calls and casts are rejected
+// as Unsupported.
 @(require_results)
 parse :: proc(text: string, allocator: mem.Allocator) -> (e: ^mdata.Expr, err: Error) {
 	p := Parser{text = text, allocator = allocator}
@@ -72,6 +73,7 @@ parse_list :: proc(text: string, allocator: mem.Allocator) -> (list: []^mdata.Ex
 Token_Kind :: enum {
 	EOF,
 	Int,
+	String,
 	Ident,
 	Plus,
 	Minus,
@@ -106,7 +108,8 @@ Token :: struct {
 	kind:   Token_Kind,
 	offset: int,
 	text:   string,
-	value:  int, // Int only
+	value:  int,    // Int only
+	str:    string, // String only: its value, allocated with the parser's allocator
 }
 
 @(private = "file")
@@ -166,7 +169,7 @@ next :: proc(p: ^Parser) -> bool {
 		for start + n < len(p.text) && (is_ident_start(p.text[start + n]) || is_digit(p.text[start + n])) do n += 1
 		kind = .Ident
 	case c == '\'' || c == '"':
-		return fail(p, .Unsupported, start, "string literals are not supported")
+		return lex_string(p)
 	case:
 		two := p.text[start:min(start + 2, len(p.text))]
 		switch two {
@@ -233,6 +236,85 @@ next :: proc(p: ^Parser) -> bool {
 	p.pos = start + n
 	p.tok = Token{kind = kind, offset = start, text = p.text[start:p.pos]}
 	return true
+}
+
+// A string literal at p.pos, which is a quote: '...' as it is, "..." with
+// its escapes replaced (metadata.String_Literal).
+@(private = "file")
+lex_string :: proc(p: ^Parser) -> bool {
+	start := p.pos
+	quote := p.text[start]
+	b := strings.builder_make(p.allocator)
+	i := start + 1
+	for {
+		if i >= len(p.text) do return fail(p, .Syntax, start, "unterminated string literal")
+		c := p.text[i]
+		if c == quote do break
+		if c != '\\' || quote == '\'' {
+			strings.write_byte(&b, c)
+			i += 1
+			continue
+		}
+		if i + 1 >= len(p.text) do return fail(p, .Syntax, start, "unterminated string literal")
+		e := p.text[i + 1]
+		i += 2
+		switch e {
+		case 'a':
+			strings.write_byte(&b, 0x07)
+		case 'b':
+			strings.write_byte(&b, 0x08)
+		case 't':
+			strings.write_byte(&b, '\t')
+		case 'n':
+			strings.write_byte(&b, '\n')
+		case 'v':
+			strings.write_byte(&b, 0x0b)
+		case 'f':
+			strings.write_byte(&b, 0x0c)
+		case 'r':
+			strings.write_byte(&b, '\r')
+		case 'e':
+			strings.write_byte(&b, 0x1b)
+		case '"', '\'', '\\':
+			strings.write_byte(&b, e)
+		case '0' ..= '7':
+			n := int(e - '0')
+			for k := 0; k < 2 && i < len(p.text) && p.text[i] >= '0' && p.text[i] <= '7'; k += 1 {
+				n = n * 8 + int(p.text[i] - '0')
+				i += 1
+			}
+			if n > 0xff do return fail(p, .Syntax, i - 4, "octal escape \\%s is above \\377", p.text[i - 3:i])
+			strings.write_byte(&b, byte(n))
+		case 'u':
+			n := 0
+			for k in 0 ..< 4 {
+				d := i + k < len(p.text) ? hex_digit(p.text[i + k]) : -1
+				if d < 0 do return fail(p, .Syntax, i - 2, "\\u needs four hex digits")
+				n = n * 16 + d
+			}
+			i += 4
+			strings.write_rune(&b, rune(n))
+		case:
+			return fail(p, .Syntax, i - 2, "unknown escape \\%c", rune(e))
+		}
+	}
+	p.pos = i + 1
+	p.tok = Token{kind = .String, offset = start, text = p.text[start:p.pos], str = strings.to_string(b)}
+	return true
+}
+
+// The value of hex digit c, or -1 when it is not one.
+@(private = "file")
+hex_digit :: proc(c: byte) -> int {
+	switch c {
+	case '0' ..= '9':
+		return int(c - '0')
+	case 'a' ..= 'f':
+		return int(c - 'a') + 10
+	case 'A' ..= 'F':
+		return int(c - 'A') + 10
+	}
+	return -1
 }
 
 // An integer literal at p.pos, which is a digit.
@@ -429,7 +511,7 @@ parse_prefix :: proc(p: ^Parser, min_bp: int) -> (e: ^mdata.Expr, ok: bool) {
 	return new_expr(p, offset, mdata.Unary{op, operand}), true
 }
 
-// An atom followed by any number of .member accesses.
+// An atom followed by any number of .member accesses and [index]es.
 @(private = "file")
 parse_primary :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 	e = parse_atom(p) or_return
@@ -446,7 +528,12 @@ parse_primary :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 		case .L_Paren:
 			return nil, fail(p, .Unsupported, p.tok.offset, "method calls are not supported")
 		case .L_Bracket:
-			return nil, fail(p, .Unsupported, p.tok.offset, "indexing is not supported")
+			offset := p.tok.offset
+			next(p) or_return
+			index := parse_expr(p, 0) or_return
+			if p.tok.kind != .R_Bracket do return nil, fail(p, .Syntax, p.tok.offset, "expected ], found %s", describe(p.tok))
+			next(p) or_return
+			e = new_expr(p, offset, mdata.Index{e, index})
 		case:
 			return e, true
 		}
@@ -464,6 +551,9 @@ parse_atom :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 	case .Int:
 		next(p) or_return
 		return new_expr(p, t.offset, mdata.Int_Literal{t.value}), true
+	case .String:
+		next(p) or_return
+		return new_expr(p, t.offset, mdata.String_Literal{t.str}), true
 	case .L_Paren:
 		next(p) or_return
 		e = parse_expr(p, 0) or_return

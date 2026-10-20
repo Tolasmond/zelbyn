@@ -48,6 +48,30 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 		strings.write_int(b, x.value)
 	case mdata.Bool_Literal:
 		strings.write_string(b, x.value ? "true" : "false")
+	case mdata.String_Literal:
+		// double-quoted, with octal escapes for all but printable ASCII
+		strings.write_byte(b, '"')
+		for c in transmute([]byte)x.value {
+			switch {
+			case c == '"' || c == '\\':
+				strings.write_byte(b, '\\')
+				strings.write_byte(b, c)
+			case c >= 0x20 && c < 0x7f:
+				strings.write_byte(b, c)
+			case:
+				strings.write_byte(b, '\\')
+				for shift := uint(6); ; shift -= 3 {
+					strings.write_byte(b, '0' + (c >> shift) & 7)
+					if shift == 0 do break
+				}
+			}
+		}
+		strings.write_byte(b, '"')
+	case mdata.Index:
+		write(b, x.operand)
+		strings.write_byte(b, '[')
+		write(b, x.index)
+		strings.write_byte(b, ']')
 	case mdata.Unary:
 		strings.write_byte(b, '(')
 		strings.write_string(b, UNARY_TEXT[x.op])
@@ -95,6 +119,15 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 	case mdata.Size:
 		write(b, x.operand)
 		strings.write_string(b, ".size")
+	case mdata.String_Length:
+		write(b, x.operand)
+		strings.write_string(b, ".length")
+	case mdata.To_S:
+		write(b, x.operand)
+		strings.write_string(b, ".to_s")
+	case mdata.To_I:
+		write(b, x.operand)
+		strings.write_string(b, ".to_i")
 	case mdata.Io:
 		write_member(b, x.instance, "_io")
 	case mdata.Io_Pos:
