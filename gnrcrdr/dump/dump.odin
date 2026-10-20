@@ -97,8 +97,8 @@ write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set
 		strings.write_int(path, i)
 		strings.write_byte(path, ']')
 
-		if set != nil {
-			instance := v.(^fld.Instance)
+		// a switch-on field that chose no set has its bytes instead
+		if instance, is_instance := v.(^fld.Instance); is_instance {
 			read_as := mdat.instance_set(set, instance)
 			slot := len(read_as.parse_instances)
 			for child in read_as.children {
@@ -132,8 +132,8 @@ write_json_array :: proc(w: io.Writer, set: ^mdat.Node, values: []fld.Value) -> 
 	io.write_byte(w, '[') or_return
 	for v, i in values {
 		if i > 0 do io.write_byte(w, ',') or_return
-		if set != nil {
-			write_json_object(w, set, v.(^fld.Instance)) or_return
+		if instance, is_instance := v.(^fld.Instance); is_instance {
+			write_json_object(w, set, instance) or_return
 		} else {
 			write_json_scalar(w, v) or_return
 		}

@@ -24,7 +24,9 @@ Value :: union {
 // child in order, each followed by its bit fields (metadata.slot_of gives
 // a child's slot), then each of its params. For an instance of a switch-on
 // field, choice is the case it was read as: an index into the field's
-// cases, or DEFAULT_CASE; otherwise it is 0.
+// cases, or DEFAULT_CASE; otherwise it is 0. A value of a switch-on field
+// with a length that no case chose is not an instance but a []byte, its
+// bytes (metadata.Switch).
 //
 // An instance is one block of its tree's arena (make_instance): the
 // Instance, its slots, then a cell for each slot, and in a tree read with
