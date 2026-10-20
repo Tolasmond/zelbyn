@@ -1,5 +1,5 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 50 of 190 files compile
-ERR	3d/gltf_binary.ksy	Unsupported	3d/gltf_binary.ksy:47:9	data: size on a switch-on field is not supported
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 59 of 190 files compile
+OK	3d/gltf_binary.ksy
 ERR	archive/android_bootldr_asus.ksy	Unsupported	archive/android_bootldr_asus.ksy:55:11	flags: valid: expr is not supported
 ERR	archive/android_bootldr_huawei.ksy	Invalid	archive/android_bootldr_huawei.ksy:38:53	size: meta_header has no field _sizeof
 ERR	archive/android_bootldr_qcom.ksy	Unsupported	archive/android_bootldr_qcom.ksy:181:33	value: indexing is not supported
@@ -9,9 +9,9 @@ ERR	archive/android_sparse.ksy	Invalid	archive/android_sparse.ksy:29:52	size: he
 ERR	archive/cpio_old_le.ksy	Unsupported	archive/cpio_old_le.ksy:36:26	if: array literals are not supported
 OK	archive/gzip.ksy
 ERR	archive/lzh.ksy	Unsupported	common/dos_datetime.ksy:72:16	value: string literals are not supported
-ERR	archive/mozilla_mar.ksy	Unsupported	archive/mozilla_mar.ksy:64:9	bytes: size on a switch-on field is not supported
+ERR	archive/mozilla_mar.ksy	Unsupported	archive/mozilla_mar.ksy:64:37	size: an integer has no member _sizeof (of methods, only .size is supported)
 ERR	archive/phar_without_stub.ksy	Unsupported	archive/phar_without_stub.ksy:190:5	type api_version: meta in a type is not supported
-ERR	archive/rar.ksy	Unsupported	archive/rar.ksy:93:9	body: size on a switch-on field is not supported
+ERR	archive/rar.ksy	Unsupported	common/dos_datetime.ksy:72:16	value: string literals are not supported
 OK	archive/respack.ksy
 ERR	archive/rpm.ksy	Unsupported	archive/rpm.ksy:402:16	num_index_records: a valid constant for an integer must be an integer literal, not "_parent.is_signature ? 32 : 0xffff"
 ERR	archive/xar.ksy	Unsupported	archive/xar.ksy:35:5	attribute toc: process is not supported
@@ -43,10 +43,10 @@ ERR	executable/python_pyc_27.ksy	Unsupported	executable/python_pyc_27.ksy:58:22	
 ERR	executable/swf.ksy	Unsupported	executable/swf.ksy:56:5	attribute zlib_body: process is not supported
 ERR	executable/uefi_te.ksy	Unsupported	executable/uefi_te.ksy:225:82	pos: size of a stream other than _io is not supported
 OK	filesystem/amlogic_emmc_partitions.ksy
-ERR	filesystem/android_super.ksy	Unsupported	filesystem/android_super.ksy:129:13	table: size on a switch-on field is not supported
+OK	filesystem/android_super.ksy
 OK	filesystem/apm_partition_table.ksy
-ERR	filesystem/apple_single_double.ksy	Unsupported	filesystem/apple_single_double.ksy:67:9	body: size on a switch-on field is not supported
-ERR	filesystem/btrfs_stream.ksy	Unsupported	filesystem/btrfs_stream.ksy:63:13	value: size on a switch-on field is not supported
+OK	filesystem/apple_single_double.ksy
+ERR	filesystem/btrfs_stream.ksy	Unsupported	filesystem/btrfs_stream.ksy:69:40	value: a case of type u8le is not supported; only user types are
 ERR	filesystem/cramfs.ksy	Unsupported	filesystem/cramfs.ksy:65:5	type inode contains itself; recursive types are not supported
 ERR	filesystem/ext2.ksy	Invalid	filesystem/ext2.ksy:15:3	instance bg1 refers to itself
 ERR	filesystem/gpt_partition_table.ksy	Unsupported	filesystem/gpt_partition_table.ksy:38:19	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
@@ -66,10 +66,10 @@ OK	firmware/ines.ksy
 ERR	firmware/uf2.ksy	Unsupported	firmware/uf2.ksy:290:11	value: valid: expr is not supported
 ERR	firmware/uimage.ksy	Unsupported	firmware/uimage.ksy:38:11	magic: valid: in-enum is not supported
 ERR	font/grub2_font.ksy	Invalid	font/grub2_font.ksy:20:5	magic: contents cannot have size
-ERR	font/pcf_font.ksy	Unsupported	font/pcf_font.ksy:61:9	body: size on a switch-on field is not supported
-ERR	font/ttf.ksy	Unsupported	font/ttf.ksy:59:9	value: size on a switch-on field is not supported
+ERR	font/pcf_font.ksy	Invalid	font/pcf_font.ksy:130:29	io: body has no field strings
+ERR	font/ttf.ksy	Unsupported	font/ttf.ksy:61:22	switch-on: tag is a String; only integer, boolean, blob and set fields can be used in expressions
 ERR	game/allegro_dat.ksy	Unsupported	game/allegro_dat.ksy:76:16	value: string literals are not supported
-ERR	game/doom_wad.ksy	Unsupported	game/doom_wad.ksy:38:9	contents: size on a switch-on field is not supported
+ERR	game/doom_wad.ksy	Unsupported	game/doom_wad.ksy:40:22	switch-on: name is a String; only integer, boolean, blob and set fields can be used in expressions
 ERR	game/dune_2_pak.ksy	Unsupported	game/dune_2_pak.ksy:36:31	value: indexing is not supported
 ERR	game/fallout2_dat.ksy	Unsupported	game/fallout2_dat.ksy:55:9	instance contents_zlib: process is not supported
 OK	game/fallout_dat.ksy
@@ -82,9 +82,9 @@ ERR	game/minecraft_nbt.ksy	Unsupported	game/minecraft_nbt.ksy:103:12	root_type: 
 ERR	game/quake2_md2.ksy	Unsupported	game/quake2_md2.ksy:340:24	value: float literals are not supported
 OK	game/quake_mdl.ksy
 OK	game/quake_pak.ksy
-ERR	game/renderware_binary_stream.ksy	Unsupported	game/renderware_binary_stream.ksy:23:5	body: size on a switch-on field is not supported
+ERR	game/renderware_binary_stream.ksy	Unsupported	game/renderware_binary_stream.ksy:79:9	an attribute in type struct_atomic has no id; attributes without one are not supported
 OK	game/saints_row_2_vpp_pc.ksy
-ERR	game/warcraft_2_pud.ksy	Unsupported	game/warcraft_2_pud.ksy:39:9	body: size on a switch-on field is not supported
+ERR	game/warcraft_2_pud.ksy	Unsupported	game/warcraft_2_pud.ksy:41:22	switch-on: name is a String; only integer, boolean, blob and set fields can be used in expressions
 OK	geospatial/shapefile_index.ksy
 OK	geospatial/shapefile_main.ksy
 ERR	hardware/dtb.ksy	Unsupported	hardware/dtb.ksy:64:12	min_compatible_version: a valid constant for an integer must be an integer literal, not "version"
@@ -95,7 +95,7 @@ ERR	image/dicom.ksy	Unsupported	image/dicom.ksy:132:16	value: string literals ar
 ERR	image/exif.ksy	Unsupported	image/exif.ksy:46:5	type exif_body: meta in a type is not supported
 OK	image/gif.ksy
 ERR	image/gimp_brush.ksy	Unsupported	image/gimp_brush.ksy:30:35	size: an integer has no member _sizeof (of methods, only .size is supported)
-ERR	image/icc_4.ksy	Unsupported	image/icc_4.ksy:532:13	tag_data_element: size on a switch-on field is not supported
+ERR	image/icc_4.ksy	Unsupported	image/icc_4.ksy:1156:39	repeat-expr: name is a String; only integer, boolean, blob and set fields can be used in expressions
 ERR	image/ico.ksy	Unsupported	image/ico.ksy:86:30	value: array literals are not supported
 ERR	image/jpeg.ksy	Unsupported	image/exif.ksy:46:5	type exif_body: meta in a type is not supported
 ERR	image/nitf.ksy	Unsupported	image/nitf.ksy:166:9	an attribute in type date_time has no id; attributes without one are not supported
@@ -106,15 +106,15 @@ ERR	image/png.ksy	Unsupported	image/png.ksy:410:9	attribute profile: process is 
 OK	image/psx_tim.ksy
 ERR	image/tga.ksy	Unsupported	image/tga.ksy:94:34	value: array literals are not supported
 ERR	image/webp.ksy	Unsupported	image/webp.ksy:64:5	type vp8: meta in a type is not supported
-ERR	image/wmf.ksy	Unsupported	image/wmf.ksy:83:9	params: size on a switch-on field is not supported
+OK	image/wmf.ksy
 OK	image/xwd.ksy
 OK	log/aix_utmp.ksy
 OK	log/glibc_utmp.ksy
 OK	log/hashcat_restore.ksy
-ERR	log/mcap.ksy	Unsupported	log/mcap.ksy:105:9	body: size on a switch-on field is not supported
-ERR	log/sudoers_ts.ksy	Unsupported	log/sudoers_ts.ksy:27:9	payload: size on a switch-on field is not supported
-ERR	log/systemd_journal.ksy	Unsupported	log/systemd_journal.ksy:151:9	payload: size on a switch-on field is not supported
-ERR	log/windows_evt_log.ksy	Unsupported	log/windows_evt_log.ksy:129:9	body: size on a switch-on field is not supported
+ERR	log/mcap.ksy	Syntax	log/mcap.ksy:35:83	value: comparisons cannot be chained
+OK	log/sudoers_ts.ksy
+ERR	log/systemd_journal.ksy	Unsupported	log/systemd_journal.ksy:137:5	type journal_object contains itself; recursive types are not supported
+OK	log/windows_evt_log.ksy
 ERR	machine_code/code_6502.ksy	Unsupported	machine_code/code_6502.ksy:26:34	args: a case of type u1 is not supported; only user types are
 ERR	macos/compressed_resource.ksy	Invalid	macos/compressed_resource.ksy:62:52	size: common_part has no field _sizeof
 ERR	macos/ds_store.ksy	Unsupported	macos/ds_store.ksy:107:7	instance directories: an instance without pos or value is not supported
@@ -126,16 +126,16 @@ ERR	macos/resource_compression/dcmp_variable_length_integer.ksy	Unsupported	maco
 ERR	macos/resource_fork.ksy	Unsupported	macos/resource_fork.ksy:94:12	value instance data_blocks: only integer and boolean values are supported
 OK	media/android_opengl_shaders_cache.ksy
 ERR	media/au.ksy	Unsupported	media/au.ksy:47:28	size: a byte array has no member _sizeof (of methods, only .size is supported)
-ERR	media/avi.ksy	Unsupported	media/avi.ksy:42:9	data: size on a switch-on field is not supported
-ERR	media/blender_blend.ksy	Unsupported	media/blender_blend.ksy:78:9	body: size on a switch-on field is not supported
-ERR	media/creative_voice_file.ksy	Unsupported	media/creative_voice_file.ksy:55:9	body: size on a switch-on field is not supported
+ERR	media/avi.ksy	Unsupported	media/avi.ksy:30:5	type blocks contains itself; recursive types are not supported
+ERR	media/blender_blend.ksy	Unsupported	media/blender_blend.ksy:80:22	switch-on: code is a String; only integer, boolean, blob and set fields can be used in expressions
+ERR	media/creative_voice_file.ksy	Unsupported	media/creative_voice_file.ksy:90:16	value: float literals are not supported
 OK	media/genmidi_op2.ksy
 OK	media/id3v1_1.ksy
 ERR	media/id3v2_3.ksy	Unsupported	media/id3v2_3.ksy:98:16	value: string literals are not supported
 ERR	media/id3v2_4.ksy	Unsupported	media/id3v2_4.ksy:170:16	value: string literals are not supported
-ERR	media/magicavoxel_vox.ksy	Unsupported	media/magicavoxel_vox.ksy:35:9	chunk_content: size on a switch-on field is not supported
+ERR	media/magicavoxel_vox.ksy	Unsupported	media/magicavoxel_vox.ksy:25:5	type chunk contains itself; recursive types are not supported
 ERR	media/ogg.ksy	Unsupported	media/ogg.ksy:108:27	size: indexing is not supported
-ERR	media/quicktime_mov.ksy	Unsupported	media/quicktime_mov.ksy:34:9	body: size on a switch-on field is not supported
+ERR	media/quicktime_mov.ksy	Unsupported	media/quicktime_mov.ksy:54:31	value: _io in a value instance is not supported; it can use only the fields and value instances of its type
 ERR	media/standard_midi_file.ksy	Unsupported	common/vlq_base128_be.ksy:47:12	value: indexing is not supported
 OK	media/stl.ksy
 ERR	media/tracker_modules/fasttracker_xm_module.ksy	Unsupported	media/tracker_modules/fasttracker_xm_module.ksy:278:19	param header: type sample_header is not supported; only integer types, bool and bytes are
@@ -158,23 +158,23 @@ ERR	network/protocol_body.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flag
 ERR	network/rtcp_payload.ksy	Unsupported	network/rtcp_payload.ksy:158:7	instance packet_status: an instance without pos or value is not supported
 OK	network/rtp_packet.ksy
 OK	network/rtpdump.ksy
-ERR	network/some_ip/some_ip.ksy	Unsupported	network/some_ip/some_ip.ksy:21:5	payload: size on a switch-on field is not supported
-ERR	network/some_ip/some_ip_container.ksy	Unsupported	network/some_ip/some_ip.ksy:21:5	payload: size on a switch-on field is not supported
+OK	network/some_ip/some_ip.ksy
+OK	network/some_ip/some_ip_container.ksy
 OK	network/some_ip/some_ip_sd.ksy
 OK	network/some_ip/some_ip_sd_entries.ksy
 OK	network/some_ip/some_ip_sd_options.ksy
 ERR	network/tcp_segment.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
-ERR	network/tls_client_hello.ksy	Unsupported	network/tls_client_hello.ksy:90:9	body: size on a switch-on field is not supported
+OK	network/tls_client_hello.ksy
 OK	network/udp_datagram.ksy
 OK	network/websocket.ksy
-ERR	scientific/nt_mdt/nt_mdt.ksy	Unsupported	scientific/nt_mdt/nt_mdt.ksy:142:13	frame_data: size-eos on a switch-on field is not supported
+ERR	scientific/nt_mdt/nt_mdt.ksy	Unsupported	scientific/nt_mdt/nt_mdt.ksy:206:49	repeat-expr: indexing is not supported
 ERR	scientific/nt_mdt/nt_mdt_pal.ksy	Unsupported	scientific/nt_mdt/nt_mdt_pal.ksy:5:13	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
 ERR	scientific/spectroscopy/avantes_roh60.ksy	Unsupported	scientific/spectroscopy/avantes_roh60.ksy:64:18	repeat-expr: ipixlast is a Float32; only integer, boolean, blob and set fields can be used in expressions
 ERR	scientific/spectroscopy/specpr.ksy	Unsupported	scientific/spectroscopy/specpr.ksy:72:21	value: a boolean has no member to_i (of methods, only .size is supported)
 ERR	security/efivar_signature_list.ksy	Unsupported	security/efivar_signature_list.ksy:68:34	value: array literals are not supported
 ERR	security/openpgp_message.ksy	Invalid	security/openpgp_message.ksy:42:22	switch-on: expected an integer, found a boolean
 ERR	security/ssh_public_key.ksy	Unsupported	security/ssh_public_key.ksy:22:27	switch-on: value is a String; only integer, boolean, blob and set fields can be used in expressions
-ERR	serialization/asn1/asn1_der.ksy	Unsupported	serialization/asn1/asn1_der.ksy:42:5	body: size on a switch-on field is not supported
+ERR	serialization/asn1/asn1_der.ksy	Invalid	serialization/asn1/asn1_der.ksy:72:15	entries: unknown type asn1_der
 ERR	serialization/bson.ksy	Unsupported	serialization/bson.ksy:143:41	content: a case of type f8 is not supported; only user types are
 ERR	serialization/chrome_pak.ksy	Unsupported	serialization/chrome_pak.ksy:82:33	value: indexing is not supported
 ERR	serialization/google_protobuf.ksy	Unsupported	common/vlq_base128_le.ksy:46:11	type: indexing is not supported
@@ -183,9 +183,9 @@ ERR	serialization/msgpack.ksy	Unsupported	serialization/msgpack.ksy:24:15	int_ex
 ERR	serialization/php_serialized_value.ksy	Unsupported	serialization/php_serialized_value.ksy:157:16	value: value_dec is a String; only integer, boolean, blob and set fields can be used in expressions
 ERR	serialization/python_pickle.ksy	Unsupported	serialization/python_pickle.ksy:61:31	arg: a case of type s4 is not supported; only user types are
 ERR	serialization/ruby_marshal.ksy	Unsupported	serialization/ruby_marshal.ksy:92:19	encoded: a case of type u1 is not supported; only user types are
-ERR	windows/regf.ksy	Unsupported	windows/regf.ksy:114:9	data: size on a switch-on field is not supported
+ERR	windows/regf.ksy	Unsupported	windows/regf.ksy:116:22	switch-on: identifier is a String; only integer, boolean, blob and set fields can be used in expressions
 ERR	windows/windows_lnk_file.ksy	Unsupported	windows/windows_lnk_file.ksy:14:13	encoding "cp437" is not supported; only ASCII and UTF-8 are
-ERR	windows/windows_minidump.ksy	Unsupported	windows/windows_minidump.ksy:69:9	data: size on a switch-on field is not supported
+ERR	windows/windows_minidump.ksy	Unsupported	windows/windows_minidump.ksy:330:19	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
 ERR	windows/windows_resource_file.ksy	Unsupported	windows/windows_resource_file.ksy:147:16	value: _io in a value instance is not supported; it can use only the fields and value instances of its type
 ERR	windows/windows_shell_items.ksy	Unsupported	windows/windows_shell_items.ksy:70:9	an attribute in type file_entry_body has no id; attributes without one are not supported
 OK	windows/windows_systemtime.ksy

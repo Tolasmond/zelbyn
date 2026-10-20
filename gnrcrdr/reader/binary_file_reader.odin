@@ -311,7 +311,9 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 // a length or a terminator, and as the set its switch-on chooses, with
 // that set's arguments. As in Kaitai, they are evaluated in node's stream,
 // after the bytes of the substream. A switch-on that chooses no set reads
-// nothing.
+// nothing, or with a length, the bytes of the length, as a []byte: as the
+// official compiler does, without removing pad_right or cutting them at a
+// terminator.
 @(private = "file", require_results)
 read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPANS: bool) -> dat.Read_Error {
 	set := node
@@ -326,7 +328,7 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPA
 				break
 			}
 		}
-		if set == nil do return .None
+		if set == nil do return read_unchosen(d, s, node, index)
 	}
 
 	if node.length == nil && node.terminator == nil {
@@ -352,6 +354,21 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPA
 	d.base += start
 
 	return read_set_instance(d, s, set, choice, args, SPANS)
+}
+
+// Reads element index of node, a switch-on field that chose no set, into
+// s: nothing, or with a length, the bytes of the length, as they are.
+@(private = "file", require_results)
+read_unchosen :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> dat.Read_Error {
+	if node.length == nil do return .None
+	start := d.r.pos
+	n, err := byte_length(d, node.length, index)
+	if err != .None do return fail(d, err, start)
+	bytes: []byte
+	bytes, err = dat.read_bytes(&d.r, n)
+	if err != .None do return fail(d, err, start)
+	push(s, 0, bytes)
+	return .None
 }
 
 // The values of the arguments of set, which has some, for instance index,

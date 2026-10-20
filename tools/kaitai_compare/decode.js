@@ -20,7 +20,9 @@
 // the path of every value that is not a set instance, as gnrcrdr's text
 // dump writes it (root[0].field[i]...), to the offset in the file that
 // the runtime's debug record gives it: where the read of the value
-// started.
+// started. The runtime copies the bytes of a substream whose pad-right it
+// removes or that it cuts at a terminator, and a debug record in a copy
+// gives offsets from its start, which is where its field starts.
 
 "use strict";
 
@@ -39,14 +41,15 @@ function lowerCamel(name) {
   return u.slice(0, 1).toLowerCase() + u.slice(1);
 }
 
-// The names of the parse instances and of the params of each type in spec,
-// by the name of its generated class, added to out. Types of the same name
-// share their lists.
+// The names of the parse instances, of those of them with io, and of the
+// params of each type in spec, by the name of its generated class, added to
+// out. Types of the same name share their lists.
 function members(spec, name, out) {
   const cls = upperCamel(name);
-  out[cls] = out[cls] || { parseInstances: [], params: new Set() };
+  out[cls] = out[cls] || { parseInstances: [], withIo: new Set(), params: new Set() };
   for (const [id, inst] of Object.entries(spec.instances || {})) {
     if (inst.value === undefined) out[cls].parseInstances.push(lowerCamel(id));
+    if (inst.value === undefined && inst.io !== undefined) out[cls].withIo.add(lowerCamel(id));
   }
   for (const p of spec.params || []) out[cls].params.add(lowerCamel(p.id));
   for (const [id, type] of Object.entries(spec.types || {})) members(type, id, out);
@@ -63,8 +66,11 @@ function value(v) {
 
 // The offsets of the values of obj, read in debug mode, added to out by
 // their paths below path; base is the offset of the root's stream.
-function offsets(obj, path, base, out) {
-  const m = MEMBERS[obj.constructor.name] || { parseInstances: [], params: new Set() };
+// Adds the offset of every value of obj, whose stream starts at offset pos
+// in the file, to out, by its path. root is the root of the tree.
+function offsets(obj, path, pos, root, out) {
+  const m = MEMBERS[obj.constructor.name] || { parseInstances: [], withIo: new Set(), params: new Set() };
+  const base = root._io.byteOffset;
   const keys = Object.keys(obj).filter((k) => !k.startsWith("_") && !m.params.has(k));
   for (const key of keys.concat(m.parseInstances)) {
     const v = obj[key];
@@ -74,8 +80,16 @@ function offsets(obj, path, base, out) {
     values.forEach((x, i) => {
       const d = Array.isArray(v) ? debug.arr[i] : debug;
       const p = path + "." + key + "[" + i + "]";
-      if (typeof x === "object" && !(x instanceof Uint8Array)) offsets(x, p, base, out);
-      else out[p] = d.ioOffset + d.start - base;
+      // a parse instance with io is read in another stream, which is not a
+      // copy
+      const start = (m.withIo.has(key) ? d.ioOffset - base : pos) + d.start;
+      if (typeof x !== "object" || x instanceof Uint8Array) {
+        out[p] = start;
+      } else if (x._io === obj._io) {
+        offsets(x, p, pos, root, out);
+      } else {
+        offsets(x, p, x._io._buffer === root._io._buffer ? x._io.byteOffset - base : start, root, out);
+      }
     });
   }
   return out;
@@ -146,7 +160,7 @@ async function main() {
       if (withOffsets) {
         // in debug mode, the constructor does not read
         root._read();
-        console.log(JSON.stringify(offsets(root, lowerCamel(ksy.meta.id) + "[0]", root._io.byteOffset, {})));
+        console.log(JSON.stringify(offsets(root, lowerCamel(ksy.meta.id) + "[0]", 0, root, {})));
       } else {
         console.log(JSON.stringify(instance(root)));
       }

@@ -33,7 +33,7 @@ import "core:strings"
 //     (le/be suffixes or meta bit-endian), str and byte arrays (no type)
 //     with size, size-eos or terminator, strz, user types (with size,
 //     size-eos or terminator, read from a substream), and switch-on whose
-//     cases are user types
+//     cases are user types, also with size, size-eos or terminator
 //   - value instances, with if and enum, and parse instances: instances
 //     with pos, io (_io or the _io of a set instance) and the keys of an
 //     attribute
@@ -43,11 +43,10 @@ import "core:strings"
 //     (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
-// Not supported yet (Unsupported): instances without pos or value, size,
-// size-eos and terminator on a switch-on field, params of other types
-// (str, user types, struct, io, any) and on the top-level type of the
-// schema compiled, and any valid constant that is not an integer or string
-// literal.
+// Not supported yet (Unsupported): instances without pos or value, params
+// of other types (str, user types, struct, io, any) and on the top-level
+// type of the schema compiled, and any valid constant that is not an
+// integer or string literal.
 
 Error_Kind :: enum {
 	None,
@@ -1040,7 +1039,6 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	case type_node.kind == .Map:
 		node.type = .Set
 		switch_node = type_node
-		if bytes_key != nil do return fail(c, .Unsupported, bytes_key, "%s: %s on a switch-on field is not supported", id, bytes_key.text)
 	case:
 		type_name := expect_scalar(c, type_node, "type") or_return
 		type_name, call = split_call(c, type_node, id, type_name) or_return
@@ -1148,9 +1146,10 @@ chain_with :: proc(c: ^Compiler, types: []^mdata.Node, node: ^mdata.Node) -> []^
 	return chain
 }
 
-// type: switch-on and cases, on node, a set. Each case is a user type,
-// compiled as a set with node's names; a case value is an integer or enum
-// constant, or _ for the default.
+// type: switch-on and cases, on node, a set, whose length and terminator
+// are already compiled. Each case is a user type, compiled as a set with
+// node's names; a case value is an integer or enum constant, or _ for the
+// default.
 @(private = "file")
 compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, node: ^mdata.Node, scope: expr.Scope) -> bool {
 	keys := SWITCH_KEYS
@@ -1210,8 +1209,10 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, no
 	}
 	sw.cases = list[:]
 
-	if default_key == nil && !mdata.is_single(node) {
-		return fail(c, .Unsupported, on, "%s: a repeated switch-on without a _ case is not supported", id)
+	// with a length, an element that no case chooses is its bytes, so every
+	// element has a value
+	if default_key == nil && !mdata.is_single(node) && node.length == nil {
+		return fail(c, .Unsupported, on, "%s: a repeated switch-on without a _ case, size or size-eos is not supported", id)
 	}
 	node.switch_on = sw
 	return true

@@ -24,6 +24,12 @@ With --offsets, the offsets of the values are compared instead: those of
 gnrcrdr's text dump with --offsets, and the starts that the runtime
 records in debug mode, which the Kaitai Web IDE shows, for every value
 that is not a set instance, by its path.
+
+The JavaScript runtime (0.11.0) reads a terminator with include: true
+wrongly: with consume, it moves one byte past the terminator, and
+without it, past the terminator. The C++ runtime, and gnrcrdr, consume
+the terminator only with consume, so a schema with include: true can
+differ after it.
 """
 
 import argparse

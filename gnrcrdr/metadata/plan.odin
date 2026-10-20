@@ -170,7 +170,11 @@ Terminator :: struct {
 // default when none does. Each case's set has the field's name and its own
 // children, and each instance records which case it was read as
 // (field.Instance.choice). With no match and no default, the field is not
-// read: the compiler allows that only when it is read at most once.
+// read, unless it has a length: then, as the official compiler does, the
+// bytes of the length are read, without removing pad_right or cutting them
+// at a terminator, and are its value, a []byte where an instance would be.
+// The compiler allows a field that is not read only when it is read at
+// most once.
 Switch :: struct {
 	on:      ^Expr, // an Int expression
 	cases:   []Switch_Case,

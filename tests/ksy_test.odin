@@ -94,7 +94,6 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    size-eos: yes\n", .Invalid, 6, 15, `size-eos must be true or false, not "yes"`},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    size-eos: true\n", .Invalid, 7, 5, "a: size-eos does not apply to u1"},
 	{HEAD + "seq:\n  - id: a\n    contents: [1]\n    size-eos: true\n", .Invalid, 7, 5, "a: contents cannot have size-eos"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    size-eos: true\ntypes:\n  s: {}\n", .Unsupported, 10, 5, "a: size-eos on a switch-on field is not supported"},
 	{HEAD + "seq:\n  - id: a\n    contents: 1\n", .Invalid, 6, 15, "contents: write a byte as a sequence, [1]"},
 	{HEAD + "seq:\n  - id: a\n    contents: [256]\n", .Invalid, 6, 16, "contents: 256 is not a byte"},
 
@@ -107,7 +106,6 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    size: 2\n    terminator: 0\n    eos-error: false\n", .Invalid, 8, 5, "a: eos-error does not apply with a size"},
 	{HEAD + "seq:\n  - id: a\n    terminator: 0\n    include: maybe\n", .Invalid, 7, 14, `include must be true or false, not "maybe"`},
 	{HEAD + "seq:\n  - id: a\n    terminator: 0\n    pad-right: 0\n", .Invalid, 7, 5, "a: pad-right needs size or size-eos"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    terminator: 0\ntypes:\n  s: {}\n", .Unsupported, 10, 5, "a: terminator on a switch-on field is not supported"},
 
 	// counts
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    repeat: forever\n", .Invalid, 7, 13, `a: repeat must be expr, eos or until, not "forever"`},
@@ -137,8 +135,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: nope\n", .Invalid, 9, 12, "a: unknown type nope"},
 	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        n: s\ntypes:\n  s: {}\n", .Unsupported, 11, 9, "a case must be an integer or an enum constant"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n        0x1: s\ntypes:\n  s: {}\n", .Invalid, 10, 9, "a: case 1 is already given (line 9, column 9)"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    size: 2\ntypes:\n  s: {}\n", .Unsupported, 10, 5, "a: size on a switch-on field is not supported"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    repeat: expr\n    repeat-expr: 2\ntypes:\n  s: {}\n", .Unsupported, 7, 18, "a repeated switch-on without a _ case is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    repeat: expr\n    repeat-expr: 2\ntypes:\n  s: {}\n", .Unsupported, 7, 18, "a repeated switch-on without a _ case, size or size-eos is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        _: s\n  - id: b\n    size: a.c\ntypes:\n  s:\n    seq:\n      - id: c\n        type: u1\n", .Unsupported, 11, 11, "size: a is a switch-on field; it cannot be used in expressions"},
 
 	// instances: value instances, over their own type, and parse instances
@@ -584,6 +581,103 @@ t[0].table[1] = 33
 	expect_dump(t, "json", ksy_json(t, both, {7}), `{"t":[{"a":[7],"p":[7],"q":[]}]}` + "\n")
 	only := HEAD + "instances:\n  p:\n    pos: 0\n    type: u1\n"
 	expect_dump(t, "json, no fields", ksy_json(t, only, {7}), `{"t":[{"p":[7]}]}` + "\n")
+}
+
+// size, terminator and size-eos on a switch-on field: the case chosen is
+// read from the substream, whose unread bytes are skipped. With no case
+// for the value, as the official compiler does, a field with a length has
+// the bytes of the length as its value, with its pad-right not removed,
+// also in a repeat with no _ case, and one with only a terminator is not
+// read.
+@(test)
+ksy_switch_on_length :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: records
+    type: record
+    repeat: eos
+types:
+  record:
+    seq:
+      - id: kind
+        type: u1
+      - id: len
+        type: u1
+      - id: body
+        type:
+          switch-on: kind
+          cases:
+            1: one
+            2: two
+        size: len
+      - id: name
+        type:
+          switch-on: kind
+          cases:
+            1: name
+        terminator: 0
+  one:
+    seq:
+      - id: v
+        type: u1
+  two:
+    seq:
+      - id: a
+        type: u1
+      - id: b
+        type: u1
+  name:
+    seq:
+      - id: text
+        type: str
+        size-eos: true
+        encoding: ASCII
+`
+	expect_dump(t, "size and terminator", ksy_dump(t, src, {1, 2, 0xaa, 0xbb, 'h', 'i', 0, 2, 2, 5, 6, 3, 1, 9}), `t[0].records[0].kind[0] = 1
+t[0].records[0].len[0] = 2
+t[0].records[0].body[0].v[0] = 170
+t[0].records[0].name[0].text[0] = "hi"
+t[0].records[1].kind[0] = 2
+t[0].records[1].len[0] = 2
+t[0].records[1].body[0].a[0] = 5
+t[0].records[1].body[0].b[0] = 6
+t[0].records[2].kind[0] = 3
+t[0].records[2].len[0] = 1
+t[0].records[2].body[0] = <1 bytes> 09
+`)
+	expect_dump(t, "size past the end", ksy_dump(t, src, {3, 4, 1}), "error: Unexpected_EOF at 2 in t[0].records[0].body[0]")
+
+	eos := HEAD + `seq:
+  - id: k
+    type: u1
+  - id: padded
+    type:
+      switch-on: k
+      cases:
+        1: one
+    size: 2
+    pad-right: 0
+  - id: rest
+    type:
+      switch-on: k
+      cases:
+        1: one
+    size-eos: true
+  - id: items
+    type:
+      switch-on: k
+      cases:
+        1: one
+    size: 1
+    repeat: expr
+    repeat-expr: 0
+types:
+  one:
+    seq:
+      - id: v
+        type: u1
+`
+	expect_dump(t, "size-eos, a case", ksy_json(t, eos, {1, 7, 0, 7, 8}), `{"t":[{"k":[1],"padded":[{"v":[7]}],"rest":[{"v":[7]}],"items":[]}]}` + "\n")
+	expect_dump(t, "size-eos, no case", ksy_json(t, eos, {2, 7, 0, 7, 8}), `{"t":[{"k":[2],"padded":["0700"],"rest":["0708"],"items":[]}]}` + "\n")
 }
 
 // io on parse instances: each is read at its pos in the stream io gives,
