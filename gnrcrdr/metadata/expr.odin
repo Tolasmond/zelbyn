@@ -18,6 +18,7 @@ Expr_Type :: enum {
 	Bytes,  // a Blob value
 	Array,  // every value of a repeated field
 	Struct, // an instance of a set
+	Stream, // the stream a set instance is read from (Kaitai's _io); only io and ?: have this type
 }
 
 Expr_Variant :: union {
@@ -37,6 +38,7 @@ Expr_Variant :: union {
 	Instance,
 	Field_Ref,
 	Size,
+	Io,
 	Io_Pos,
 	Io_Size,
 	Io_Eof,
@@ -134,8 +136,16 @@ Size :: struct {
 	operand: ^Expr,
 }
 
-// _io.pos, _io.size and _io.eof: the reader's position, the input's length,
-// and whether the position is at the end.
+// The stream that the set instance instance is read from: its substream,
+// if it has one, else that of the instance it belongs to. _io is the
+// stream of the instance being decoded.
+Io :: struct {
+	instance: ^Expr,
+}
+
+// _io.pos, _io.size and _io.eof: the position in the stream of the set
+// instance being decoded, its length, and whether the position is at the
+// end.
 Io_Pos :: struct {}
 Io_Size :: struct {}
 Io_Eof :: struct {}

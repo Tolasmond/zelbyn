@@ -43,7 +43,9 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\n  -peek: [1]\n", .Invalid, 3, 3, "the extension -peek does not apply here"},
 	{HEAD + "types:\n  u:\n    meta:\n      endian: be\n", .Unsupported, 6, 5, "type u: meta in a type is not supported"},
 	{HEAD + "types:\n  unused:\n    seq:\n      - id: a\n        type: u1\n        pos: 0\n", .Unsupported, 9, 9, "attribute a: pos is not supported"},
-	{HEAD + "types:\n  unused:\n    instances:\n      x:\n        pos: 0\n        type: u1\n        io: _root._io\n", .Unsupported, 10, 9, "instance x: io is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    io: _root._io\n", .Unsupported, 7, 5, "attribute a: io is not supported"},
+	{HEAD + "instances:\n  x:\n    pos: 0\n    type: u1\n    io: 1\n", .Invalid, 8, 9, "io: expected a stream, found an integer"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\ninstances:\n  x:\n    pos: 0\n    type: u1\n    io: a._io\n", .Invalid, 11, 11, "io: an integer has no _io"},
 
 	// the top level and meta
 	{"# nothing\n", .Invalid, 0, 0, "the schema is empty"},
@@ -582,6 +584,102 @@ t[0].table[1] = 33
 	expect_dump(t, "json", ksy_json(t, both, {7}), `{"t":[{"a":[7],"p":[7],"q":[]}]}` + "\n")
 	only := HEAD + "instances:\n  p:\n    pos: 0\n    type: u1\n"
 	expect_dump(t, "json, no fields", ksy_json(t, only, {7}), `{"t":[{"p":[7]}]}` + "\n")
+}
+
+// io on parse instances: each is read at its pos in the stream io gives,
+// which is that of an instance being decoded (_parent._io, and _io in a
+// ?:), or the kept stream of a set instance read before (names._io). _io
+// in its own expressions is still its instance's stream, and a pos out of
+// range fails at the instance's position. A stream of a field that was not
+// read is absent.
+@(test)
+ksy_parse_instance_io :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: names
+    type: names
+    size: 6
+  - id: entries
+    type: entry
+    size: 3
+    repeat: expr
+    repeat-expr: 2
+types:
+  names:
+    seq:
+      - id: all
+        size-eos: true
+  entry:
+    seq:
+      - id: ofs
+        type: u1
+      - id: len
+        type: u1
+      - id: flags
+        type: u1
+    instances:
+      name:
+        io: _root.names._io
+        pos: ofs
+        size: len
+      last:
+        io: _parent._io
+        pos: _io.size - 1
+        type: u1
+      first:
+        io: '(flags & 1) != 0 ? _io : _root._io'
+        pos: 0
+        type: u1
+`
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	err := ksy.compile(src, &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
+
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, {'a', 'b', 'c', 'd', 'e', 'f', 1, 2, 1, 4, 2, 0}, &d, spans = true)
+	if !testing.expectf(t, d.err.kind == .None, "%v at %v in %s", d.err.kind, d.err.offset, d.err.path) do return
+	b := strings.builder_make(context.temp_allocator)
+	testing.expect(t, dmp.write_text(strings.to_writer(&b), &ff, &d.tree, offsets = true) == .None, "write_text failed")
+	expect_dump(t, "offsets", strings.to_string(b), `t[0].names[0].all[0] = <6 bytes> 61 62 63 64 65 66 @0x0
+t[0].entries[0].ofs[0] = 1 @0x6
+t[0].entries[0].len[0] = 2 @0x7
+t[0].entries[0].flags[0] = 1 @0x8
+t[0].entries[0].name[0] = <2 bytes> 62 63 @0x1
+t[0].entries[0].last[0] = 99 @0x2
+t[0].entries[0].first[0] = 1 @0x6
+t[0].entries[1].ofs[0] = 4 @0x9
+t[0].entries[1].len[0] = 2 @0xA
+t[0].entries[1].flags[0] = 0 @0xB
+t[0].entries[1].name[0] = <2 bytes> 65 66 @0x4
+t[0].entries[1].last[0] = 99 @0x2
+t[0].entries[1].first[0] = 97 @0x0
+`)
+
+	expect_dump(t, "pos out of range", ksy_dump(t, src, {'a', 'b', 'c', 'd', 'e', 'f', 7, 0, 0, 4, 2, 0}), "error: Offset_Out_Of_Range at 9 in t[0].entries[0].name[0]")
+
+	// the stream of a field that was not read, and of one that was
+	later := HEAD + `seq:
+  - id: a
+    type: u1
+  - id: s
+    type: s
+    size: 1
+    if: a == 0
+instances:
+  x:
+    io: s._io
+    pos: 0
+    type: u1
+types:
+  s:
+    seq:
+      - id: v
+        type: u1
+`
+	expect_dump(t, "not read", ksy_dump(t, later, {1, 9}), "error: Absent_Field at 1 in t[0].x[0]")
+	expect_dump(t, "read", ksy_dump(t, later, {0, 9}), "t[0].a[0] = 0\nt[0].s[0].v[0] = 9\nt[0].x[0] = 9\n")
 }
 
 // if and enum on value instances: one has a value only when its if is

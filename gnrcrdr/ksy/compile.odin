@@ -35,18 +35,19 @@ import "core:strings"
 //     size-eos or terminator, read from a substream), and switch-on whose
 //     cases are user types
 //   - value instances, with if and enum, and parse instances: instances
-//     with pos and the keys of an attribute
+//     with pos, io (_io or the _io of a set instance) and the keys of an
+//     attribute
 //   - params of integer types, bool and bytes, in types and at the top
 //     level of an imported schema, given as t(a, b)
 //   - enums, whose values are names or mappings of id, doc and doc-ref
 //     (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
-// Not supported yet (Unsupported): instances without pos or value, io,
-// size, size-eos and terminator on a switch-on field, params of other
-// types (str, user types, struct, io, any) and on the top-level type of
-// the schema compiled, and any valid constant that is not an integer or
-// string literal.
+// Not supported yet (Unsupported): instances without pos or value, size,
+// size-eos and terminator on a switch-on field, params of other types
+// (str, user types, struct, io, any) and on the top-level type of the
+// schema compiled, and any valid constant that is not an integer or string
+// literal.
 
 Error_Kind :: enum {
 	None,
@@ -330,8 +331,8 @@ VALUE_INSTANCE_KEYS :: Keys {
 
 @(private = "file")
 PARSE_INSTANCE_KEYS :: Keys {
-	allowed     = {"pos", "type", "size", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"},
-	unsupported = {"io", "process", "parent"},
+	allowed     = {"pos", "io", "type", "size", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"},
+	unsupported = {"process", "parent"},
 	extensions  = {"-orig-id"},
 }
 
@@ -844,8 +845,8 @@ compile_parse_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^m
 	return compile_parse_instance((^Compiler)(data), set, inst)
 }
 
-// Compiles inst, a parse instance of set, as an attribute, then its pos. It
-// can use the fields of set compiled so far, and its instances. pos is
+// Compiles inst, a parse instance of set, as an attribute, then its io and
+// pos. It can use the fields of set compiled so far, and its instances. pos is
 // compiled last: until it is set, a reference to inst compiles it, so
 // that one from inst itself is found.
 @(private = "file")
@@ -860,6 +861,9 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 
 	spec := src.entry.value
 	compile_field(c, src.td, spec, inst, src.scope, nil) or_return
+	if n := get(spec, "io"); n != nil {
+		inst.io = compile_expr(c, n, "io", src.scope, .Stream) or_return
+	}
 	inst.pos = compile_expr(c, get(spec, "pos"), "pos", src.scope, .Int) or_return
 	return true
 }

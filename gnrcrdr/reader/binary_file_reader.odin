@@ -165,11 +165,23 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, $SPANS: bool) -> d
 	}
 
 	if node.pos != nil {
-		pos, err := eval_int(d, node.pos)
-		if err == .None && (pos < 0 || pos > len(d.r.data)) do err = .Offset_Out_Of_Range
+		// io, then pos, in the instance's stream; pos is in io's
+		stream := Stream{d.r, d.base}
+		err: dat.Read_Error
+		if node.io != nil do stream, err = eval_stream(d, node.io)
+		pos: int
+		if err == .None do pos, err = eval_int(d, node.pos)
+		if err == .None && (pos < 0 || pos > len(stream.r.data)) do err = .Offset_Out_Of_Range
 		if err != .None {
 			append(&d.path, Path_Segment{node.name, 0})
 			return fail(d, err, d.r.pos)
+		}
+		if node.io != nil {
+			// the instance's stream stays its frame's, for _io in the rest
+			// of node's expressions; read_parse_instance puts the streams
+			// back
+			append(&d.streams, Stream{d.r, d.base})
+			d.r, d.base = stream.r, stream.base
 		}
 		d.r.pos = pos
 		// unlike Kaitai's runtimes, which keep the bits left over from
@@ -366,6 +378,7 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	}
 	instance, cells := fld.make_instance(d.arena, node.slot_count, choice, SPANS)
 	push(s, 0, instance)
+	if node.keeps_stream do keep_stream(d, instance)
 	for v, k in args {
 		slot := mdata.param_slot(node, k)
 		cells[slot] = v
@@ -391,9 +404,19 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	return .None
 }
 
+// Records the stream of instance, which is being read, for an io
+// expression that refers to it (eval_stream). Not inlined: inlining it into
+// read_set_instance costs 0.5% more decode instructions.
+@(private = "file")
+keep_stream :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance) {
+	if d.kept == nil do d.kept = make(map[^fld.Instance]Stream, d.allocator)
+	d.kept[instance] = Stream{d.r, d.base}
+}
+
 // Reads parse instance node of instance, a set instance being decoded, into
 // slot k: at its pos in the instance's stream, as the instance's frame
-// sees it. The stream, frames and path are then put back as they were.
+// sees it, or in the stream of its io. The stream, frames and path are then
+// put back as they were.
 @(private, require_results)
 read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int, $SPANS: bool) -> dat.Read_Error {
 	j := len(d.frames) - 1
@@ -417,9 +440,9 @@ read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.N
 	}
 
 	// the frames, streams and path above the instance's are set aside while
-	// it is read
+	// it is read, and so are the streams when io adds the instance's
 	frames, streams, path := d.frames, d.streams, d.path
-	aside := j < len(frames) - 1 || frame.stream < len(streams) || frame.path < len(path)
+	aside := j < len(frames) - 1 || frame.stream < len(streams) || frame.path < len(path) || node.io != nil
 	if aside {
 		d.frames = clone_dynamic(d, frames[:j + 1])
 		d.streams = clone_dynamic(d, streams[:frame.stream])

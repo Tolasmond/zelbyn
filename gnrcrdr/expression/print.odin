@@ -95,6 +95,8 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 	case mdata.Size:
 		write(b, x.operand)
 		strings.write_string(b, ".size")
+	case mdata.Io:
+		write_member(b, x.instance, "_io")
 	case mdata.Io_Pos:
 		strings.write_string(b, "_io.pos")
 	case mdata.Io_Size:
