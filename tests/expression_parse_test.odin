@@ -36,6 +36,9 @@ PRECEDENCE_CASES := [?][2]string {
 	{"0x1F + 0B1_0 + 0o17 + 1_000 + 0", "((((31 + 2) + 15) + 1000) + 0)"},
 	{"9223372036854775807", "9223372036854775807"},
 	{"true != false", "(true != false)"},
+	{`'a\n' + "b\t\"\\\101\u00e9"`, `("a\\n" + "b\011\"\\A\303\251")`},
+	{"a[1][b + 2].c", "a[1][(b + 2)].c"},
+	{"x.length + y.to_s.to_i", "(x.length + y.to_s.to_i)"},
 }
 
 @(test)
@@ -82,12 +85,16 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	{"1_", .Syntax, 0, "invalid integer literal 1_"},
 	{"1e5", .Syntax, 0, "invalid integer literal 1e5"},
 	{"9223372036854775808", .Syntax, 0, "too large"},
+	{`"abc`, .Syntax, 0, "unterminated string literal"},
+	{`'abc`, .Syntax, 0, "unterminated string literal"},
+	{`"a\q"`, .Syntax, 2, "unknown escape \\q"},
+	{`"\400"`, .Syntax, 1, "above \\377"},
+	{`"\u12"`, .Syntax, 1, "four hex digits"},
+	{"a[1", .Syntax, 3, "expected ], found end of expression"},
 
 	// outside the subset
 	{"1.5", .Unsupported, 0, "float literals"},
-	{"'GIF'", .Unsupported, 0, "string literals"},
 	{"[1, 2]", .Unsupported, 0, "array literals"},
-	{"items[0]", .Unsupported, 5, "indexing"},
 	{"a.to_s()", .Unsupported, 6, "method calls"},
 	{"a.as<u4>", .Unsupported, 2, "casts"},
 	{"a::b::c", .Unsupported, 0, "a::b::c"},
@@ -119,6 +126,15 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	{"items", .Invalid, 0, "expected an integer, found an array"},
 	{"hdr.tag", .Invalid, 4, "expected an integer, found a byte array"},
 	{"block_type::end_of_file", .Invalid, 0, "no enum block_type"},
+	{"'GIF'", .Invalid, 0, "expected an integer, found a string"},
+	{"items[0]", .Invalid, 5, "expected an integer, found a set"},
+	{"a[0]", .Invalid, 1, "an integer cannot be indexed"},
+	{"items['x'].v", .Invalid, 6, "expected an integer, found a string"},
+	{"('a' + 1).length", .Invalid, 7, "expected a string, found an integer"},
+	{"1 + 'a'", .Invalid, 4, "expected an integer, found a string"},
+	{"'a' < 1 ? 1 : 0", .Invalid, 6, "expected a string, found an integer"},
+	{"'a'.size", .Unsupported, 4, "a string has no member size"},
+	{"a.length", .Unsupported, 2, "an integer has no member length"},
 }
 
 @(test)

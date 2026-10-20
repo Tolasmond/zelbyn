@@ -120,7 +120,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 
 	// if and enum
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    if: 1\n", .Invalid, 7, 9, "if: expected a boolean, found an integer"},
-	{HEAD + "seq:\n  - id: a\n    type: u1\n    if: a == 1\n", .Invalid, 7, 9, "if: t has no field a"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    if: a == 1\n", .Invalid, 7, 9, "if: a cannot be used in its own if or repeat-expr"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    enum: e\n", .Invalid, 7, 11, "a: no enum e"},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    enum: e\nenums:\n  e:\n    1: x\n", .Invalid, 7, 5, "a: enum applies only to integer types"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    enum: s::e\n", .Unsupported, 7, 11, "an enum of another type (s::e) is not supported"},
@@ -129,7 +129,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n", .Invalid, 7, 7, "a: switch-on needs cases"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      cases: {}\n", .Invalid, 7, 7, "a: a type mapping needs switch-on"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases: {}\n      default: x\n", .Invalid, 9, 7, `a: type: unknown key "default"`},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1 == 1\n      cases: {}\n", .Invalid, 7, 20, "switch-on: expected an integer, found a boolean"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1 == 1\n      cases: {}\n", .Unsupported, 7, 18, "a: switch-on over a boolean is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n", .Unsupported, 9, 12, "a: a case of type u1 is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: b4le\n", .Unsupported, 9, 12, "a: a case of type b4le is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: nope\n", .Invalid, 9, 12, "a: unknown type nope"},
@@ -154,7 +154,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "instances:\n  x:\n    pos: 0\n", .Invalid, 6, 5, "x needs a type, size, size-eos, terminator or contents"},
 	{HEAD + "instances:\n  x:\n    value: y\n  y:\n    value: x + 1\n", .Invalid, 6, 12, "value instance x refers to itself"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\ninstances:\n  a:\n    value: 1\n", .Invalid, 8, 3, "id a is already used (line 5, column 9)"},
-	{HEAD + "seq:\n  - id: b\n    size: 1\ninstances:\n  x:\n    value: b\n", .Unsupported, 9, 12, "value instance x: only integer and boolean values are supported"},
+	{HEAD + "seq:\n  - id: b\n    size: 1\ninstances:\n  x:\n    value: b\n", .Unsupported, 9, 12, "value instance x: only integer, boolean and string values are supported"},
 	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    instances:\n      x:\n        value: _parent.y\n", .Unsupported, 11, 16, "_parent in a value instance is not supported"},
 	{HEAD + "instances:\n  x:\n    value: _io.pos\n", .Unsupported, 6, 12, "_io in a value instance is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: x\n  - id: n\n    type: u1\ninstances:\n  x:\n    value: n\n", .Invalid, 11, 12, "value: t has no field n"},
@@ -581,6 +581,90 @@ t[0].table[1] = 33
 	expect_dump(t, "json", ksy_json(t, both, {7}), `{"t":[{"a":[7],"p":[7],"q":[]}]}` + "\n")
 	only := HEAD + "instances:\n  p:\n    pos: 0\n    type: u1\n"
 	expect_dump(t, "json, no fields", ksy_json(t, only, {7}), `{"t":[{"p":[7]}]}` + "\n")
+}
+
+// Strings and indexing: string literals with escapes, comparisons, + and
+// .to_s and .length, a string value instance, switch-on over a string, and
+// indexing an array, the elements of a repeat read so far among them, and
+// bytes. An index outside the array fails.
+@(test)
+ksy_strings_and_indexing :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: magic
+    type: str
+    size: 2
+    encoding: ASCII
+  - id: n
+    type: u1
+  - id: lens
+    type: u1
+    repeat: expr
+    repeat-expr: n
+  - id: chunks
+    type: 'chunk(_index == 0 ? 0 : chunks[_index - 1].total)'
+    size: lens[_index]
+    repeat: expr
+    repeat-expr: n
+  - id: tag
+    size: label.length
+  - id: pad
+    size: chunks[n - 1].total % 3
+  - id: kind
+    type: strz
+    encoding: ASCII
+  - id: body
+    type:
+      switch-on: kind
+      cases:
+        '"one"': one
+        '"t\167o"': two
+    size-eos: true
+instances:
+  is_ab:
+    value: magic == "AB"
+  label:
+    value: '(is_ab ? "ab" : ''other'') + "-" + n.to_s'
+types:
+  chunk:
+    params:
+      - id: before
+        type: u4
+    seq:
+      - id: bytes
+        size-eos: true
+    instances:
+      total:
+        value: before + bytes.size + bytes[0] * 0
+  one:
+    seq:
+      - id: v
+        type: u1
+  two:
+    seq:
+      - id: v
+        type: u2
+`
+	expect_dump(t, "two", ksy_dump(t, src, {'A', 'B', 2, 2, 3, 1, 2, 3, 4, 5, 't', 'a', 'g', '!', 0xee, 0xff, 't', 'w', 'o', 0, 0x34, 0x12}), `t[0].magic[0] = "AB"
+t[0].n[0] = 2
+t[0].lens[0] = 2
+t[0].lens[1] = 3
+t[0].chunks[0].bytes[0] = <2 bytes> 01 02
+t[0].chunks[1].bytes[0] = <3 bytes> 03 04 05
+t[0].tag[0] = <4 bytes> 74 61 67 21
+t[0].pad[0] = <2 bytes> ee ff
+t[0].kind[0] = "two"
+t[0].body[0].v[0] = 4660
+`)
+	expect_dump(t, "one", ksy_dump(t, src, {'X', 'Y', 1, 1, 9, 'o', 't', 'h', 'e', 'r', '-', '1', 0xee, 'o', 'n', 'e', 0, 7}), `t[0].magic[0] = "XY"
+t[0].n[0] = 1
+t[0].lens[0] = 1
+t[0].chunks[0].bytes[0] = <1 bytes> 09
+t[0].tag[0] = <7 bytes> 6f 74 68 65 72 2d 31
+t[0].pad[0] = <1 bytes> ee
+t[0].kind[0] = "one"
+t[0].body[0].v[0] = 7
+`)
+	expect_dump(t, "no chunks", ksy_dump(t, src, {'A', 'B', 0, 'a', 'b', '-', '0'}), "error: Index_Out_Of_Range at 7 in t[0].pad[0]")
 }
 
 // size, terminator and size-eos on a switch-on field: the case chosen is

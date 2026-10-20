@@ -180,6 +180,30 @@ EVAL_CASES := [?]Eval_Case {
 	{text = "_io.size", want = "12"},
 	{text = "_io.eof", want = "false"},
 	{text = "data.size", err = .Absent_Field}, // itself: not read yet
+
+	// strings, compared byte by byte; .length counts code points
+	{text = `("ab" + 'c').length`, want = "3"},
+	{text = `"\303\251".length`, want = "1"},
+	{text = "'abc' < 'abd' ? 1 : 0", want = "1"},
+	{text = "'ab' < 'a' ? 1 : 0", want = "0"},
+	{text = "'ab' == 'a' + 'b' ? 1 : 0", want = "1"},
+	{text = "'-42'.to_i", want = "-42"},
+	{text = "'+7'.to_i", want = "7"},
+	{text = "'4x'.to_i", err = .Invalid_Number},
+	{text = "''.to_i", err = .Invalid_Number},
+	{text = "'9223372036854775808'.to_i", err = .Integer_Overflow},
+	{text = "'-9223372036854775808'.to_i == -9223372036854775807 - 1 ? 1 : 0", want = "1"},
+	{text = "(a - 8).to_s.to_i", want = "-3"},
+	{text = "(a * 100).to_s.length", want = "3"},
+	{text = "(-9223372036854775807 - 1).to_s.length", want = "20"},
+
+	// indexing
+	{text = "items[1].v", want = "11"},
+	{text = "items[2].v + items[0].v", want = "22"},
+	{text = "items[3].v", err = .Index_Out_Of_Range},
+	{text = "items[-1].v", err = .Index_Out_Of_Range},
+	{text = "hdr.tag[1]", want = "238"},
+	{text = "hdr.tag[2]", err = .Index_Out_Of_Range},
 	{text = "later", err = .Absent_Field},
 }
 

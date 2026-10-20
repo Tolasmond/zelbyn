@@ -1,17 +1,20 @@
 package reader
 
+import arn "../arena"
 import dat "../data"
 import fld "../field"
 import mdata "../metadata"
 import "base:intrinsics"
+import "core:unicode/utf8"
 
-// The value of an expression, by its type: Int, Bool, Bytes, Array and
-// Struct in that order.
+// The value of an expression, by its type: Int, Bool, Bytes, String, Array
+// and Struct in that order.
 @(private = "file")
 Eval_Value :: union {
 	int,
 	bool,
 	[]byte,
+	string,
 	[]fld.Value,
 	^fld.Instance,
 }
@@ -45,6 +48,14 @@ eval_bool :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1, element: fld.Value =
 	if n, ok := eval_direct(d, e.direct, element); ok do return n != 0, .None
 	v := eval(d, e, {index = index, element = element}) or_return
 	return v.(bool), .None
+}
+
+// Evaluates e, a String expression, as eval_int does.
+@(private, require_results)
+eval_string :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (s: string, err: dat.Read_Error) {
+	assert(e.type == .String)
+	v := eval(d, e, {index = index}) or_return
+	return v.(string), .None
 }
 
 // Evaluates e, an Int, Bool or Bytes expression, as eval_int does, as a
@@ -141,6 +152,30 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		return x.value, .None
 	case mdata.Bool_Literal:
 		return x.value, .None
+	case mdata.String_Literal:
+		return x.value, .None
+	case mdata.Index:
+		operand := eval(d, x.operand, ctx) or_return
+		index := eval(d, x.index, ctx) or_return
+		i := index.(int)
+		#partial switch o in operand {
+		case []byte:
+			if i < 0 || i >= len(o) do return nil, .Index_Out_Of_Range
+			return int(o[i]), .None
+		case []fld.Value:
+			if i < 0 || i >= len(o) do return nil, .Index_Out_Of_Range
+			return single_value(o[i])
+		}
+		panic("eval: indexing neither an array nor bytes")
+	case mdata.String_Length:
+		operand := eval(d, x.operand, ctx) or_return
+		return utf8.rune_count_in_string(operand.(string)), .None
+	case mdata.To_S:
+		operand := eval(d, x.operand, ctx) or_return
+		return int_to_string(d, operand.(int)), .None
+	case mdata.To_I:
+		operand := eval(d, x.operand, ctx) or_return
+		return string_to_int(operand.(string))
 	case mdata.Unary:
 		operand := eval(d, x.operand, ctx) or_return
 		switch x.op {
@@ -270,11 +305,13 @@ single_value :: proc(value: fld.Value) -> (Eval_Value, dat.Read_Error) {
 		return int(v), .None
 	case []byte:
 		return v, .None
+	case string:
+		return v, .None
 	case bool:
 		return v, .None
 	case ^fld.Instance:
 		return v, .None
-	case f32, f64, string:
+	case f32, f64:
 		// the resolver rejects references to these
 	}
 	panic("eval: a field value of an unsupported type")
@@ -298,18 +335,10 @@ eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval
 
 	right := eval(d, x.right, ctx) or_return
 
-	if l, is_bool := left.(bool); is_bool {
-		r := right.(bool)
-		#partial switch x.op {
-		case .Eq:
-			return l == r, .None
-		case .Ne:
-			return l != r, .None
-		}
-		panic("eval: invalid operator on booleans")
-	}
-
-	a, b := left.(int), right.(int)
+	// integers first: they are what the decoder evaluates per element
+	a, is_int := left.(int)
+	if !is_int do return eval_binary_other(d, x.op, left, right), .None
+	b := right.(int)
 	n: int
 	overflow: bool
 	switch x.op {
@@ -357,5 +386,91 @@ eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval
 	}
 
 	if overflow do return nil, .Integer_Overflow
+	return n, .None
+}
+
+// x op y for two strings or two booleans.
+@(private = "file")
+eval_binary_other :: proc(d: ^Decoder, op: mdata.Binary_Op, x, y: Eval_Value) -> Eval_Value {
+	if l, is_bool := x.(bool); is_bool {
+		r := y.(bool)
+		#partial switch op {
+		case .Eq:
+			return l == r
+		case .Ne:
+			return l != r
+		}
+		panic("eval: invalid operator on booleans")
+	}
+
+	l, r := x.(string), y.(string)
+	#partial switch op {
+	case .Add:
+		joined := arn.arena_make(d.arena, byte, len(l) + len(r))
+		copy(joined, l)
+		copy(joined[len(l):], r)
+		return string(joined)
+	case .Eq:
+		return l == r
+	case .Ne:
+		return l != r
+	case .Lt:
+		return l < r
+	case .Le:
+		return l <= r
+	case .Gt:
+		return l > r
+	case .Ge:
+		return l >= r
+	}
+	panic("eval: invalid operator on strings")
+}
+
+// The decimal digits of n, with a - when it is negative, in the tree's
+// arena: like a string that + makes, it lasts as long as the tree.
+@(private = "file")
+int_to_string :: proc(d: ^Decoder, n: int) -> string {
+	buf: [20]byte // the digits of min(int), and its -
+	i := len(buf)
+	u := n < 0 ? -u64(n) : u64(n)
+	for {
+		i -= 1
+		buf[i] = '0' + byte(u % 10)
+		u /= 10
+		if u == 0 do break
+	}
+	if n < 0 {
+		i -= 1
+		buf[i] = '-'
+	}
+	out := arn.arena_make(d.arena, byte, len(buf) - i)
+	copy(out, buf[i:])
+	return string(out)
+}
+
+// The decimal integer s is, with an optional + or -: Invalid_Number when it
+// is not one, and Integer_Overflow when it does not fit an int.
+@(private = "file", require_results)
+string_to_int :: proc(s: string) -> (v: Eval_Value, err: dat.Read_Error) {
+	digits := s
+	negative := false
+	if len(digits) > 0 && (digits[0] == '-' || digits[0] == '+') {
+		negative = digits[0] == '-'
+		digits = digits[1:]
+	}
+	if len(digits) == 0 do return nil, .Invalid_Number
+	// counted as a negative number, which reaches min(int)
+	n := 0
+	for c in transmute([]byte)digits {
+		if c < '0' || c > '9' do return nil, .Invalid_Number
+		overflow_mul, overflow_sub: bool
+		n, overflow_mul = intrinsics.overflow_mul(n, 10)
+		n, overflow_sub = intrinsics.overflow_sub(n, int(c - '0'))
+		if overflow_mul || overflow_sub do return nil, .Integer_Overflow
+	}
+	if !negative {
+		if n == min(int) do return nil, .Integer_Overflow
+		n = -n
+	}
 	return n, .None
 }
