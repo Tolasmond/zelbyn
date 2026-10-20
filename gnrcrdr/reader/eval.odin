@@ -21,13 +21,17 @@ Eval_Value :: union {
 
 // What _index and _ are, and the set instance whose value instance is
 // being evaluated: index is -1 when the expression is not evaluated for an
-// element of a repeat, element nil outside repeat-until, and self nil
-// outside a value instance.
+// element of a repeat, element nil outside repeat-until and valid, and
+// self nil outside a value instance. In a value instance, base is the
+// expression that gave self, in the context caller, through which the
+// instances enclosing self are found (ancestor).
 @(private = "file")
 Eval_Context :: struct {
 	index:   int,
 	element: fld.Value,
 	self:    ^fld.Instance,
+	base:    ^mdata.Expr,
+	caller:  ^Eval_Context,
 }
 
 // Evaluates e, an Int expression, in the set instance being decoded. index
@@ -194,11 +198,11 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		cond := eval(d, x.cond, ctx) or_return
 		return eval(d, cond.(bool) ? x.then : x.otherwise, ctx)
 	case mdata.Instance:
-		// a value instance's expression refers only to its own instance
-		if ctx.self != nil do return ctx.self, .None
-		i := x.root ? 0 : len(d.frames) - 1 - x.up
-		if i < 0 || i >= len(d.frames) do return nil, .Absent_Field
-		return d.frames[i].instance, .None
+		if x.root {
+			if len(d.frames) == 0 do return nil, .Absent_Field
+			return d.frames[0].instance, .None
+		}
+		return ancestor(d, ctx, x.up)
 	case mdata.Field_Ref:
 		base := eval(d, x.base, ctx) or_return
 		instance := base.(^fld.Instance)
@@ -233,7 +237,8 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		return single_value(ctx.element)
 	case mdata.Value_Ref:
 		base := eval(d, x.base, ctx) or_return
-		self := Eval_Context{index = -1, self = base.(^fld.Instance)}
+		caller := ctx
+		self := Eval_Context{index = -1, self = base.(^fld.Instance), base = x.base, caller = &caller}
 		if x.instance.cond != nil {
 			cond := eval(d, x.instance.cond, self) or_return
 			if !cond.(bool) do return nil, .Absent_Field
@@ -245,6 +250,47 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		panic("eval: unresolved expression")
 	}
 	panic("eval: invalid expression")
+}
+
+// The instance up levels above that of ctx (_parent is 1), from the
+// frames, or in a value instance, through base: a set has one place in the
+// plan, so the instances enclosing self are the values of the expressions
+// base is made of, innermost first, then those enclosing the instance it
+// starts from, in caller.
+@(private = "file", require_results)
+ancestor :: proc(d: ^Decoder, ctx: Eval_Context, up: int) -> (instance: ^fld.Instance, err: dat.Read_Error) {
+	if ctx.self == nil {
+		i := len(d.frames) - 1 - up
+		if i < 0 do return nil, .Absent_Field
+		return d.frames[i].instance, .None
+	}
+	if up == 0 do return ctx.self, .None
+
+	up := up
+	e := ctx.base
+	for {
+		#partial switch x in e.variant {
+		case mdata.Field_Ref:
+			// a field's instance is in the instance of its base
+			up -= 1
+			if up == 0 {
+				v := eval(d, x.base, ctx.caller^) or_return
+				return v.(^fld.Instance), .None
+			}
+			e = x.base
+		case mdata.Index:
+			// an element is in the instance of its array's field
+			e = x.operand
+		case mdata.Instance:
+			if x.root do return nil, .Absent_Field
+			return ancestor(d, ctx.caller^, x.up + up)
+		case mdata.Repeat_Element:
+			// _ is in the instance being decoded
+			return ancestor(d, ctx.caller^, up - 1)
+		case:
+			panic("ancestor: the base of a value instance is not an instance")
+		}
+	}
 }
 
 // Evaluates e, a Stream expression, in the set instance being decoded.

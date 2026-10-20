@@ -27,14 +27,16 @@ import "core:strings"
 //   - imported schemas, whose top-level types are used by their meta id,
 //     each with its own meta
 //   - attributes: id, type, size, size-eos, terminator with consume, include
-//     and eos-error, pad-right, contents, if, enum, valid, repeat (expr,
-//     eos, until) with repeat-expr and repeat-until, encoding, doc, doc-ref
+//     and eos-error, pad-right, contents, if, enum, valid (eq, min, max,
+//     any-of, in-enum, expr), repeat (expr, eos, until) with repeat-expr
+//     and repeat-until, encoding, doc, doc-ref
 //   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), b1-b64
 //     (le/be suffixes or meta bit-endian), str and byte arrays (no type)
 //     with size, size-eos or terminator, strz, user types (with size,
 //     size-eos or terminator, read from a substream), and switch-on whose
 //     cases are user types, also with size, size-eos or terminator
-//   - value instances, with if and enum, and parse instances: instances
+//   - value instances, with if and enum, over their type and through
+//     _parent and _root those enclosing it, and parse instances: instances
 //     with pos, io (_io or the _io of a set instance) and the keys of an
 //     attribute
 //   - params of integer types, bool and bytes, in types and at the top
@@ -45,8 +47,8 @@ import "core:strings"
 //
 // Not supported yet (Unsupported): instances without pos or value, params
 // of other types (str, user types, struct, io, any) and on the top-level
-// type of the schema compiled, and any valid constant that is not an
-// integer or string literal.
+// type of the schema compiled, _io in a value instance, valid on a float,
+// and min and max on a type other than an integer.
 
 Error_Kind :: enum {
 	None,
@@ -167,7 +169,7 @@ parse_schema :: proc(c: ^Compiler, src: string) -> (root: ^yml.Node, ok: bool) {
 Instance_Source :: struct {
 	spec:      ^yml.Node, // its mapping in instances, which has a value key
 	td:        ^Type_Def,
-	set:       ^mdata.Node,
+	scope:     expr.Scope, // that of the set's fields
 	compiling: bool,
 }
 
@@ -751,7 +753,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 			inst := new(mdata.Value_Instance, c.allocator)
 			inst.name = e.key.text
 			src := new(Instance_Source, c.scratch)
-			src^ = {spec = e.value, td = td, set = set}
+			src^ = {spec = e.value, td = td, scope = scope}
 			c.instances[inst] = src
 			append(&instances, inst)
 		} else {
@@ -872,7 +874,8 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 
 // Compiles the if and the expression of inst, a value instance of set.
 // They can use the fields of set compiled so far and its other value
-// instances. An enum keeps the integer, as on an attribute.
+// instances, and through _root and _parent, those of the sets enclosing
+// it. An enum keeps the integer, as on an attribute.
 @(private = "file")
 compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Instance) -> bool {
 	src := c.instances[inst]
@@ -884,9 +887,7 @@ compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Inst
 	src.compiling = true
 	defer src.compiling = false
 
-	types := make([]^mdata.Node, 1, c.scratch)
-	types[0] = set
-	scope := scope_of(c, src.td, types)
+	scope := src.scope
 	scope.instance = true
 
 	if n := get(src.spec, "if"); n != nil {
@@ -1102,11 +1103,6 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	}
 	compile_terminator(c, attr, id, node, strz) or_return
 
-	if valid != nil {
-		// the constants of a bit type have the type of its values
-		node.valid = compile_valid(c, valid, id, node.type == .Bits ? mdata.bits_type(int(node.width)) : node.type) or_return
-	}
-
 	if bits := get(attr, "-bits"); bits != nil {
 		if node.width > 0 do return fail(c, .Invalid, bits, "%s: -bits does not apply to a bit type", id)
 		node.bits = compile_bits(c, bits, id, node.type, ids) or_return
@@ -1120,6 +1116,10 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	}
 	if switch_node != nil {
 		compile_switch(c, td, switch_node, id, node, element_scope) or_return
+	}
+	// after the type's fields, which an expr can refer to through _
+	if valid != nil {
+		node.valid = compile_valid(c, attr, valid, id, node, scope) or_return
 	}
 
 	// repeat-until refers to the element just read, so it is compiled after
@@ -1492,68 +1492,194 @@ byte_list :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (bytes: []byte, o
 	return b[:], true
 }
 
-// valid: a constant (eq), or a mapping of eq, min and max, or any-of.
+// valid on node, an attribute or a parse instance attr, in scope: a
+// constant (eq), or a mapping of eq, min and max, any-of, expr or in-enum.
+// A constant is a literal of the value's type (an integer or an enum
+// constant, a string literal, or a list of bytes, [0x50, 0x4b], for a
+// blob), or an expression of that type; in it and in expr, _ is the
+// value. The check keeps Scalars when every constant is a literal, as
+// most are, and is a Valid_Expr otherwise.
 @(private = "file")
-compile_valid :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Type) -> (valid: mdata.Valid, ok: bool) {
-	if type == .Set do return nil, fail(c, .Invalid, n, "%s: valid does not apply to a user type", id)
+compile_valid :: proc(c: ^Compiler, attr, n: ^yml.Node, id: string, node: ^mdata.Node, scope: expr.Scope) -> (valid: mdata.Valid, ok: bool) {
+	// the constants of a bit type have the type of its values
+	type := node.type == .Bits ? mdata.bits_type(int(node.width)) : node.type
+	scope := scope
+	scope.element = node
+	scope.in_repeat = !mdata.is_single(node)
 
+	eq, lo, hi, any_of, ex, in_enum: ^yml.Node
 	switch n.kind {
 	case .Scalar:
-		return mdata.Valid_Eq{constant(c, n, id, type) or_return}, true
+		eq = n
 	case .Seq:
 		return nil, fail(c, .Invalid, n, "%s: valid must be a constant or a mapping", id)
 	case .Map:
+		check_keys(c, n, {what = "%s: valid", name = id, allowed = {"eq", "min", "max", "any-of", "expr", "in-enum"}}) or_return
+		eq, lo, hi, any_of, ex, in_enum = get(n, "eq"), get(n, "min"), get(n, "max"), get(n, "any-of"), get(n, "expr"), get(n, "in-enum")
+		forms := int(eq != nil) + int(lo != nil || hi != nil) + int(any_of != nil) + int(ex != nil) + int(in_enum != nil)
+		if forms != 1 do return nil, fail(c, .Invalid, n, "%s: valid needs exactly one of eq, min and max, any-of, expr and in-enum", id)
 	}
-
-	check_keys(c, n, {what = "%s: valid", name = id, allowed = {"eq", "min", "max", "any-of"}, unsupported = {"expr", "in-enum"}}) or_return
-
-	eq, lo, hi, any_of := get(n, "eq"), get(n, "min"), get(n, "max"), get(n, "any-of")
-	forms := int(eq != nil) + int(lo != nil || hi != nil) + int(any_of != nil)
-	if forms != 1 do return nil, fail(c, .Invalid, n, "%s: valid needs exactly one of eq, min and max, or any-of", id)
 
 	switch {
-	case eq != nil:
-		return mdata.Valid_Eq{constant(c, eq, id, type) or_return}, true
-	case any_of != nil:
-		if any_of.kind != .Seq do return nil, fail(c, .Invalid, any_of, "%s: any-of must be a sequence", id)
-		values := make([]mdata.Scalar, len(any_of.items), c.allocator)
-		for item, i in any_of.items {
-			values[i] = constant(c, item, id, type) or_return
-		}
-		return mdata.Valid_Any_Of{values}, true
+	case ex != nil:
+		cond := compile_expr(c, ex, "valid", scope, .Bool) or_return
+		checks := make([]mdata.Valid_Check, 1, c.allocator)
+		checks[0] = {cond, .Expr_False}
+		return mdata.Valid_Expr{checks}, true
+	case in_enum != nil:
+		return compile_in_enum(c, attr, in_enum, id, scope.enums)
+	}
+	if type == .Set do return nil, fail(c, .Invalid, n, "%s: valid on a user type must be an expr", id)
+	if type != .Bool && type != .String && type != .Blob && type not_in INTEGER_TYPES {
+		return nil, fail(c, .Unsupported, n, "%s: valid on a %v is not supported", id, type)
+	}
+	if (lo != nil || hi != nil) && type not_in INTEGER_TYPES {
+		return nil, fail(c, .Unsupported, n, "%s: min and max are only supported on integer types", id)
 	}
 
-	if type not_in INTEGER_TYPES do return nil, fail(c, .Unsupported, n, "%s: min and max are only supported on integer types", id)
-	r: mdata.Valid_Range
-	if lo != nil do r.min = constant(c, lo, id, type) or_return
-	if hi != nil do r.max = constant(c, hi, id, type) or_return
-	if lo != nil && hi != nil && int_of(r.min) > int_of(r.max) do return nil, fail(c, .Invalid, n, "%s: min is above max", id)
-	return r, true
+	nodes := []^yml.Node{eq}
+	if lo != nil || hi != nil do nodes = []^yml.Node{lo, hi}
+	if any_of != nil {
+		if any_of.kind != .Seq do return nil, fail(c, .Invalid, any_of, "%s: any-of must be a sequence", id)
+		nodes = any_of.items
+	}
+	bounds := make([]Bound, len(nodes), c.scratch)
+	literal := true
+	for x, i in nodes {
+		if x == nil do continue
+		bounds[i] = compile_bound(c, x, id, type, scope) or_return
+		literal &&= bounds[i].value != nil
+	}
+
+	if literal {
+		switch {
+		case eq != nil:
+			return mdata.Valid_Eq{bounds[0].value}, true
+		case any_of != nil:
+			values := make([]mdata.Scalar, len(bounds), c.allocator)
+			for b, i in bounds do values[i] = b.value
+			return mdata.Valid_Any_Of{values}, true
+		}
+		r := mdata.Valid_Range{bounds[0].value, bounds[1].value}
+		if lo != nil && hi != nil && int_of(r.min) > int_of(r.max) do return nil, fail(c, .Invalid, n, "%s: min is above max", id)
+		return r, true
+	}
+
+	for b, i in bounds {
+		if nodes[i] != nil && b.e == nil do return nil, fail(c, .Unsupported, nodes[i], "%s: %s cannot be compared with an expression", id, nodes[i].text)
+	}
+	checks := make([dynamic]mdata.Valid_Check, c.allocator)
+	value := new_expr(c, type == .Bool ? .Bool : type == .String ? .String : .Int, mdata.Repeat_Element{node})
+	switch {
+	case eq != nil:
+		append(&checks, mdata.Valid_Check{new_expr(c, .Bool, mdata.Binary{.Eq, value, bounds[0].e}), .Not_Equal})
+	case any_of != nil:
+		cond: ^mdata.Expr
+		for b in bounds {
+			x := new_expr(c, .Bool, mdata.Binary{.Eq, value, b.e})
+			cond = cond == nil ? x : new_expr(c, .Bool, mdata.Binary{.Logical_Or, cond, x})
+		}
+		append(&checks, mdata.Valid_Check{cond, .Not_Any_Of})
+	case:
+		if lo != nil do append(&checks, mdata.Valid_Check{new_expr(c, .Bool, mdata.Binary{.Ge, value, bounds[0].e}), .Less_Than_Min})
+		if hi != nil do append(&checks, mdata.Valid_Check{new_expr(c, .Bool, mdata.Binary{.Le, value, bounds[1].e}), .Greater_Than_Max})
+	}
+	return mdata.Valid_Expr{checks[:]}, true
 }
 
-// A valid constant, as type: an integer literal for an integer type, or a
-// string literal ("text" or 'text', without escapes) for a str.
+// A constant of valid: value when it is a literal, and e when it can be
+// compared in an expression; at least one is set.
 @(private = "file")
-constant :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Type) -> (value: mdata.Scalar, ok: bool) {
-	text := expect_scalar(c, n, "a valid constant") or_return
-	text = strings.trim_space(text)
+Bound :: struct {
+	value: mdata.Scalar,
+	e:     ^mdata.Expr,
+}
+
+// The constant n of valid, on a value of type, in scope.
+@(private = "file")
+compile_bound :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Type, scope: expr.Scope) -> (b: Bound, ok: bool) {
+	text := strings.trim_space(expect_scalar(c, n, "a valid constant") or_return)
 
 	#partial switch type {
+	case .Blob:
+		bytes, is_list := byte_literal(c, text)
+		if !is_list do return {}, fail(c, .Unsupported, n, "%s: a valid constant for a blob must be a list of bytes, as [0x50, 0x4b]", id)
+		return {value = bytes}, true
+	case .Bool:
+		return {e = compile_expr(c, n, "valid", scope, .Bool) or_return}, true
 	case .String:
-		if len(text) >= 2 && (text[0] == '"' || text[0] == '\'') && text[len(text) - 1] == text[0] {
-			inner := text[1:len(text) - 1]
-			if strings.contains_any(inner, "\\\"'") do return nil, fail(c, .Unsupported, n, "%s: escapes and quotes in a string literal are not supported", id)
-			return inner, true
-		}
-		return nil, fail(c, .Unsupported, n, "%s: a valid constant for a str must be a string literal (\"text\")", id)
-	case .Int8, .UInt8, .Int16, .UInt16, .Int32, .UInt32, .Int64, .UInt64:
-		v, is_int := parse_int(text)
-		if !is_int do return nil, fail(c, .Unsupported, n, "%s: a valid constant for an integer must be an integer literal, not %q", id, text)
-		value, ok = int_scalar(type, v)
-		if !ok do return nil, fail(c, .Invalid, n, "%s: %s does not fit in a %v", id, text, type)
-		return value, true
+		b.e = compile_expr(c, n, "valid", scope, .String) or_return
+		if lit, is_literal := b.e.variant.(mdata.String_Literal); is_literal do b.value = lit.value
+		return b, true
 	}
-	return nil, fail(c, .Unsupported, n, "%s: valid on a %v is not supported", id, type)
+
+	// an integer literal is read here too, since one beyond an int does
+	// not parse as an expression
+	v, is_int := parse_int(text)
+	if !is_int {
+		b.e = compile_expr(c, n, "valid", scope, .Int) or_return
+		v, is_int = int_literal(b.e)
+		if !is_int do return b, true
+	} else if v >= i128(min(int)) && v <= i128(max(int)) {
+		b.e = new_expr(c, .Int, mdata.Int_Literal{int(v)})
+	}
+	b.value, ok = int_scalar(type, v)
+	if !ok do return {}, fail(c, .Invalid, n, "%s: %s does not fit in a %v", id, text, type)
+	return b, true
+}
+
+// The value of e when it is an integer literal or a negated one; enum
+// constants are already literals.
+@(private = "file")
+int_literal :: proc(e: ^mdata.Expr) -> (v: i128, ok: bool) {
+	#partial switch x in e.variant {
+	case mdata.Int_Literal:
+		return i128(x.value), true
+	case mdata.Unary:
+		if x.op != .Neg do return
+		lit := x.operand.variant.(mdata.Int_Literal) or_return
+		return -i128(lit.value), true
+	}
+	return
+}
+
+// text as a list of bytes, [0x50, 0x4b]: integer literals from 0 to 255.
+@(private = "file")
+byte_literal :: proc(c: ^Compiler, text: string) -> (bytes: []byte, ok: bool) {
+	if len(text) < 2 || text[0] != '[' || text[len(text) - 1] != ']' do return
+	b := make([dynamic]byte, c.allocator)
+	for item in strings.split(text[1:len(text) - 1], ",", c.scratch) {
+		v := parse_int(strings.trim_space(item)) or_return
+		if v < 0 || v > 255 do return
+		append(&b, byte(v))
+	}
+	return b[:], true
+}
+
+// valid: in-enum: true, on attr, whose enum is among enums: its value is
+// one of the enum's. in-enum: false checks nothing.
+@(private = "file")
+compile_in_enum :: proc(c: ^Compiler, attr, n: ^yml.Node, id: string, enums: []expr.Enum) -> (valid: mdata.Valid, ok: bool) {
+	if !(boolean(c, n, "in-enum") or_return) do return nil, true
+	enum_node := get(attr, "enum")
+	if enum_node == nil do return nil, fail(c, .Invalid, n, "%s: in-enum needs an enum", id)
+	// the enum key is checked first, so the enum is found
+	for e in enums {
+		if e.name != enum_node.text do continue
+		values := make([]int, len(e.values), c.allocator)
+		for v, i in e.values do values[i] = v.value
+		slice.sort(values)
+		return mdata.Valid_In_Enum{values}, true
+	}
+	panic("compile_in_enum: no enum")
+}
+
+// A resolved expression made by the compiler, with no text.
+@(private = "file")
+new_expr :: proc(c: ^Compiler, type: mdata.Expr_Type, variant: mdata.Expr_Variant) -> ^mdata.Expr {
+	e := new(mdata.Expr, c.allocator)
+	e^ = {type = type, offset = -1, variant = variant}
+	return e
 }
 
 @(private = "file")

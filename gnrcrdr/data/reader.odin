@@ -21,6 +21,8 @@ Read_Error :: enum {
 	Less_Than_Min,         // a value is below its field's minimum (valid: min)
 	Greater_Than_Max,      // a value is above its field's maximum (valid: max)
 	Not_Any_Of,            // a value is none of those its field allows (valid: any-of)
+	Not_In_Enum,           // a value is none of its field's enum's (valid: in-enum)
+	Expr_False,            // a value fails its field's valid: expr
 	File_Read_Failed,      // the input file could not be read
 }
 

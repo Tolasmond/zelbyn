@@ -5,6 +5,7 @@ import fld "../gnrcrdr/field"
 import ksy "../gnrcrdr/ksy"
 import mdat "../gnrcrdr/metadata"
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 
@@ -80,7 +81,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: b65\n", .Invalid, 6, 11, "a: unknown type b65"},
 	{HEAD + "seq:\n  - id: a\n    type: b01\n", .Invalid, 6, 11, "a: unknown type b01"},
 	{HEAD + "seq:\n  - id: a\n    type: b4\n    size: 1\n", .Invalid, 7, 5, "a: size does not apply to b4"},
-	{HEAD + "seq:\n  - id: a\n    type: b1\n    valid: true\n", .Unsupported, 7, 12, "a: valid on a Bool is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: b1\n    valid:\n      min: false\n", .Unsupported, 8, 7, "a: min and max are only supported on integer types"},
 	{"meta:\n  id: t\n  bit-endian: x\n", .Invalid, 3, 15, "bit-endian must be le or be"},
 	{HEAD + "seq:\n  - id: a\n    type: str\n    encoding: ASCII\n", .Invalid, 6, 11, "a: str needs size, size-eos or terminator"},
 	{HEAD + "seq:\n  - id: a\n    type: str\n    size: 1\n", .Invalid, 6, 11, "a: str needs an encoding"},
@@ -138,7 +139,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    repeat: expr\n    repeat-expr: 2\ntypes:\n  s: {}\n", .Unsupported, 7, 18, "a repeated switch-on without a _ case, size or size-eos is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        _: s\n  - id: b\n    size: a.c\ntypes:\n  s:\n    seq:\n      - id: c\n        type: u1\n", .Unsupported, 11, 11, "size: a is a switch-on field; it cannot be used in expressions"},
 
-	// instances: value instances, over their own type, and parse instances
+	// instances: value instances and parse instances
 	{HEAD + "instances:\n  x:\n    doc: d\n", .Unsupported, 5, 3, "instance x: an instance without pos or value is not supported"},
 	{HEAD + "instances:\n  x:\n    size: 1\n", .Unsupported, 5, 3, "instance x: an instance without pos or value is not supported"},
 	{HEAD + "instances:\n  x:\n    value: 1\n    pos: 0\n", .Invalid, 7, 5, `instance x: unknown key "pos"`},
@@ -155,7 +156,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "instances:\n  x:\n    value: y\n  y:\n    value: x + 1\n", .Invalid, 6, 12, "value instance x refers to itself"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\ninstances:\n  a:\n    value: 1\n", .Invalid, 8, 3, "id a is already used (line 5, column 9)"},
 	{HEAD + "seq:\n  - id: b\n    size: 1\ninstances:\n  x:\n    value: b\n", .Unsupported, 9, 12, "value instance x: only integer, boolean and string values are supported"},
-	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    instances:\n      x:\n        value: _parent.y\n", .Unsupported, 11, 16, "_parent in a value instance is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    instances:\n      x:\n        value: _parent.y\n", .Invalid, 11, 24, "value: t has no field y"},
+	{HEAD + "instances:\n  x:\n    value: _parent.y\n", .Invalid, 6, 12, "value: _parent: t has no enclosing set here"},
 	{HEAD + "instances:\n  x:\n    value: _io.pos\n", .Unsupported, 6, 12, "_io in a value instance is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: x\n  - id: n\n    type: u1\ninstances:\n  x:\n    value: n\n", .Invalid, 11, 12, "value: t has no field n"},
 	{HEAD + "seq:\n  - id: a\n    type: s\n    -peek: [1]\n    -until-peek: [0]\ntypes:\n  s: {}\n", .Invalid, 8, 5, "-until-peek cannot be combined with -peek"},
@@ -171,11 +173,17 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 
 	// valid
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid: 256\n", .Invalid, 7, 12, "a: 256 does not fit in a UInt8"},
-	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid: x + 1\n", .Unsupported, 7, 12, "must be an integer literal"},
-	{HEAD + "seq:\n  - id: a\n    type: str\n    size: 1\n    encoding: ASCII\n    valid: G\n", .Unsupported, 9, 12, "must be a string literal"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid: x + 1\n", .Invalid, 7, 12, "valid: t has no field x"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid: '\"x\"'\n", .Invalid, 7, 12, "valid: expected an integer, found a string"},
+	{HEAD + "seq:\n  - id: a\n    type: str\n    size: 1\n    encoding: ASCII\n    valid: G\n", .Invalid, 9, 12, "valid: t has no field G"},
+	{HEAD + "seq:\n  - id: a\n    size: 1\n    valid: 1\n", .Unsupported, 7, 12, "a: a valid constant for a blob must be a list of bytes"},
+	{HEAD + "seq:\n  - id: a\n    size: 1\n    valid: '[256]'\n", .Unsupported, 7, 12, "a: a valid constant for a blob must be a list of bytes"},
+	{HEAD + "seq:\n  - id: a\n    type: s\n    valid: 1\ntypes:\n  s: {}\n", .Invalid, 7, 12, "a: valid on a user type must be an expr"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid:\n      in-enum: true\n", .Invalid, 8, 16, "a: in-enum needs an enum"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid:\n      min: 2\n      max: 1\n", .Invalid, 8, 7, "a: min is above max"},
-	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid:\n      eq: 1\n      min: 0\n", .Invalid, 8, 7, "exactly one of eq, min and max, or any-of"},
-	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid:\n      expr: _ > 1\n", .Unsupported, 8, 7, "a: valid: expr is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid:\n      eq: 1\n      min: 0\n", .Invalid, 8, 7, "exactly one of eq, min and max, any-of, expr and in-enum"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid:\n      expr: _ + 1\n", .Invalid, 8, 15, "valid: expected a boolean, found an integer"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid:\n      expr: _ > b\n  - id: b\n    type: u1\n", .Invalid, 8, 17, "valid: t has no field b"},
 	{HEAD + "seq:\n  - id: a\n    type: f4\n    valid: 1\n", .Unsupported, 7, 12, "valid on a Float32"},
 
 	// -bits
@@ -665,6 +673,172 @@ t[0].kind[0] = "one"
 t[0].body[0].v[0] = 7
 `)
 	expect_dump(t, "no chunks", ksy_dump(t, src, {'A', 'B', 0, 'a', 'b', '-', '0'}), "error: Index_Out_Of_Range at 7 in t[0].pad[0]")
+}
+
+// valid with expressions: a bound that is a value instance, in-enum, expr
+// with _ and with the field's own name, any-of with a string expression
+// and with byte lists, a boolean against an expression, expr on the
+// instances of a repeated user type with _index, and an enum constant.
+// Each fails with its own error, as in Kaitai's runtimes.
+@(test)
+ksy_valid_expressions :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: version
+    type: u1
+    valid:
+      min: 1
+      max: limit
+  - id: kind
+    type: u1
+    enum: kind
+    valid:
+      in-enum: true
+  - id: flags
+    type: u1
+    valid:
+      expr: (_ & 1) == 0 and flags < 0x80
+  - id: tag
+    type: str
+    size: 2
+    encoding: ASCII
+    valid:
+      any-of: ['"ab"', expected]
+  - id: bom
+    size: 2
+    valid:
+      any-of: ['[0xfe, 0xff]', '[0xff, 0xfe]']
+  - id: enabled
+    type: b1
+    valid: version > 1
+  - id: rest
+    type: b7
+  - id: items
+    type: item
+    repeat: expr
+    repeat-expr: 2
+    valid:
+      expr: _.v >= _index
+  - id: last
+    type: u1
+    enum: kind
+    valid: kind::two
+instances:
+  limit:
+    value: 3
+  expected:
+    value: '"c" + "d"'
+enums:
+  kind:
+    1: one
+    2: two
+types:
+  item:
+    seq:
+      - id: v
+        type: u1
+`
+	ok := []byte{2, 2, 0x10, 'c', 'd', 0xff, 0xfe, 0x85, 0, 1, 2}
+	expect_dump(t, "pass", ksy_dump(t, src, ok), `t[0].version[0] = 2
+t[0].kind[0] = 2
+t[0].flags[0] = 16
+t[0].tag[0] = "cd"
+t[0].bom[0] = <2 bytes> ff fe
+t[0].enabled[0] = true
+t[0].rest[0] = 5
+t[0].items[0].v[0] = 0
+t[0].items[1].v[0] = 1
+t[0].last[0] = 2
+`)
+
+	Failure :: struct {
+		at:    int,
+		value: byte,
+		want:  string,
+	}
+	failures := []Failure {
+		{0, 4, "error: Greater_Than_Max at 0 in t[0].version[0]"},
+		{1, 3, "error: Not_In_Enum at 1 in t[0].kind[0]"},
+		{2, 0x11, "error: Expr_False at 2 in t[0].flags[0]"},
+		{2, 0x90, "error: Expr_False at 2 in t[0].flags[0]"},
+		{3, 'x', "error: Not_Any_Of at 3 in t[0].tag[0]"},
+		{5, 0, "error: Not_Any_Of at 5 in t[0].bom[0]"},
+		{0, 1, "error: Not_Equal at 7 in t[0].enabled[0]"},
+		{9, 0, "error: Expr_False at 9 in t[0].items[1]"},
+		{10, 1, "error: Not_Equal at 10 in t[0].last[0]"},
+	}
+	for f in failures {
+		input := slice.clone(ok, context.temp_allocator)
+		input[f.at] = f.value
+		expect_dump(t, f.want, ksy_dump(t, src, input), f.want)
+	}
+}
+
+// _parent and _root in value instances, which are evaluated for the
+// instance an expression refers to them in: from their own type, from its
+// parent (through an element of an array), and from the root (through two
+// fields), with _parent of _parent, and _parent in a value instance used
+// through _parent and in an if.
+@(test)
+ksy_parent_and_root_in_value_instances :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: scale
+    type: u1
+  - id: groups
+    type: group
+    repeat: expr
+    repeat-expr: 2
+  - id: tail
+    size: groups[1].entries[0].scaled
+  - id: tail2
+    size: groups[0].entries[1].grand
+types:
+  group:
+    seq:
+      - id: k
+        type: u1
+      - id: entries
+        type: entry
+        repeat: expr
+        repeat-expr: 2
+      - id: d
+        size: entries[1].scaled - entries[0].scaled
+    instances:
+      factor:
+        value: _parent.scale * k
+    types:
+      entry:
+        seq:
+          - id: x
+            type: u1
+          - id: blob
+            size: scaled % 3
+        instances:
+          scaled:
+            value: x * _parent.factor + _root.scale
+          grand:
+            value: _parent._parent.scale
+            if: _parent.k == 1
+`
+	input := []byte{1, 1, 1, 0xaa, 0xab, 2, 0xd0, 2, 0, 0xb0, 1, 0xe0, 0xe1, 0xf0, 0xf1}
+	expect_dump(t, "outer", ksy_dump(t, src, input), `t[0].scale[0] = 1
+t[0].groups[0].k[0] = 1
+t[0].groups[0].entries[0].x[0] = 1
+t[0].groups[0].entries[0].blob[0] = <2 bytes> aa ab
+t[0].groups[0].entries[1].x[0] = 2
+t[0].groups[0].entries[1].blob[0] = <0 bytes>
+t[0].groups[0].d[0] = <1 bytes> d0
+t[0].groups[1].k[0] = 2
+t[0].groups[1].entries[0].x[0] = 0
+t[0].groups[1].entries[0].blob[0] = <1 bytes> b0
+t[0].groups[1].entries[1].x[0] = 1
+t[0].groups[1].entries[1].blob[0] = <0 bytes>
+t[0].groups[1].d[0] = <2 bytes> e0 e1
+t[0].tail[0] = <1 bytes> f0
+t[0].tail2[0] = <1 bytes> f1
+`)
+	// in the second group, whose k is 2, grand has no value
+	absent, _ := strings.replace_all(src, "size: groups[0].entries[1].grand", "size: groups[1].entries[1].grand", context.temp_allocator)
+	expect_dump(t, "absent", ksy_dump(t, absent, input), "error: Absent_Field at 14 in t[0].tail2[0]")
 }
 
 // size, terminator and size-eos on a switch-on field: the case chosen is

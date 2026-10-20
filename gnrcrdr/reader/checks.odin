@@ -5,12 +5,30 @@ import fld "../field"
 import mdata "../metadata"
 import "core:slice"
 
-// Checks value, of a field that is not a set, against valid, whose
-// constants have the value's type.
+// Checks value, element index of a field that has valid, against it. The
+// value is already in the tree, so that the expressions of a Valid_Expr see
+// it under the field's name as well as as _.
 @(private, require_results)
-check_valid :: proc(value: fld.Value, valid: mdata.Valid) -> dat.Read_Error {
-	if valid == nil do return .None
+check_valid :: proc(d: ^Decoder, value: fld.Value, valid: mdata.Valid, index: int) -> dat.Read_Error {
+	#partial switch c in valid {
+	case mdata.Valid_In_Enum:
+		n, is_int := int_of_value(value)
+		if !is_int do return .Not_In_Enum
+		if _, found := slice.binary_search(c.values, n); !found do return .Not_In_Enum
+		return .None
+	case mdata.Valid_Expr:
+		for check in c.checks {
+			ok := eval_bool(d, check.cond, index, value) or_return
+			if !ok do return check.err
+		}
+		return .None
+	}
+	return check_constant(value, valid)
+}
 
+// Checks value against valid, a check with constants of its type.
+@(private, require_results)
+check_constant :: proc(value: fld.Value, valid: mdata.Valid) -> dat.Read_Error {
 	switch v in value {
 	case i8:
 		return check_scalar(v, valid)
@@ -37,17 +55,42 @@ check_valid :: proc(value: fld.Value, valid: mdata.Valid) -> dat.Read_Error {
 	case []byte:
 		return check_bytes(v, valid)
 	case bool:
-		panic("check_valid: a check on a boolean")
+		panic("check_constant: a check on a boolean")
 	case ^fld.Instance:
-		panic("check_valid: called for a set")
+		panic("check_constant: called for a set")
 	}
-	panic("check_valid: no value")
+	panic("check_constant: no value")
+}
+
+// An integer value as an int; is_int is false for any other value, and for
+// a u64 above max(int).
+@(private = "file")
+int_of_value :: proc(value: fld.Value) -> (n: int, is_int: bool) {
+	#partial switch v in value {
+	case i8:
+		return int(v), true
+	case i16:
+		return int(v), true
+	case i32:
+		return int(v), true
+	case i64:
+		return int(v), true
+	case u8:
+		return int(v), true
+	case u16:
+		return int(v), true
+	case u32:
+		return int(v), true
+	case u64:
+		if v <= u64(max(int)) do return int(v), true
+	}
+	return 0, false
 }
 
 // Comparisons are written !(a <= b) so that a NaN fails every range.
 @(private = "file", require_results)
 check_scalar :: proc(v: $T, valid: mdata.Valid) -> dat.Read_Error {
-	switch c in valid {
+	#partial switch c in valid {
 	case mdata.Valid_Eq:
 		if v != c.value.(T) do return .Not_Equal
 	case mdata.Valid_Range:
@@ -64,11 +107,11 @@ check_scalar :: proc(v: $T, valid: mdata.Valid) -> dat.Read_Error {
 
 @(private = "file", require_results)
 check_bytes :: proc(v: []byte, valid: mdata.Valid) -> dat.Read_Error {
-	switch c in valid {
+	#partial switch c in valid {
 	case mdata.Valid_Eq:
 		if !slice.equal(v, c.value.([]byte)) do return .Not_Equal
 	case mdata.Valid_Range:
-		panic("check_valid: a range on a blob")
+		panic("check_constant: a range on a blob")
 	case mdata.Valid_Any_Of:
 		for x in c.values {
 			if slice.equal(v, x.([]byte)) do return .None
