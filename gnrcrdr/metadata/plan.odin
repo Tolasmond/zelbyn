@@ -28,6 +28,8 @@ Node :: struct {
 	params:          []^Node,           // Set only: Kaitai's params, each a field read once, of type Int64 (any integer type), Bool or Blob, whose value is its argument (see args)
 	args:            []^Expr,           // a Set with params: an Int, Bool or Bytes expression for each, evaluated where each instance is read, after the bytes of its substream
 	pos:             ^Expr,             // a parse instance only: an Int expression, the offset it is read at (see below); nil for every other field
+	io:              ^Expr,             // a parse instance only: a Stream expression, the stream it is read from (Kaitai's io); nil for that of the set instance it belongs to
+	keeps_stream:    bool,              // Set only: an io expression refers to the stream of its instances, which the decoder then keeps while it decodes (Io)
 	bits:            []Bit_Field,       // integer types only: packed subfields, decoded from each element
 	valid:           Valid,             // checked on every element; nil when there is no check
 }
@@ -182,7 +184,9 @@ Switch_Case :: struct {
 
 // A parse instance of a set (Kaitai's instances with pos) is a field read
 // at offset pos, an Int expression, in the stream that the set instance it
-// belongs to is read from; reading it does not move that stream. Each is
+// belongs to is read from, or the one io gives; reading it does not move
+// that stream. Its expressions, io and pos among them, are evaluated in the
+// set instance, where _io is still that instance's stream. Each is
 // read when an expression first refers to it, which can be from any field
 // of the set, or else after the set's children, in order, so that every
 // one is in the decoded tree. Its cond is evaluated before pos. Its values

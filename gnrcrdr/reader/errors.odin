@@ -28,12 +28,15 @@ Decoder :: struct {
 	path:      [dynamic]Path_Segment,
 	frames:    [dynamic]Frame,  // the set instances being decoded, outermost first
 	streams:   [dynamic]Stream, // the streams that substreams were taken from, outermost first, as they are now
+	kept:      map[^fld.Instance]Stream, // the streams of the instances of sets with keeps_stream, in the same arena; nil until one is read
 	spans:     bool,            // the tree records spans: read_parse_instance is called with SPANS
 	err:       Parse_Error,
 }
 
 // A set instance being decoded, and where: its stream is streams[stream],
-// or r when stream is len(streams); path[:path] is its path.
+// or r when stream is len(streams); path[:path] is its path. Only while a
+// parse instance of it is read from another stream (Node.io) is the stream
+// of the innermost frame not r.
 @(private)
 Frame :: struct {
 	instance: ^fld.Instance,

@@ -185,11 +185,11 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 			return len(o), .None
 		}
 	case mdata.Io_Pos:
-		return d.r.pos, .None
+		return own_stream(d).pos, .None
 	case mdata.Io_Size:
-		return len(d.r.data), .None
+		return len(own_stream(d).data), .None
 	case mdata.Io_Eof:
-		return dat.at_eof(&d.r), .None
+		return dat.at_eof(own_stream(d)), .None
 	case mdata.Repeat_Index:
 		assert(ctx.index >= 0, "eval: _index outside a repeat")
 		return ctx.index, .None
@@ -204,10 +204,47 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 			if !cond.(bool) do return nil, .Absent_Field
 		}
 		return eval(d, x.instance.expr, self)
+	case mdata.Io:
+		panic("eval: a Stream expression (eval_stream)")
 	case mdata.Name, mdata.Member, mdata.Enum_Constant:
 		panic("eval: unresolved expression")
 	}
 	panic("eval: invalid expression")
+}
+
+// Evaluates e, a Stream expression, in the set instance being decoded.
+@(private, require_results)
+eval_stream :: proc(d: ^Decoder, e: ^mdata.Expr) -> (stream: Stream, err: dat.Read_Error) {
+	assert(e.type == .Stream)
+	#partial switch x in e.variant {
+	case mdata.Ternary:
+		cond := eval_bool(d, x.cond) or_return
+		return eval_stream(d, cond ? x.then : x.otherwise)
+	case mdata.Io:
+		v := eval(d, x.instance, {index = -1}) or_return
+		instance := v.(^fld.Instance)
+		#reverse for f in d.frames {
+			if f.instance != instance do continue
+			if f.stream < len(d.streams) do return d.streams[f.stream], .None
+			return {d.r, d.base}, .None
+		}
+		// an instance that is not being decoded is of a set whose stream an
+		// io expression refers to, and so was kept
+		kept, ok := d.kept[instance]
+		assert(ok, "eval_stream: the stream of the instance was not kept")
+		return kept, .None
+	}
+	panic("eval_stream: not a Stream expression")
+}
+
+// The stream of the set instance being decoded, that _io refers to: r,
+// unless a parse instance of it is being read from another stream.
+@(private = "file")
+own_stream :: proc(d: ^Decoder) -> ^dat.Reader {
+	if len(d.frames) > 0 {
+		if f := d.frames[len(d.frames) - 1]; f.stream < len(d.streams) do return &d.streams[f.stream].r
+	}
+	return &d.r
 }
 
 // The value of a field read once, as its expression type.

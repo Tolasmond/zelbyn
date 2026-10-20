@@ -143,6 +143,8 @@ type_name :: proc(t: mdata.Expr_Type) -> string {
 		return "an array"
 	case .Struct:
 		return "a set"
+	case .Stream:
+		return "a stream"
 	}
 	return ""
 }
@@ -170,7 +172,7 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		resolve(r, x.then) or_return
 		resolve(r, x.otherwise) or_return
 		expect(r, x.cond, .Bool) or_return
-		if x.then.type != .Int && x.then.type != .Bool do return fail(r, .Unsupported, x.then.offset, "?: on %s is not supported", type_name(x.then.type))
+		if x.then.type != .Int && x.then.type != .Bool && x.then.type != .Stream do return fail(r, .Unsupported, x.then.offset, "?: on %s is not supported", type_name(x.then.type))
 		expect(r, x.otherwise, x.then.type) or_return
 		e.type = x.then.type
 	case mdata.Name:
@@ -179,7 +181,7 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		return resolve_member(r, e, x)
 	case mdata.Enum_Constant:
 		return resolve_enum_constant(r, e, x)
-	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref:
+	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref:
 		assert(e.type != .Unresolved, "resolve: a resolved variant without a type")
 	case:
 		panic("resolve: empty expression")
@@ -260,7 +262,10 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 		e.variant = mdata.Repeat_Index{}
 		e.type = .Int
 	case "_io":
-		return fail(r, .Unsupported, e.offset, "only _io.pos, _io.size and _io.eof are supported")
+		instance := new(mdata.Expr, r.allocator)
+		instance^ = {type = .Struct, offset = e.offset, variant = mdata.Instance{node = types[len(types) - 1]}}
+		e.variant = mdata.Io{instance}
+		e.type = .Stream
 	case "_":
 		if r.scope.element == nil do return fail(r, .Invalid, e.offset, "_ is only defined in repeat-until")
 		e.type = value_type(r, e, r.scope.element, "_") or_return
@@ -402,13 +407,23 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 		e.variant = inst
 		e.type = .Struct
 		return true
-	case "_root", "_io":
-		return fail(r, .Unsupported, e.offset, ".%s is not supported", m.name)
+	case "_io":
+		if operand.type != .Struct do return fail(r, .Invalid, e.offset, "%s has no _io; only a set has", type_name(operand.type))
+		// the decoder finds the stream of an instance being decoded in its
+		// frame, and keeps that of the instances of any other set
+		if _, is_instance := operand.variant.(mdata.Instance); !is_instance do struct_node(operand).keeps_stream = true
+		e.variant = mdata.Io{operand}
+		e.type = .Stream
+		return true
+	case "_root":
+		return fail(r, .Unsupported, e.offset, "._root is not supported")
 	}
 
 	#partial switch operand.type {
 	case .Struct:
 		return resolve_field(r, e, operand, m.name)
+	case .Stream:
+		return fail(r, .Unsupported, e.offset, "%s of a stream other than _io is not supported", m.name)
 	case .Array, .Bytes:
 		if m.name == "size" {
 			e.variant = mdata.Size{operand}
