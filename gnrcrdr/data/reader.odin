@@ -24,6 +24,7 @@ Read_Error :: enum {
 	Not_In_Enum,           // a value is none of its field's enum's (valid: in-enum)
 	Expr_False,            // a value fails its field's valid: expr
 	File_Read_Failed,      // the input file could not be read
+	Too_Deep,              // set instances are nested more deeply than the decoder allows, which only a recursive type can do
 }
 
 // Bounds-checked cursor over a byte slice. Every read either succeeds and

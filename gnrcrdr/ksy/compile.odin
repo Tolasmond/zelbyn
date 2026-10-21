@@ -36,9 +36,10 @@ import "core:strings"
 //   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), b1-b64
 //     (le/be suffixes or meta bit-endian), str and byte arrays (no type)
 //     with size, size-eos or terminator, strz, user types (with size,
-//     size-eos or terminator, read from a substream), and switch-on, also
-//     with size, size-eos or terminator, whose cases are user types or any
-//     of those types
+//     size-eos or terminator, read from a substream; also inside
+//     themselves, and the schema's top-level type, by its meta id), and
+//     switch-on, also with size, size-eos or terminator, whose cases are
+//     user types or any of those types
 //   - value instances, with if and enum, over their type and through
 //     _parent and _root those enclosing it, and parse instances: instances
 //     with pos, io (_io or the _io of a set instance) and the keys of an
@@ -53,7 +54,9 @@ import "core:strings"
 // of other types (str, user types, struct, io, any) and on the top-level
 // type of the schema compiled, _io in a value instance, valid on a float,
 // min and max on a type other than an integer, an endian that is a
-// switch-on, and imports in a type.
+// switch-on, imports in a type, and in a type that contains itself, the
+// members of the sets enclosing it, other than through the schema's _root,
+// and an instance that refers to itself through a field of its type.
 
 Error_Kind :: enum {
 	None,
@@ -126,11 +129,18 @@ Compiler :: struct {
 }
 
 // A set compiled, and its type. Sizes are rare, so the sets are searched
-// rather than hashed, which would cost every compile more.
+// rather than hashed, which would cost every compile more. reused_by holds
+// the fields of its type inside it (Node.recursive), which are given its
+// members once it is compiled; escape is then an error: the first
+// expression in it, or in the sets inside it, that refers to an instance
+// enclosing it (note_escapes), with what it is.
 @(private = "file")
 Set_Type :: struct {
-	set: ^mdata.Node,
-	td:  ^Type_Def,
+	set:         ^mdata.Node,
+	td:          ^Type_Def,
+	reused_by:   [dynamic]^mdata.Node, // in scratch; nil until one
+	escape:      ^yml.Node,
+	escape_what: string,
 }
 
 // A .ksy file: the schema being compiled, or one it imports.
@@ -218,7 +228,7 @@ Type_Def :: struct {
 	instances:   []yml.Entry, // the entries of instances, each checked
 	enums:       []expr.Enum,
 	params:      []Param_Def,
-	in_progress: bool, // its attributes are being compiled
+	compiling:   ^mdata.Node, // the set its attributes are being compiled into; nil when they are not
 	sizing:      bool, // its size is being found (type_bits)
 }
 
@@ -755,15 +765,20 @@ check_enum :: proc(c: ^Compiler, n: ^yml.Node, id: string, enums: []expr.Enum) -
 	return fail(c, .Invalid, n, "%s: no enum %s", id, enum_name)
 }
 
-// The type called name, looked up from td outward, then among the schemas
-// that td's schema imports.
+// The type called name, looked up from td outward, then as the top-level
+// type of td's schema, by its meta id, and among the schemas that td's
+// schema imports.
 @(private = "file")
 find_type :: proc(td: ^Type_Def, name: string) -> ^Type_Def {
-	for t := td; t != nil; t = t.parent {
+	t := td
+	for {
 		for sub in t.types {
 			if sub.name == name do return sub
 		}
+		if t.parent == nil do break
+		t = t.parent
 	}
+	if t.name == name do return t
 	for top in td.schema.imports {
 		if top.name == name do return top
 	}
@@ -783,16 +798,27 @@ visible_enums :: proc(c: ^Compiler, td: ^Type_Def) -> []expr.Enum {
 // Compiles the attributes and instances of td as those of set, an instance
 // of td. chain is the scope: the sets enclosing set, outermost first, then
 // set. Each attribute's expressions can refer to the attributes before it,
-// and to any instance whose expressions refer only to those.
+// and to any instance whose expressions refer only to those. When set is
+// inside a set of td being compiled, a type that contains itself, set is
+// read as that set (Node.recursive), whose expressions must then not refer
+// to the instances enclosing it. Once that set is compiled, set gets its
+// members, so that the decoder and the dumps need not look for them.
 @(private = "file")
 compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^mdata.Node) -> bool {
+	if td.compiling != nil {
+		set.recursive = td.compiling
+		st := set_type(c, td.compiling)
+		if st.reused_by == nil do st.reused_by = make([dynamic]^mdata.Node, c.scratch)
+		append(&st.reused_by, set)
+		return true
+	}
 	schema := c.schema
 	defer c.schema = schema
 	c.schema = td.schema
-	if td.in_progress do return fail(c, .Unsupported, td.spec, "type %s contains itself; recursive types are not supported", td.name)
-	td.in_progress = true
-	defer td.in_progress = false
-	append(&c.type_defs, Set_Type{set, td})
+	td.compiling = set
+	defer td.compiling = nil
+	set_index := len(c.type_defs)
+	append(&c.type_defs, Set_Type{set = set, td = td})
 
 	ids := make([dynamic]^yml.Node, c.scratch) // the id nodes of the attributes, bit fields and instances
 
@@ -876,7 +902,89 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 			if p.pos == nil do compile_parse_instance(c, set, p) or_return
 		}
 	}
+
+	// every expression in set and in the sets inside it is compiled
+	st := c.type_defs[set_index]
+	if len(st.reused_by) == 0 do return true
+	if st.escape != nil {
+		return fail(c, .Unsupported, st.escape, "%s: type %s contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it, other than through the _root of the schema decoded, or to an imported schema's _root", st.escape_what, td.name)
+	}
+	for field in st.reused_by {
+		field.children = set.children
+		field.slot_count = set.slot_count
+		field.instances = set.instances
+		field.parse_instances = set.parse_instances
+		field.params = set.params
+	}
 	return true
+}
+
+// The entry of c.type_defs for set, which was compiled.
+@(private = "file")
+set_type :: proc(c: ^Compiler, set: ^mdata.Node) -> ^Set_Type {
+	#reverse for &st in c.type_defs {
+		if st.set == set do return &st
+	}
+	panic("set_type: a set that was not compiled")
+}
+
+// Records e, the expression of n (what) compiled in scope, as the escape of
+// each set of the scope that it refers to a member of an instance
+// enclosing, through _parent, or to the _root of an imported schema, which
+// up reaches too. In a set that is reused (Node.recursive), such an
+// instance is of another set for the set's other instances, and for the
+// instances of the set that reuses it, which are inside it, that root is
+// the nearest instance of it, not the outermost. The _io of an enclosing
+// instance is found from the instance the decoder reaches, and so is right
+// in each of them.
+@(private = "file")
+note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, scope: expr.Scope) {
+	if e == nil do return
+	switch x in e.variant {
+	case mdata.Instance:
+		if x.root || (x.up == 0 && !x.imported_root) do return
+		innermost := len(scope.types) - 1
+		// the root of an imported schema is the outermost instance of it, not
+		// the up-th enclosing instance of a reused set
+		target := x.imported_root ? -1 : innermost - x.up
+		for set in scope.types[target + 1:] {
+			if st := set_type(c, set); st.escape == nil {
+				st.escape, st.escape_what = n, what
+			}
+		}
+	case mdata.Unary:
+		note_escapes(c, n, what, x.operand, scope)
+	case mdata.Binary:
+		note_escapes(c, n, what, x.left, scope)
+		note_escapes(c, n, what, x.right, scope)
+	case mdata.Ternary:
+		note_escapes(c, n, what, x.cond, scope)
+		note_escapes(c, n, what, x.then, scope)
+		note_escapes(c, n, what, x.otherwise, scope)
+	case mdata.Index:
+		note_escapes(c, n, what, x.operand, scope)
+		note_escapes(c, n, what, x.index, scope)
+	case mdata.Field_Ref:
+		note_escapes(c, n, what, x.base, scope)
+	case mdata.Size:
+		note_escapes(c, n, what, x.operand, scope)
+	case mdata.String_Length:
+		note_escapes(c, n, what, x.operand, scope)
+	case mdata.To_S:
+		note_escapes(c, n, what, x.operand, scope)
+	case mdata.To_I:
+		note_escapes(c, n, what, x.operand, scope)
+	case mdata.Array_Method:
+		note_escapes(c, n, what, x.operand, scope)
+	case mdata.Io:
+		if inst, is_instance := x.instance.variant.(mdata.Instance); is_instance && !inst.imported_root do return
+		note_escapes(c, n, what, x.instance, scope)
+	case mdata.Value_Ref:
+		note_escapes(c, n, what, x.base, scope)
+	case mdata.Int_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element:
+	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of:
+		panic("note_escapes: unresolved expression")
+	}
 }
 
 // The scope of expressions in td, whose instance is the last of chain.
@@ -910,7 +1018,7 @@ size_of_callback :: proc(data: rawptr, set: ^mdata.Node, name: string, of_type: 
 	c := (^Compiler)(data)
 	td: ^Type_Def
 	for st in c.type_defs {
-		if st.set == set {
+		if st.set == mdata.members(set) {
 			td = st.td
 			break
 		}
@@ -1073,16 +1181,19 @@ constant_int :: proc(c: ^Compiler, n: ^yml.Node) -> (v: int, ok: bool) {
 	return expr.constant(e)
 }
 
-// Compiles inst, a parse instance of set, as an attribute, then its io and
-// pos. It can use the fields of set compiled so far, and its instances. pos is
-// compiled last: until it is set, a reference to inst compiles it, so
-// that one from inst itself is found.
+// Compiles inst, a parse instance of set (of its members), as an attribute,
+// then its io and pos. It can use the fields of set compiled so far, and its
+// instances. pos is compiled last: until it is set, a reference to inst
+// compiles it, so that one from inst itself is found, also through a field
+// of its type inside it (set.recursive), which is another instance, but
+// whose type is not known yet.
 @(private = "file")
 compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node) -> bool {
 	src := c.parse_instances[inst]
 	schema := c.schema
 	defer c.schema = schema
 	c.schema = src.td.schema
+	if src.compiling && set.recursive != nil do return fail(c, .Unsupported, src.entry.key, "instance %s refers to itself in a field of its type; a type that contains itself cannot be compiled that way", inst.ref_name)
 	if src.compiling do return fail(c, .Invalid, src.entry.key, "instance %s refers to itself", inst.ref_name)
 	src.compiling = true
 	defer src.compiling = false
@@ -1096,10 +1207,13 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 	return true
 }
 
-// Compiles the if and the expression of inst, a value instance of set.
-// They can use the fields of set compiled so far and its other value
-// instances, and through _root and _parent, those of the sets enclosing
-// it. An enum keeps the integer, as on an attribute.
+// Compiles the if and the expression of inst, a value instance of set (of
+// its members). They can use the fields of set compiled so far and its
+// other value instances, and through _root and _parent, those of the sets
+// enclosing it. An enum keeps the integer, as on an attribute. A reference
+// to inst while it is compiled is to itself, or through a field of its
+// type inside it (set.recursive), to that of another instance, whose type
+// is not known yet.
 @(private = "file")
 compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Instance) -> bool {
 	src := c.instances[inst]
@@ -1107,6 +1221,7 @@ compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Inst
 	defer c.schema = schema
 	c.schema = src.td.schema
 	value := get(src.spec, "value")
+	if src.compiling && set.recursive != nil do return fail(c, .Unsupported, value, "value instance %s refers to itself in a field of its type; a type that contains itself cannot be compiled that way", inst.name)
 	if src.compiling do return fail(c, .Invalid, value, "value instance %s refers to itself", inst.name)
 	src.compiling = true
 	defer src.compiling = false
@@ -1580,8 +1695,9 @@ compile_expr :: proc(c: ^Compiler, n: ^yml.Node, what: string, scope: expr.Scope
 	text := expect_scalar(c, n, what) or_return
 	err: expr.Error
 	e, err = expr.compile(text, scope, want, c.allocator)
-	if err.kind == .None do return e, true
-	return nil, expr_error(c, n, what, err, 0)
+	if err.kind != .None do return nil, expr_error(c, n, what, err, 0)
+	note_escapes(c, n, what, e, scope)
+	return e, true
 }
 
 // Records err, the error of the expression at byte start of the scalar n,
@@ -1645,6 +1761,7 @@ compile_args :: proc(c: ^Compiler, n: ^yml.Node, id: string, user: ^Type_Def, ca
 	err: expr.Error
 	args, err = expr.compile_list(call.args, scope, c.allocator)
 	if err.kind != .None do return nil, expr_error(c, n, "type", err, call.start)
+	for a in args do note_escapes(c, n, "type", a, scope)
 	if len(args) != len(user.params) {
 		return nil, fail(c, .Invalid, n, "%s: type %s takes %v argument%s, not %v", id, user.name, len(user.params), len(user.params) == 1 ? "" : "s", len(args))
 	}

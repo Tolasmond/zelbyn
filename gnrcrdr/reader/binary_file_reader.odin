@@ -58,6 +58,7 @@ decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, 
 	tree.spans = spans
 
 	d := Decoder{arena = &tree.arena, allocator = allocator, spans = spans}
+	d.stack_start = uintptr(&d)
 	d.path = make([dynamic]Path_Segment, allocator)
 	d.frames = make([dynamic]Frame, allocator)
 	d.streams = make([dynamic]Stream, allocator)
@@ -417,14 +418,41 @@ eval_args :: proc(d: ^Decoder, set: ^mdata.Node, index: int) -> (args: []fld.Val
 	return args, .None
 }
 
+// The deepest that set instances nest, as frames. Only a recursive type
+// can nest them deeper than CHECK_DEPTH, and an input can then nest them
+// as deeply as it likes, which would overflow the stack. Decoding a level
+// takes about 1.1 KB of it, and writing it 1.3 KB (2.7 KB each in a debug
+// build), so MAX_DEPTH levels fit in the 1 MB of the main thread's stack
+// on Windows.
+MAX_DEPTH :: 256
+
+// The most stack that decoding uses before an instance is Too_Deep, which
+// bounds what frames do not count: read_parse_instance sets aside the
+// frames above the instance's while it reads, and a parse instance read
+// from an expression has the evaluator's frames below it, which take
+// several times what a level takes otherwise (6.6 KB, and 20 KB in a debug
+// build, for the instance in an if). Instances read that way can reach it
+// in fewer than MAX_DEPTH levels. It is checked in each parse instance, and
+// in each set instance deeper than CHECK_DEPTH, so the stack grows at most
+// CHECK_DEPTH levels past it.
+MAX_STACK :: 768 * 1024
+
+// The frames below which the depth and the stack are not checked: deeper
+// than formats without recursive types nest, so that they pay one test.
+CHECK_DEPTH :: 32
+
 // Appends one instance of set node to s, read as choice (see
 // field.Instance), with the values of its params, args, and reads its
 // children into it, then the parse instances that no expression has read.
+// An instance nested deeper than MAX_DEPTH is Too_Deep, and so is one read
+// below CHECK_DEPTH frames once decoding has used MAX_STACK.
 @(private = "file", require_results)
 read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int, args: []fld.Value, $SPANS: bool) -> dat.Read_Error {
 	when ODIN_DEBUG {
 		assert(node.slot_count == mdata.count_slots(node), "read_set_instance: the set's slot_count was not recorded")
 	}
+	if len(d.frames) >= CHECK_DEPTH && (len(d.frames) >= MAX_DEPTH || stack_used(d) > MAX_STACK) do return fail(d, .Too_Deep, d.r.pos)
+
 	instance, cells := fld.make_instance(d.arena, node.slot_count, choice, SPANS)
 	push(s, 0, instance)
 	if node.keeps_stream do keep_stream(d, instance)
@@ -453,6 +481,14 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	return .None
 }
 
+// The bytes of stack used since decoding started, by the frame this is
+// inlined into: the stack grows down on every platform Odin targets.
+@(private)
+stack_used :: #force_inline proc(d: ^Decoder) -> int {
+	marker: byte
+	return int(d.stack_start - uintptr(&marker))
+}
+
 // Records the stream of instance, which is being read, for an io
 // expression that refers to it (eval_stream). Not inlined: inlining it into
 // read_set_instance costs 0.5% more decode instructions.
@@ -465,9 +501,13 @@ keep_stream :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance) {
 // Reads parse instance node of instance, a set instance being decoded, into
 // slot k: at its pos in the instance's stream, as the instance's frame
 // sees it, or in the stream of its io. The stream, frames and path are then
-// put back as they were.
+// put back as they were. It is Too_Deep once decoding has used MAX_STACK.
 @(private, require_results)
 read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int, $SPANS: bool) -> dat.Read_Error {
+	if stack_used(d) > MAX_STACK {
+		append(&d.path, Path_Segment{node.name, 0})
+		return fail(d, .Too_Deep, d.r.pos)
+	}
 	j := len(d.frames) - 1
 	for j >= 0 && d.frames[j].instance != instance do j -= 1
 	// an instance that is no longer decoded had its parse instances read

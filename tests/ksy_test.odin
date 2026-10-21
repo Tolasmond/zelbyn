@@ -4,6 +4,7 @@ import dmp "../gnrcrdr/dump"
 import fld "../gnrcrdr/field"
 import ksy "../gnrcrdr/ksy"
 import mdat "../gnrcrdr/metadata"
+import rdr "../gnrcrdr/reader"
 import "core:fmt"
 import "core:slice"
 import "core:strings"
@@ -98,7 +99,6 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: str\n    size: 1\n", .Invalid, 6, 11, "a: str needs an encoding"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    encoding: ASCII\n", .Invalid, 7, 5, "a: encoding applies only to str"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    size: 2\n", .Invalid, 7, 5, "a: size does not apply to u1"},
-	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    seq:\n      - id: b\n        type: s\n", .Unsupported, 9, 5, "type s contains itself"},
 	{HEAD + "seq:\n  - id: a\n    contents: [1]\n    type: u1\n", .Invalid, 7, 5, "a: contents cannot have a type"},
 
 	// size-eos
@@ -237,6 +237,13 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: u1\n        enum: e\n", .Invalid, 9, 15, "p: no enum e"},
 	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: u1\n        size: 1\n", .Invalid, 9, 9, `param p: unknown key "size"`},
 	{HEAD + "types:\n  s:\n    params: 1\n", .Invalid, 6, 13, "params must be a sequence"},
+
+	// recursive types: a type that contains itself, and the types in it, can
+	// refer to the members of the sets enclosing it only through _root, and
+	// its instances cannot refer to themselves through a field of their type
+	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type: s\ntypes:\n  s:\n    seq:\n      - id: b\n        type: u1\n        if: _parent.n == 0\n      - id: c\n        type: s\n        if: b == 1\n", .Unsupported, 14, 13, "if: type s contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it"},
+	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type: s\ntypes:\n  s:\n    seq:\n      - id: b\n        type: u1\n      - id: u\n        type: u\n      - id: c\n        type: s\n        if: b == 1\n  u:\n    seq:\n      - id: x\n        type: u1\n        if: _parent.b == 0\n      - id: y\n        type: u1\n        if: _parent._parent.n == 0\n", .Unsupported, 26, 13, "if: type s contains itself"},
+	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    seq:\n      - id: n\n        type: u1\n      - id: kids\n        type: s\n        repeat: expr\n        repeat-expr: n\n    instances:\n      total:\n        value: 'n + (n > 0 ? kids[0].total : 0)'\n", .Unsupported, 18, 16, "value instance total refers to itself in a field of its type"},
 
 	// enums
 	{HEAD + "enums:\n  e:\n    1:\n      doc: d\n", .Invalid, 7, 7, "enum e: a value has no id"},
@@ -523,7 +530,6 @@ main[0].le[0] = 4660
 		{DIR + "errors/bad_yaml_import.ksy", .Syntax, DIR + "errors/bad_yaml.ksy", 2, 1, "unterminated flow collection"},
 		{DIR + "errors/orphan.ksy", .Invalid, DIR + "errors/orphan_lib.ksy", 7, 9, "if: _parent: o has no enclosing set here"},
 		{DIR + "errors/twins.ksy", .Invalid, DIR + "errors/twins.ksy", 5, 7, "imports: two schemas have the id tag"},
-		{DIR + "errors/cycle_a.ksy", .Unsupported, DIR + "errors/cycle_a.ksy", 1, 1, "type cycle_a contains itself"},
 	}
 	for c in cases {
 		ff: mdat.File_Format
@@ -1234,6 +1240,186 @@ t[0].items[0] = 13 @0x7
 t[0].items[1] = 14 @0x7
 t[0].last[0] = 153 @0x8
 `)
+}
+
+// Recursive types: a type inside itself, in a repeat with a param (kids),
+// through a switch-on case and as the schema's own top-level type, by its
+// meta id (item, t), and through a parse instance (next). The fields of a
+// type inside it are read as its own, and its value instances evaluated
+// for each instance (kids[0].total), and its nested types still refer to
+// it through _parent (label). The _io of an enclosing instance is that of
+// the instance each is in. Schemas that import each other can contain
+// each other, but an imported schema whose type contains itself cannot use
+// its _root, which is its outermost instance.
+@(test)
+ksy_recursive_types :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: base
+    type: u1
+  - id: tree
+    type: node(0)
+  - id: list
+    type: item
+  - id: expr
+    type: rec_expr
+instances:
+  at:
+    pos: _io.size - 2
+    type: jump
+types:
+  node:
+    params:
+      - id: depth
+        type: u1
+    seq:
+      - id: n
+        type: u1
+      - id: kids
+        type: node(depth + 1)
+        repeat: expr
+        repeat-expr: n
+      - id: label
+        type: label
+      - id: kid_total
+        size: 'n > 0 ? kids[0].total : 0'
+    instances:
+      total:
+        value: n + depth + _root.base
+    types:
+      label:
+        seq:
+          - id: len
+            type: u1
+          - id: text
+            size: len
+            if: _parent.depth < 2
+  item:
+    seq:
+      - id: kind
+        type: u1
+      - id: body
+        type:
+          switch-on: kind
+          cases:
+            1: item
+            2: t
+            _: leaf
+  leaf:
+    seq:
+      - id: v
+        type: u2
+  rec_expr:
+    seq:
+      - id: op
+        type: u1
+      - id: args
+        type: rec_expr
+        repeat: expr
+        repeat-expr: op
+  jump:
+    seq:
+      - id: to
+        type: u1
+    instances:
+      next:
+        pos: to
+        type: jump
+        if: to != 0
+`
+	expect_dump(t, "tree, list and jumps", ksy_dump(t, src, {1, 2, 1, 0, 1, 2, 97, 98, 88, 89, 90, 0, 0, 1, 99, 80, 81, 82, 1, 2, 0, 0, 0, 0, 65, 66, 0, 2, 0, 1, 0, 32, 0}), `t[0].base[0] = 1
+t[0].tree[0].n[0] = 2
+t[0].tree[0].kids[0].n[0] = 1
+t[0].tree[0].kids[0].kids[0].n[0] = 0
+t[0].tree[0].kids[0].kids[0].label[0].len[0] = 1
+t[0].tree[0].kids[0].kids[0].kid_total[0] = <0 bytes>
+t[0].tree[0].kids[0].label[0].len[0] = 2
+t[0].tree[0].kids[0].label[0].text[0] = <2 bytes> 61 62
+t[0].tree[0].kids[0].kid_total[0] = <3 bytes> 58 59 5a
+t[0].tree[0].kids[1].n[0] = 0
+t[0].tree[0].kids[1].label[0].len[0] = 0
+t[0].tree[0].kids[1].label[0].text[0] = <0 bytes>
+t[0].tree[0].kids[1].kid_total[0] = <0 bytes>
+t[0].tree[0].label[0].len[0] = 1
+t[0].tree[0].label[0].text[0] = <1 bytes> 63
+t[0].tree[0].kid_total[0] = <3 bytes> 50 51 52
+t[0].list[0].kind[0] = 1
+t[0].list[0].body[0].kind[0] = 2
+t[0].list[0].body[0].body[0].base[0] = 0
+t[0].list[0].body[0].body[0].tree[0].n[0] = 0
+t[0].list[0].body[0].body[0].tree[0].label[0].len[0] = 0
+t[0].list[0].body[0].body[0].tree[0].label[0].text[0] = <0 bytes>
+t[0].list[0].body[0].body[0].tree[0].kid_total[0] = <0 bytes>
+t[0].list[0].body[0].body[0].list[0].kind[0] = 0
+t[0].list[0].body[0].body[0].list[0].body[0].v[0] = 16961
+t[0].list[0].body[0].body[0].expr[0].op[0] = 0
+t[0].list[0].body[0].body[0].at[0].to[0] = 32
+t[0].list[0].body[0].body[0].at[0].next[0].to[0] = 0
+t[0].expr[0].op[0] = 2
+t[0].expr[0].args[0].op[0] = 0
+t[0].expr[0].args[1].op[0] = 1
+t[0].expr[0].args[1].args[0].op[0] = 0
+t[0].at[0].to[0] = 32
+t[0].at[0].next[0].to[0] = 0
+`)
+	expect_dump(t, "deeper list", ksy_dump(t, src, {3, 0, 0, 1, 1, 1, 7, 9, 0, 3, 0, 0, 0, 14, 0}), `t[0].base[0] = 3
+t[0].tree[0].n[0] = 0
+t[0].tree[0].label[0].len[0] = 0
+t[0].tree[0].label[0].text[0] = <0 bytes>
+t[0].tree[0].kid_total[0] = <0 bytes>
+t[0].list[0].kind[0] = 1
+t[0].list[0].body[0].kind[0] = 1
+t[0].list[0].body[0].body[0].kind[0] = 1
+t[0].list[0].body[0].body[0].body[0].kind[0] = 7
+t[0].list[0].body[0].body[0].body[0].body[0].v[0] = 9
+t[0].expr[0].op[0] = 3
+t[0].expr[0].args[0].op[0] = 0
+t[0].expr[0].args[1].op[0] = 0
+t[0].expr[0].args[2].op[0] = 0
+t[0].at[0].to[0] = 14
+t[0].at[0].next[0].to[0] = 0
+`)
+
+	io := HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type: s\n    size: 4\ntypes:\n  s:\n    seq:\n      - id: b\n        type: u1\n      - id: c\n        type: s\n        size: 3\n        if: b == 1\n    instances:\n      up:\n        io: _parent._io\n        pos: 0\n        type: u1\n"
+	expect_dump(t, "_parent._io", ksy_dump(t, io, {9, 1, 5, 0, 0}), "t[0].n[0] = 9\nt[0].a[0].b[0] = 1\nt[0].a[0].c[0].b[0] = 5\nt[0].a[0].c[0].up[0] = 1\nt[0].a[0].up[0] = 9\n")
+
+	DIR :: "tests/schemas/recursive/"
+	expect_dump(t, "imports that contain each other", ksy_file_dump(t, DIR + "cycle_a.ksy", nil, {1, 2, 3, 0}), `cycle_a[0].n[0] = 1
+cycle_a[0].b[0].m[0] = 2
+cycle_a[0].b[0].a[0].n[0] = 3
+cycle_a[0].b[0].a[0].b[0].m[0] = 0
+`)
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	err := ksy.read_file_format(DIR + "imported_root.ksy", &ff)
+	defer ksy.destroy_error(&err)
+	testing.expectf(t, err.kind == .Unsupported && err.path == DIR + "chain.ksy" && err.line == 8 && err.column == 9 && strings.contains(err.message, "type chain contains itself"), "imported _root: %v at %s:%v:%v: %s", err.kind, err.path, err.line, err.column, err.message)
+}
+
+// Set instances nest at most reader.MAX_DEPTH deep, and through parse
+// instances read from expressions, which take more stack, until the
+// decoder has used reader.MAX_STACK, at a depth that depends on the build.
+// Deeper ones are Too_Deep.
+@(test)
+ksy_too_deep :: proc(t: ^testing.T) {
+	nest := "meta:\n  id: nest\nseq:\n  - id: flag\n    type: u1\n  - id: next\n    type: nest\n    if: flag != 0\n  - id: tail\n    type: u1\n"
+	// flags, then a tail byte for each instance
+	levels :: proc(n: int) -> []byte {
+		input := make([]byte, 2 * n, context.temp_allocator)
+		for i in 0 ..< n - 1 do input[i] = 1
+		for i in n ..< 2 * n do input[i] = 7
+		return input
+	}
+	dump := ksy_dump(t, nest, levels(rdr.MAX_DEPTH))
+	testing.expectf(t, strings.count(dump, "\n") == 2 * rdr.MAX_DEPTH && strings.has_suffix(dump, "\nnest[0].tail[0] = 7\n"), "MAX_DEPTH levels: %d lines, ending %q", strings.count(dump, "\n"), dump[max(0, len(dump) - 40):])
+
+	got := ksy_dump(t, nest, levels(rdr.MAX_DEPTH + 1))
+	want := fmt.tprintf("error: Too_Deep at %v in nest[0]", rdr.MAX_DEPTH)
+	testing.expectf(t, strings.has_prefix(got, want) && strings.count(got, ".next[0]") == rdr.MAX_DEPTH, "MAX_DEPTH + 1 levels: %.80s", got)
+
+	through_instances := "meta:\n  id: p\nseq:\n  - id: flag\n    type: u1\n  - id: x\n    size: 0\n    if: flag != 0 and child.flag < 2\ninstances:\n  child:\n    pos: _io.pos\n    type: p\n    if: flag != 0\n"
+	ones := make([]byte, rdr.MAX_DEPTH, context.temp_allocator)
+	slice.fill(ones, 1)
+	testing.expect(t, strings.has_prefix(ksy_dump(t, through_instances, ones), "error: Too_Deep at "), "parse instances read from expressions")
 }
 
 // io on parse instances: each is read at its pos in the stream io gives,

@@ -143,12 +143,13 @@ Size_Of :: struct {
 }
 
 // The set instance being decoded (up = 0), one of its enclosing instances
-// (up > 0, _parent, and _root in an imported schema), or the outermost one
-// (root, _root). node is its set.
+// (up > 0, _parent, and _root in an imported schema, which sets
+// imported_root), or the outermost one (root, _root). node is its set.
 Instance :: struct {
-	root: bool,
-	up:   int,
-	node: ^Node,
+	root:          bool,
+	up:            int,
+	node:          ^Node,
+	imported_root: bool,
 }
 
 // The values of field node in the instance base, from its slot there. A

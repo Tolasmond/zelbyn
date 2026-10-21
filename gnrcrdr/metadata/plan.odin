@@ -6,8 +6,8 @@ import "core:encoding/endian"
 
 // One field of a compiled format. Every rule is resolved and validated when
 // the format is loaded, so decoding needs no lookups. Each field has its
-// own node, even when several fields have the same type, and the plan has
-// no cycles.
+// own node, even when several fields have the same type. The plan has no
+// cycles but for a type that contains itself (recursive).
 Node :: struct {
 	name:            string,            // shown in the dump and in error paths: the .ksy -orig-id, or else the id
 	ref_name:        string,            // what expressions call it: the .ksy id
@@ -23,6 +23,7 @@ Node :: struct {
 	children:        []^Node,           // Set only, in order; nil when switch_on is set
 	slot_count:      int,               // Set only: the slots in each instance (count_slots), recorded when children is set
 	switch_on:       ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
+	recursive:       ^Node,             // Set only: for a field of a type inside the same type (a recursive type), the set of that type that encloses it, whose children, instances, parse instances, params and slot count it is given, once that set is compiled (members); nil otherwise
 	instances:       []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
 	parse_instances: []^Node,           // Set only: Kaitai's instances with pos, each read at an offset (see pos)
 	params:          []^Node,           // Set only: Kaitai's params, each a field read once, of type Int64 (any integer type), Bool or Blob, whose value is its argument (see args)
@@ -232,6 +233,17 @@ instance_set :: proc(node: ^Node, instance: ^fld.Instance) -> ^Node {
 	if sw == nil do return node
 	if instance.choice == fld.DEFAULT_CASE do return sw.default
 	return sw.cases[instance.choice].node
+}
+
+// The set that holds the children, instances, parse instances, params and
+// slot count of set: the set of its type that encloses it, for a field of a
+// type inside the same type (Node.recursive), else set itself. A front end
+// needs it while that set is compiled; set has them once it is. The
+// expressions in that set are evaluated in the instances of both, so none
+// of them refers to the members of the instances that enclose it, other
+// than the root's.
+members :: proc(set: ^Node) -> ^Node {
+	return set.recursive != nil ? set.recursive : set
 }
 
 // The type of the values of a field of type Bits whose elements are width
