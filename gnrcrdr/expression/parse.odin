@@ -337,7 +337,8 @@ lex_int :: proc(p: ^Parser) -> bool {
 
 	end := digits
 	for end < len(p.text) && (is_ident_start(p.text[end]) || is_digit(p.text[end])) do end += 1
-	if end < len(p.text) - 1 && base == 10 && p.text[end] == '.' && is_digit(p.text[end + 1]) {
+	// 1.5 and 1. are floats; 1.to_s is a method of 1
+	if end < len(p.text) && base == 10 && p.text[end] == '.' && (end + 1 == len(p.text) || !is_ident_start(p.text[end + 1])) {
 		return fail(p, .Unsupported, start, "float literals are not supported")
 	}
 
@@ -572,6 +573,9 @@ parse_atom :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 			return new_expr(p, t.offset, mdata.Bool_Literal{true}), true
 		case "false":
 			return new_expr(p, t.offset, mdata.Bool_Literal{false}), true
+		case "sizeof", "bitsizeof":
+			// as in Kaitai, sizeof< is always one, whatever fields there are
+			if p.tok.kind == .Lt do return parse_size_of(p, t)
 		}
 		if p.tok.kind != .Colon_Colon do return new_expr(p, t.offset, mdata.Name{strings.clone(t.text, p.allocator)}), true
 
@@ -584,4 +588,23 @@ parse_atom :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 	}
 
 	return nil, fail(p, .Syntax, t.offset, "unexpected %s", describe(t))
+}
+
+// The rest of sizeof<t> or bitsizeof<t>, after keyword: <, a type name,
+// which can be a path (a::b), and >.
+@(private = "file")
+parse_size_of :: proc(p: ^Parser, keyword: Token) -> (e: ^mdata.Expr, ok: bool) {
+	next(p) or_return
+	b := strings.builder_make(p.allocator)
+	for {
+		if p.tok.kind != .Ident do return nil, fail(p, .Syntax, p.tok.offset, "expected a type name in %s<>, found %s", keyword.text, describe(p.tok))
+		strings.write_string(&b, p.tok.text)
+		next(p) or_return
+		if p.tok.kind != .Colon_Colon do break
+		strings.write_string(&b, "::")
+		next(p) or_return
+	}
+	if p.tok.kind != .Gt do return nil, fail(p, .Syntax, p.tok.offset, "expected > after the type name, found %s", describe(p.tok))
+	next(p) or_return
+	return new_expr(p, keyword.offset, mdata.Size_Of{strings.to_string(b), keyword.text == "bitsizeof"}), true
 }

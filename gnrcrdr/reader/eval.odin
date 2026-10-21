@@ -5,6 +5,7 @@ import dat "../data"
 import fld "../field"
 import mdata "../metadata"
 import "base:intrinsics"
+import "core:slice"
 import "core:unicode/utf8"
 
 // The value of an expression, by its type: Int, Bool, Bytes, String, Array
@@ -179,7 +180,11 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		return int_to_string(d, operand.(int)), .None
 	case mdata.To_I:
 		operand := eval(d, x.operand, ctx) or_return
+		if b, is_bool := operand.(bool); is_bool do return int(b), .None
 		return string_to_int(operand.(string))
+	case mdata.Array_Method:
+		operand := eval(d, x.operand, ctx) or_return
+		return array_method(operand, x.method)
 	case mdata.Unary:
 		operand := eval(d, x.operand, ctx) or_return
 		switch x.op {
@@ -246,7 +251,7 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		return eval(d, x.instance.expr, self)
 	case mdata.Io:
 		panic("eval: a Stream expression (eval_stream)")
-	case mdata.Name, mdata.Member, mdata.Enum_Constant:
+	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of:
 		panic("eval: unresolved expression")
 	}
 	panic("eval: invalid expression")
@@ -280,6 +285,8 @@ ancestor :: proc(d: ^Decoder, ctx: Eval_Context, up: int) -> (instance: ^fld.Ins
 			e = x.base
 		case mdata.Index:
 			// an element is in the instance of its array's field
+			e = x.operand
+		case mdata.Array_Method:
 			e = x.operand
 		case mdata.Instance:
 			if x.root do return nil, .Absent_Field
@@ -361,6 +368,41 @@ single_value :: proc(value: fld.Value) -> (Eval_Value, dat.Read_Error) {
 		// the resolver rejects references to these
 	}
 	panic("eval: a field value of an unsupported type")
+}
+
+// .first, .last, .min or .max of operand, an array or bytes.
+@(private = "file", require_results)
+array_method :: proc(operand: Eval_Value, method: mdata.Array_Method_Kind) -> (v: Eval_Value, err: dat.Read_Error) {
+	#partial switch o in operand {
+	case []byte:
+		if len(o) == 0 do return nil, .Index_Out_Of_Range
+		switch method {
+		case .First:
+			return int(o[0]), .None
+		case .Last:
+			return int(o[len(o) - 1]), .None
+		case .Min:
+			return int(slice.min(o)), .None
+		case .Max:
+			return int(slice.max(o)), .None
+		}
+	case []fld.Value:
+		if len(o) == 0 do return nil, .Index_Out_Of_Range
+		switch method {
+		case .First:
+			return single_value(o[0])
+		case .Last:
+			return single_value(o[len(o) - 1])
+		case .Min, .Max:
+			best := single_value(o[0]) or_return
+			for value in o[1:] {
+				n := single_value(value) or_return
+				if method == .Min ? n.(int) < best.(int) : n.(int) > best.(int) do best = n
+			}
+			return best, .None
+		}
+	}
+	panic("eval: a method of neither an array nor bytes")
 }
 
 // Integer operations fail rather than wrap, and / and % round toward

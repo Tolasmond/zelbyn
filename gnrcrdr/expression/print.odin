@@ -42,6 +42,14 @@ BINARY_TEXT := [mdata.Binary_Op]string {
 }
 
 @(private = "file")
+ARRAY_METHOD_TEXT := [mdata.Array_Method_Kind]string {
+	.First = ".first",
+	.Last  = ".last",
+	.Min   = ".min",
+	.Max   = ".max",
+}
+
+@(private = "file")
 write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 	switch x in e.variant {
 	case mdata.Int_Literal:
@@ -103,6 +111,10 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 		strings.write_string(b, x.enum_name)
 		strings.write_string(b, "::")
 		strings.write_string(b, x.value_name)
+	case mdata.Size_Of:
+		strings.write_string(b, x.bits ? "bitsizeof<" : "sizeof<")
+		strings.write_string(b, x.type_name)
+		strings.write_byte(b, '>')
 	case mdata.Instance:
 		if x.root {
 			strings.write_string(b, "_root")
@@ -128,6 +140,9 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 	case mdata.To_I:
 		write(b, x.operand)
 		strings.write_string(b, ".to_i")
+	case mdata.Array_Method:
+		write(b, x.operand)
+		strings.write_string(b, ARRAY_METHOD_TEXT[x.method])
 	case mdata.Io:
 		write_member(b, x.instance, "_io")
 	case mdata.Io_Pos:
