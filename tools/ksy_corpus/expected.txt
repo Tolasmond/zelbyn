@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 83 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 87 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -10,19 +10,19 @@ ERR	archive/cpio_old_le.ksy	Unsupported	archive/cpio_old_le.ksy:36:26	if: array 
 OK	archive/gzip.ksy
 OK	archive/lzh.ksy
 OK	archive/mozilla_mar.ksy
-ERR	archive/phar_without_stub.ksy	Unsupported	archive/phar_without_stub.ksy:190:5	type api_version: meta in a type is not supported
+ERR	archive/phar_without_stub.ksy	Unsupported	serialization/php_serialized_value.ksy:219:16	value instance value: only integer, boolean and string values are supported
 ERR	archive/rar.ksy	Unsupported	archive/rar.ksy:39:18	blocks: a repeated switch-on without a _ case, size or size-eos is not supported
 OK	archive/respack.ksy
 ERR	archive/rpm.ksy	Invalid	archive/rpm.ksy:316:21	io: signature has no field storage_section
 ERR	archive/xar.ksy	Unsupported	archive/xar.ksy:35:5	attribute toc: process is not supported
-ERR	archive/zchunk.ksy	Unsupported	archive/zchunk.ksy:308:9	type group: meta in a type is not supported
+ERR	archive/zchunk.ksy	Unsupported	archive/zchunk.ksy:330:49	valid: casts are not supported
 ERR	archive/zip.ksy	Unsupported	archive/zip.ksy:42:5	type pk_section contains itself; recursive types are not supported
 ERR	archive/zisofs.ksy	Unsupported	archive/zisofs.ksy:36:3	instance blocks: an instance without pos or value is not supported
 OK	cad/monomakh_sapr_chg.ksy
 ERR	common/bcd.ksy	Unsupported	common/bcd.ksy:37:1	params on the top-level type are not supported, except in an imported schema
 OK	common/bytes_with_io.ksy
 OK	common/dos_datetime.ksy
-ERR	common/riff.ksy	Unsupported	common/riff.ksy:115:5	type info_subchunk: meta in a type is not supported
+ERR	common/riff.ksy	Unsupported	common/riff.ksy:71:16	value: _io in a value instance is not supported
 ERR	common/utf16_with_bom.ksy	Unsupported	common/utf16_with_bom.ksy:41:15	encoding "UTF-16BE" is not supported; only ASCII and UTF-8 are
 OK	common/utf8_string.ksy
 ERR	common/vlq_base128_be.ksy	Unsupported	common/vlq_base128_be.ksy:47:12	value: casts are not supported
@@ -34,7 +34,7 @@ OK	database/tsm.ksy
 OK	executable/android_nanoapp_header.ksy
 ERR	executable/dex.ksy	Unsupported	common/vlq_base128_le.ksy:85:45	valid: casts are not supported
 OK	executable/dos_mz.ksy
-ERR	executable/elf.ksy	Unsupported	executable/elf.ksy:361:5	type endian_elf: meta in a type is not supported
+ERR	executable/elf.ksy	Unsupported	executable/elf.ksy:363:9	endian: switch-on is not supported
 ERR	executable/java_class.ksy	Unsupported	executable/java_class.ksy:179:60	value: casts are not supported
 ERR	executable/mach_o.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
 ERR	executable/mach_o_fat.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
@@ -46,7 +46,7 @@ OK	filesystem/amlogic_emmc_partitions.ksy
 OK	filesystem/android_super.ksy
 OK	filesystem/apm_partition_table.ksy
 OK	filesystem/apple_single_double.ksy
-ERR	filesystem/btrfs_stream.ksy	Unsupported	filesystem/btrfs_stream.ksy:69:40	value: a case of type u8le is not supported; only user types are
+OK	filesystem/btrfs_stream.ksy
 ERR	filesystem/cramfs.ksy	Unsupported	filesystem/cramfs.ksy:65:5	type inode contains itself; recursive types are not supported
 ERR	filesystem/ext2.ksy	Invalid	filesystem/ext2.ksy:15:3	instance bg1 refers to itself
 ERR	filesystem/gpt_partition_table.ksy	Unsupported	filesystem/gpt_partition_table.ksy:38:19	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
@@ -78,7 +78,7 @@ OK	game/gran_turismo_vol.ksy
 ERR	game/heaps_pak.ksy	Unsupported	game/heaps_pak.ksy:41:26	body: switch-on over a boolean is not supported; only over an integer or a string
 OK	game/heroes_of_might_and_magic_agg.ksy
 OK	game/heroes_of_might_and_magic_bmp.ksy
-ERR	game/minecraft_nbt.ksy	Unsupported	game/minecraft_nbt.ksy:118:24	payload: a case of type s1 is not supported; only user types are
+ERR	game/minecraft_nbt.ksy	Unsupported	game/minecraft_nbt.ksy:151:5	type tag_list contains itself; recursive types are not supported
 ERR	game/quake2_md2.ksy	Unsupported	game/quake2_md2.ksy:340:24	value: float literals are not supported
 OK	game/quake_mdl.ksy
 OK	game/quake_pak.ksy
@@ -90,22 +90,22 @@ OK	geospatial/shapefile_main.ksy
 OK	hardware/dtb.ksy
 ERR	hardware/edid.ksy	Unsupported	hardware/edid.ksy:140:28	value: float literals are not supported
 ERR	hardware/mifare/mifare_classic.ksy	Unsupported	hardware/mifare/mifare_classic.ksy:221:23	param ac: type ac is not supported; only integer types, bool and bytes are
-ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:391:5	type bitmap_v5_extension: meta in a type is not supported
+ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:392:17	encoding "windows-1252" is not supported; only ASCII and UTF-8 are
 ERR	image/dicom.ksy	Unsupported	image/dicom.ksy:112:22	value_len: switch-on over a boolean is not supported; only over an integer or a string
-ERR	image/exif.ksy	Unsupported	image/exif.ksy:46:5	type exif_body: meta in a type is not supported
+ERR	image/exif.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supported
 OK	image/gif.ksy
 OK	image/gimp_brush.ksy
 ERR	image/icc_4.ksy	Unsupported	image/icc_4.ksy:1341:31	encoding "UTF-16BE" is not supported; only ASCII and UTF-8 are
 ERR	image/ico.ksy	Unsupported	image/ico.ksy:86:30	value: array literals are not supported
-ERR	image/jpeg.ksy	Unsupported	image/exif.ksy:46:5	type exif_body: meta in a type is not supported
+ERR	image/jpeg.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supported
 ERR	image/nitf.ksy	Unsupported	image/nitf.ksy:166:9	an attribute in type date_time has no id; attributes without one are not supported
 OK	image/pcx.ksy
 OK	image/pcx_dcx.ksy
-ERR	image/pif.ksy	Unsupported	image/pif.ksy:138:41	entries: a case of type b24 is not supported; only user types are
+ERR	image/pif.ksy	Unsupported	image/pif.ksy:136:22	entries: a repeated switch-on without a _ case, size or size-eos is not supported
 ERR	image/png.ksy	Unsupported	image/png.ksy:410:9	attribute profile: process is not supported
 OK	image/psx_tim.ksy
 ERR	image/tga.ksy	Unsupported	image/tga.ksy:94:34	value: array literals are not supported
-ERR	image/webp.ksy	Unsupported	image/webp.ksy:64:5	type vp8: meta in a type is not supported
+OK	image/webp.ksy
 OK	image/wmf.ksy
 OK	image/xwd.ksy
 OK	log/aix_utmp.ksy
@@ -115,14 +115,14 @@ ERR	log/mcap.ksy	Unsupported	log/mcap.ksy:35:13	value: _io in a value instance i
 OK	log/sudoers_ts.ksy
 ERR	log/systemd_journal.ksy	Unsupported	log/systemd_journal.ksy:137:5	type journal_object contains itself; recursive types are not supported
 OK	log/windows_evt_log.ksy
-ERR	machine_code/code_6502.ksy	Unsupported	machine_code/code_6502.ksy:26:34	args: a case of type u1 is not supported; only user types are
+OK	machine_code/code_6502.ksy
 ERR	macos/compressed_resource.ksy	Unsupported	macos/compressed_resource.ksy:68:16	value instance type_specific_part_raw: only integer, boolean and string values are supported
 ERR	macos/ds_store.ksy	Unsupported	macos/ds_store.ksy:107:7	instance directories: an instance without pos or value is not supported
 ERR	macos/mac_os_resource_snd.ksy	Unsupported	macos/mac_os_resource_snd.ksy:118:9	an attribute in type sound_header has no id; attributes without one are not supported
-ERR	macos/resource_compression/dcmp_0.ksy	Unsupported	macos/resource_compression/dcmp_0.ksy:178:23	index_separate_minus: a case of type u1 is not supported; only user types are
+ERR	macos/resource_compression/dcmp_0.ksy	Unsupported	macos/resource_compression/dcmp_0.ksy:212:20	value: index_separate_minus is a switch-on field; it cannot be used in expressions
 ERR	macos/resource_compression/dcmp_1.ksy	Unsupported	macos/resource_compression/dcmp_1.ksy:231:20	value: array literals are not supported
 ERR	macos/resource_compression/dcmp_2.ksy	Unsupported	macos/resource_compression/dcmp_2.ksy:38:11	param header_parameters_with_io: type bytes_with_io is not supported; only integer types, bool and bytes are
-ERR	macos/resource_compression/dcmp_variable_length_integer.ksy	Unsupported	macos/resource_compression/dcmp_variable_length_integer.ksy:49:15	more: a case of type s4 is not supported; only user types are
+ERR	macos/resource_compression/dcmp_variable_length_integer.ksy	Unsupported	macos/resource_compression/dcmp_variable_length_integer.ksy:63:12	value: more is a switch-on field; it cannot be used in expressions
 ERR	macos/resource_fork.ksy	Unsupported	macos/resource_fork.ksy:94:12	value instance data_blocks: only integer, boolean and string values are supported
 OK	media/android_opengl_shaders_cache.ksy
 ERR	media/au.ksy	Unsupported	media/au.ksy:50:47	value: _io in a value instance is not supported
@@ -141,7 +141,7 @@ OK	media/stl.ksy
 ERR	media/tracker_modules/fasttracker_xm_module.ksy	Unsupported	media/tracker_modules/fasttracker_xm_module.ksy:278:19	param header: type sample_header is not supported; only integer types, bool and bytes are
 ERR	media/tracker_modules/s3m.ksy	Unsupported	media/tracker_modules/s3m.ksy:194:13	an attribute in type adlib has no id; attributes without one are not supported
 OK	media/vp8_duck_ivf.ksy
-ERR	media/wav.ksy	Unsupported	common/riff.ksy:115:5	type info_subchunk: meta in a type is not supported
+ERR	media/wav.ksy	Unsupported	media/wav.ksy:76:11	chunk: a type of another type (riff::chunk) is not supported
 OK	network/bitcoin_transaction.ksy
 OK	network/dime_message.ksy
 ERR	network/dns_packet.ksy	Unsupported	network/dns_packet.ksy:96:5	type domain_name contains itself; recursive types are not supported
@@ -153,7 +153,7 @@ ERR	network/ipv4_packet.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags:
 ERR	network/ipv6_packet.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
 ERR	network/microsoft_network_monitor_v2.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
 ERR	network/packet_ppi.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
-ERR	network/pcap.ksy	Unsupported	network/pcap.ksy:33:5	type header: meta in a type is not supported
+ERR	network/pcap.ksy	Unsupported	network/pcap.ksy:35:9	endian: switch-on is not supported
 ERR	network/protocol_body.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
 ERR	network/rtcp_payload.ksy	Unsupported	network/rtcp_payload.ksy:158:7	instance packet_status: an instance without pos or value is not supported
 OK	network/rtp_packet.ksy
@@ -175,14 +175,14 @@ ERR	security/efivar_signature_list.ksy	Unsupported	security/efivar_signature_lis
 ERR	security/openpgp_message.ksy	Unsupported	security/openpgp_message.ksy:42:22	body: switch-on over a boolean is not supported; only over an integer or a string
 OK	security/ssh_public_key.ksy
 ERR	serialization/asn1/asn1_der.ksy	Invalid	serialization/asn1/asn1_der.ksy:72:15	entries: unknown type asn1_der
-ERR	serialization/bson.ksy	Unsupported	serialization/bson.ksy:143:41	content: a case of type f8 is not supported; only user types are
+ERR	serialization/bson.ksy	Invalid	serialization/bson.ksy:145:36	content: unknown type bson
 ERR	serialization/chrome_pak.ksy	Unsupported	serialization/chrome_pak.ksy:101:16	value instance resource: only integer, boolean and string values are supported
 ERR	serialization/google_protobuf.ksy	Unsupported	common/vlq_base128_le.ksy:85:45	valid: casts are not supported
 ERR	serialization/microsoft_cfb.ksy	Unsupported	serialization/microsoft_cfb.ksy:88:19	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
-ERR	serialization/msgpack.ksy	Unsupported	serialization/msgpack.ksy:24:15	int_extra: a case of type u1 is not supported; only user types are
+ERR	serialization/msgpack.ksy	Invalid	serialization/msgpack.ksy:62:11	array_elements: unknown type msgpack
 ERR	serialization/php_serialized_value.ksy	Unsupported	serialization/php_serialized_value.ksy:219:16	value instance value: only integer, boolean and string values are supported
-ERR	serialization/python_pickle.ksy	Unsupported	serialization/python_pickle.ksy:61:31	arg: a case of type s4 is not supported; only user types are
-ERR	serialization/ruby_marshal.ksy	Unsupported	serialization/ruby_marshal.ksy:92:19	encoded: a case of type u1 is not supported; only user types are
+OK	serialization/python_pickle.ksy
+ERR	serialization/ruby_marshal.ksy	Unsupported	serialization/ruby_marshal.ksy:113:16	value: encoded is a switch-on field; it cannot be used in expressions
 OK	windows/regf.ksy
 ERR	windows/windows_lnk_file.ksy	Unsupported	windows/windows_lnk_file.ksy:14:13	encoding "cp437" is not supported; only ASCII and UTF-8 are
 ERR	windows/windows_minidump.ksy	Unsupported	windows/windows_minidump.ksy:330:19	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are

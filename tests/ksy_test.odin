@@ -42,7 +42,6 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\n  ks-debug: true\n", .Unsupported, 3, 3, "meta: ks-debug is not supported"},
 	{"meta:\n  id: t\n  name: x\n", .Invalid, 3, 3, `meta: unknown key "name"`},
 	{"meta:\n  id: t\n  -peek: [1]\n", .Invalid, 3, 3, "the extension -peek does not apply here"},
-	{HEAD + "types:\n  u:\n    meta:\n      endian: be\n", .Unsupported, 6, 5, "type u: meta in a type is not supported"},
 	{HEAD + "types:\n  unused:\n    seq:\n      - id: a\n        type: u1\n        pos: 0\n", .Unsupported, 9, 9, "attribute a: pos is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    io: _root._io\n", .Unsupported, 7, 5, "attribute a: io is not supported"},
 	{HEAD + "instances:\n  x:\n    pos: 0\n    type: u1\n    io: 1\n", .Invalid, 8, 9, "io: expected a stream, found an integer"},
@@ -66,6 +65,18 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\n  ks-version: ''\n", .Invalid, 3, 15, `ks-version "" is not a version`},
 	{"meta:\n  id: t\n  ks-version: 99999999999999999999.0\n", .Invalid, 3, 15, "is not a version"},
 	{"meta:\n  id: t\n  ks-version: [0, 9]\n", .Invalid, 3, 15, "ks-version must be a scalar"},
+
+	// meta in a type: the keys of the schema's meta, and the types declared
+	// in the type inherit it, but not the types it uses (w)
+	{HEAD + "types:\n  u:\n    meta: 1\n", .Invalid, 6, 11, "meta must be a mapping"},
+	{HEAD + "types:\n  u:\n    meta:\n      name: x\n", .Invalid, 7, 7, `type u: meta: unknown key "name"`},
+	{HEAD + "types:\n  u:\n    meta:\n      ks-debug: true\n", .Unsupported, 7, 7, "type u: meta: ks-debug is not supported"},
+	{HEAD + "types:\n  u:\n    meta:\n      imports: [x]\n", .Unsupported, 7, 7, "type u: imports in a type are not supported"},
+	{HEAD + "types:\n  u:\n    meta:\n      id: U\n", .Invalid, 7, 11, `meta id "U" is not an identifier`},
+	{HEAD + "types:\n  u:\n    meta:\n      endian:\n        switch-on: x\n", .Unsupported, 8, 9, "endian: switch-on is not supported"},
+	{HEAD + "types:\n  u:\n    meta:\n      encoding: UTF-16LE\n", .Unsupported, 7, 17, `encoding "UTF-16LE" is not supported`},
+	{HEAD + "types:\n  u:\n    meta:\n      ks-version: 0.12\n", .Unsupported, 7, 19, "ks-version 0.12 is newer than 0.11"},
+	{"meta:\n  id: t\nseq:\n  - id: a\n    type: u\ntypes:\n  u:\n    meta:\n      encoding: ASCII\n    seq:\n      - id: b\n        type: w\n  w:\n    seq:\n      - id: s\n        type: strz\n", .Invalid, 16, 15, "s: str needs an encoding, or meta encoding"},
 
 	// attributes
 	{HEAD + "seq:\n  - type: u1\n", .Unsupported, 5, 5, "an attribute in type t has no id"},
@@ -131,8 +142,12 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type:\n      cases: {}\n", .Invalid, 7, 7, "a: a type mapping needs switch-on"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases: {}\n      default: x\n", .Invalid, 9, 7, `a: type: unknown key "default"`},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1 == 1\n      cases: {}\n", .Unsupported, 7, 18, "a: switch-on over a boolean is not supported"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n", .Unsupported, 9, 12, "a: a case of type u1 is not supported"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: b4le\n", .Unsupported, 9, 12, "a: a case of type b4le is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: str\n", .Invalid, 9, 12, "a: str needs size, size-eos or terminator"},
+	{"meta:\n  id: t\nseq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u2\n", .Invalid, 8, 12, "a: u2 needs le or be, or meta endian"},
+	{HEAD + "seq:\n  - id: a\n    size: 1\n    type:\n      switch-on: 1\n      cases:\n        1: strz\n", .Invalid, 10, 12, "a: a case of type strz needs meta encoding"},
+	{HEAD + "  encoding: ASCII\nseq:\n  - id: a\n    size: 1\n    encoding: ASCII\n    type:\n      switch-on: 1\n      cases:\n        1: strz\n", .Invalid, 8, 5, "a: encoding applies only to str"},
+	{HEAD + "seq:\n  - id: a\n    consume: false\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n", .Invalid, 6, 5, "a: consume applies only with terminator or strz"},
+	{HEAD + "  encoding: ASCII\nseq:\n  - id: a\n    size: 2\n    consume: false\n    type:\n      switch-on: 1\n      cases:\n        1: strz\n", .Invalid, 8, 5, "a: consume does not apply with a size"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: nope\n", .Invalid, 9, 12, "a: unknown type nope"},
 	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        n: s\ntypes:\n  s: {}\n", .Unsupported, 11, 9, "a case must be an integer or an enum constant"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n        0x1: s\ntypes:\n  s: {}\n", .Invalid, 10, 9, "a: case 1 is already given (line 9, column 9)"},
@@ -1076,6 +1091,149 @@ types:
 `
 	expect_dump(t, "size-eos, a case", ksy_json(t, eos, {1, 7, 0, 7, 8}), `{"t":[{"k":[1],"padded":[{"v":[7]}],"rest":[{"v":[7]}],"items":[]}]}` + "\n")
 	expect_dump(t, "size-eos, no case", ksy_json(t, eos, {2, 7, 0, 7, 8}), `{"t":[{"k":[2],"padded":["0700"],"rest":["0708"],"items":[]}]}` + "\n")
+}
+
+// meta in a type: its endian, bit-endian and encoding apply in it and in
+// the types declared in it (deeper), but not in the types it uses (other),
+// as in Kaitai. Its id, title and ks-version are checked and ignored.
+@(test)
+ksy_type_meta :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: a
+    type: u2
+  - id: inner
+    type: inner
+  - id: other
+    type: other
+types:
+  inner:
+    meta:
+      id: inner
+      title: Inner
+      endian: be
+      bit-endian: le
+      encoding: UTF-8
+      ks-version: 0.9
+    seq:
+      - id: x
+        type: u2
+      - id: deeper
+        type: deeper
+      - id: other
+        type: other
+    types:
+      deeper:
+        seq:
+          - id: v
+            type: u2
+          - id: bits
+            type: b3
+          - id: s
+            type: str
+            size: 2
+  other:
+    seq:
+      - id: w
+        type: u2
+`
+	expect_dump(t, "type meta", ksy_dump(t, src, {1, 2, 1, 2, 1, 2, 0x05, 'h', 'i', 1, 2, 3, 0}), `t[0].a[0] = 513
+t[0].inner[0].x[0] = 258
+t[0].inner[0].deeper[0].v[0] = 258
+t[0].inner[0].deeper[0].bits[0] = 5
+t[0].inner[0].deeper[0].s[0] = "hi"
+t[0].inner[0].other[0].w[0] = 513
+t[0].other[0].w[0] = 3
+`)
+}
+
+// switch-on cases of primitive, bit and string types, read as fields of
+// those types, as the official compiler reads them: a string has the
+// field's size and pad-right (sized, tags 5 and 6), and the other types
+// ignore them (tag 1), so that the field's size is read only for a string,
+// a user type or no case. No byte is skipped after a bit type chosen, so the
+// next bit type reads the bits it left over (items, tags 4 and 6), and the
+// field after the switch-on does not start at a byte. A case value's
+// offset is where the stream is when it is read.
+@(test)
+ksy_switch_on_cases :: proc(t: ^testing.T) {
+	src := HEAD + `  encoding: ASCII
+seq:
+  - id: tag
+    type: u1
+  - id: plain
+    type:
+      switch-on: tag
+      cases:
+        1: u1
+        2: s2be
+        3: f4
+        4: b12
+        5: strz
+        6: b1
+        7: one
+  - id: sized
+    size: 4
+    pad-right: 0x20
+    type:
+      switch-on: tag
+      cases:
+        1: u2
+        5: strz
+        6: str
+        7: one
+  - id: items
+    type:
+      switch-on: tag
+      cases:
+        1: u1
+        _: b4
+    repeat: expr
+    repeat-expr: 2
+  - id: last
+    type: u1
+types:
+  one:
+    seq:
+      - id: v
+        type: u1
+`
+	Case :: struct {
+		input: []byte,
+		want:  string,
+	}
+	for c in ([]Case {
+		{{1, 7, 0x34, 0x12, 0x0a, 0x0b, 0x0c}, "t[0].tag[0] = 1\nt[0].plain[0] = 7\nt[0].sized[0] = 4660\nt[0].items[0] = 10\nt[0].items[1] = 11\nt[0].last[0] = 12\n"},
+		{{2, 0xff, 0xfe, 'a', 'b', 0x20, 0x20, 0xab, 0x0c}, "t[0].tag[0] = 2\nt[0].plain[0] = -2\nt[0].sized[0] = <4 bytes> 61 62 20 20\nt[0].items[0] = 10\nt[0].items[1] = 11\nt[0].last[0] = 12\n"},
+		{{3, 0, 0, 0xc0, 0x3f, 1, 2, 3, 4, 0x12, 0x0c}, "t[0].tag[0] = 3\nt[0].plain[0] = 1.5\nt[0].sized[0] = <4 bytes> 01 02 03 04\nt[0].items[0] = 1\nt[0].items[1] = 2\nt[0].last[0] = 12\n"},
+		{{4, 0xab, 0xcd, 1, 2, 3, 4, 0xef, 0x99}, "t[0].tag[0] = 4\nt[0].plain[0] = 2748\nt[0].sized[0] = <4 bytes> 01 02 03 04\nt[0].items[0] = 13\nt[0].items[1] = 14\nt[0].last[0] = 153\n"},
+		{{5, 'h', 'i', 0, 'o', 'k', 0x20, 0x20, 0x12, 0x0c}, "t[0].tag[0] = 5\nt[0].plain[0] = \"hi\"\nt[0].sized[0] = \"ok\"\nt[0].items[0] = 1\nt[0].items[1] = 2\nt[0].last[0] = 12\n"},
+		{{6, 0x80, 'a', 'b', 0x20, 0x20, 0xa5, 0x0c}, "t[0].tag[0] = 6\nt[0].plain[0] = true\nt[0].sized[0] = \"ab\"\nt[0].items[0] = 0\nt[0].items[1] = 1\nt[0].last[0] = 12\n"},
+		{{7, 0x42, 0x43, 0x44, 0x45, 0x46, 0x12, 0x0c}, "t[0].tag[0] = 7\nt[0].plain[0].v[0] = 66\nt[0].sized[0].v[0] = 67\nt[0].items[0] = 1\nt[0].items[1] = 2\nt[0].last[0] = 12\n"},
+		{{9, 0xde, 0xad, 0xbe, 0xef, 0x12, 0x0c}, "t[0].tag[0] = 9\nt[0].sized[0] = <4 bytes> de ad be ef\nt[0].items[0] = 1\nt[0].items[1] = 2\nt[0].last[0] = 12\n"},
+	}) {
+		expect_dump(t, fmt.tprintf("tag %v", c.input[0]), ksy_dump(t, src, c.input), c.want)
+	}
+	expect_dump(t, "json", ksy_json(t, src, {5, 'h', 'i', 0, 'o', 'k', 0x20, 0x20, 0x12, 0x0c}), `{"t":[{"tag":[5],"plain":["hi"],"sized":["ok"],"items":[1,2],"last":[12]}]}` + "\n")
+	expect_dump(t, "past the end", ksy_dump(t, src, {2, 0xff}), "error: Unexpected_EOF at 1 in t[0].plain[0]")
+
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	err := ksy.compile(src, &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, {4, 0xab, 0xcd, 1, 2, 3, 4, 0xef, 0x99}, &d, spans = true)
+	if !testing.expectf(t, d.err.kind == .None, "%v at %v in %s", d.err.kind, d.err.offset, d.err.path) do return
+	b := strings.builder_make(context.temp_allocator)
+	testing.expect(t, dmp.write_text(strings.to_writer(&b), &ff, &d.tree, offsets = true) == .None, "write_text failed")
+	expect_dump(t, "offsets", strings.to_string(b), `t[0].tag[0] = 4 @0x0
+t[0].plain[0] = 2748 @0x1
+t[0].sized[0] = <4 bytes> 01 02 03 04 @0x3
+t[0].items[0] = 13 @0x7
+t[0].items[1] = 14 @0x7
+t[0].last[0] = 153 @0x8
+`)
 }
 
 // io on parse instances: each is read at its pos in the stream io gives,

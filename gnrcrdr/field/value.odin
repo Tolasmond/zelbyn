@@ -25,7 +25,8 @@ Value :: union {
 // a child's slot), then each of its params. For an instance of a switch-on
 // field, choice is the case it was read as: an index into the field's
 // cases, or DEFAULT_CASE; otherwise it is 0. A value of a switch-on field
-// with a length that no case chose is not an instance but a []byte, its
+// whose case is not a set is not an instance but a value of the case's
+// type, and so is one with a length that no case chose, a []byte, its
 // bytes (metadata.Switch).
 //
 // An instance is one block of its tree's arena (make_instance): the

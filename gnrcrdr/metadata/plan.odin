@@ -188,15 +188,19 @@ Terminator :: struct {
 }
 
 // A field whose type is chosen by a value (Kaitai's switch-on): each
-// instance is one of the set of the first case whose value equals on, or of
-// default when none does. Each case's set has the field's name and its own
-// children, and each instance records which case it was read as
-// (field.Instance.choice). With no match and no default, the field is not
-// read, unless it has a length: then, as the official compiler does, the
-// bytes of the length are read, without removing pad_right or cutting them
-// at a terminator, and are its value, a []byte where an instance would be.
-// The compiler allows a field that is not read only when it is read at
-// most once.
+// element is read as the first case whose value equals on, or as default
+// when none does. Each case is a node with the field's name: a set, with
+// its own children, whose instances record which case they were read as
+// (field.Instance.choice), or a field of any other type, whose element is
+// a value of that type where an instance would be. That field has its own
+// length, terminator and pad_right: as the official compiler reads them,
+// a String has those of the switch-on field, and the other types none, so
+// that their values are read in the field's stream whatever its length.
+// With no match and no default, the field is not read, unless it has a
+// length: then, as the official compiler does, the bytes of the length are
+// read, without removing pad_right or cutting them at a terminator, and
+// are its value, a []byte where an instance would be. The compiler allows
+// a field that is not read only when it is read at most once.
 Switch :: struct {
 	on:      ^Expr, // an Int or String expression
 	cases:   []Switch_Case,
