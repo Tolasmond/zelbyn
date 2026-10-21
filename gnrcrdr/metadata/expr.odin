@@ -36,6 +36,7 @@ Expr_Variant :: union {
 	Name,
 	Member,
 	Enum_Constant,
+	Size_Of,
 
 	// resolved only
 	Instance,
@@ -44,6 +45,7 @@ Expr_Variant :: union {
 	String_Length,
 	To_S,
 	To_I,
+	Array_Method,
 	Io,
 	Io_Pos,
 	Io_Size,
@@ -132,6 +134,14 @@ Enum_Constant :: struct {
 	enum_name, value_name: string,
 }
 
+// sizeof<type_name>, or bitsizeof<type_name> when bits is set. Resolving
+// it, like _sizeof, gives an Int_Literal: the size of the type in bytes or
+// bits.
+Size_Of :: struct {
+	type_name: string,
+	bits:      bool,
+}
+
 // The set instance being decoded (up = 0), one of its enclosing instances
 // (up > 0, _parent, and _root in an imported schema), or the outermost one
 // (root, _root). node is its set.
@@ -175,8 +185,24 @@ To_S :: struct {
 
 // .to_i of a String: the decimal integer it is, with an optional sign;
 // Invalid_Number when it is not one, Integer_Overflow when it does not fit.
+// Of a Bool: 1 or 0.
 To_I :: struct {
 	operand: ^Expr,
+}
+
+// .first, .last, .min and .max of an Array or of Bytes: one of its values,
+// or of its bytes as an Int; Index_Out_Of_Range when it has none. min and
+// max are of Int values.
+Array_Method :: struct {
+	operand: ^Expr,
+	method:  Array_Method_Kind,
+}
+
+Array_Method_Kind :: enum {
+	First,
+	Last,
+	Min,
+	Max,
 }
 
 // _io.pos, _io.size and _io.eof: the position in the stream of the set

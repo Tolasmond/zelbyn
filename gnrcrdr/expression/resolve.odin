@@ -1,6 +1,7 @@
 package expression
 
 import mdata "../metadata"
+import "base:intrinsics"
 import "core:fmt"
 import "core:mem"
 
@@ -21,7 +22,14 @@ Scope :: struct {
 	// error.
 	compile_instance:       proc(data: rawptr, set: ^mdata.Node, instance: ^mdata.Value_Instance) -> bool,
 	compile_parse_instance: proc(data: rawptr, set: ^mdata.Node, instance: ^mdata.Node) -> bool,
-	data:                   rawptr,
+
+	// Called for _sizeof, sizeof<t> and bitsizeof<t>: the size in bits that
+	// Kaitai's compiler gives the attribute or parse instance called name
+	// of set, or set's own type when name is "", or with of_type, the type
+	// called name, as set's type names it. On failure it returns the error,
+	// whose offset the resolver sets. When nil, these are an error.
+	size_of: proc(data: rawptr, set: ^mdata.Node, name: string, of_type: bool) -> (bits: int, err: Error),
+	data:    rawptr,
 }
 
 // A schema's enum: its values, by name. An enum constant (name::value) is
@@ -95,6 +103,61 @@ direct_form :: proc(e: ^mdata.Expr) -> mdata.Direct {
 		}
 	}
 	return nil
+}
+
+// The value of e, a parsed or resolved expression, when it is made of
+// integer literals and the integer operators; ok is false for any other,
+// and when the decoder would fail on it (overflow, division by zero).
+constant :: proc(e: ^mdata.Expr) -> (v: int, ok: bool) {
+	#partial switch x in e.variant {
+	case mdata.Int_Literal:
+		return x.value, true
+	case mdata.Unary:
+		n := constant(x.operand) or_return
+		#partial switch x.op {
+		case .Neg:
+			if n == min(int) do return
+			return -n, true
+		case .Bit_Not:
+			return ~n, true
+		}
+	case mdata.Binary:
+		a := constant(x.left) or_return
+		b := constant(x.right) or_return
+		overflow := false
+		#partial switch x.op {
+		case .Mul:
+			v, overflow = intrinsics.overflow_mul(a, b)
+		case .Add:
+			v, overflow = intrinsics.overflow_add(a, b)
+		case .Sub:
+			v, overflow = intrinsics.overflow_sub(a, b)
+		case .Div:
+			if b == 0 || (a == min(int) && b == -1) do return
+			v = a / b
+			if a % b != 0 && (a < 0) != (b < 0) do v -= 1
+		case .Mod:
+			if b == 0 do return
+			v = b == -1 ? 0 : a %% b
+		case .Shl:
+			if b < 0 || b > 63 do return
+			v = a << uint(b)
+			overflow = v >> uint(b) != a
+		case .Shr:
+			if b < 0 || b > 63 do return
+			v = a >> uint(b)
+		case .And:
+			v = a & b
+		case .Xor:
+			v = a ~ b
+		case .Or:
+			v = a | b
+		case:
+			return
+		}
+		return v, !overflow
+	}
+	return
 }
 
 // e as a Direct_Field: an Int field read at most once, of the set instance
@@ -199,7 +262,9 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		return resolve_member(r, e, x)
 	case mdata.Enum_Constant:
 		return resolve_enum_constant(r, e, x)
-	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.String_Length, mdata.To_S, mdata.To_I, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref:
+	case mdata.Size_Of:
+		return resolve_size_of(r, e, r.scope.types[len(r.scope.types) - 1], x.type_name, true, x.bits)
+	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.String_Length, mdata.To_S, mdata.To_I, mdata.Array_Method, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref:
 		assert(e.type != .Unresolved, "resolve: a resolved variant without a type")
 	case:
 		panic("resolve: empty expression")
@@ -292,6 +357,8 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 		instance^ = {type = .Struct, offset = e.offset, variant = mdata.Instance{node = types[len(types) - 1]}}
 		e.variant = mdata.Io{instance}
 		e.type = .Stream
+	case "_sizeof":
+		return resolve_size_of(r, e, types[len(types) - 1], "", false, false)
 	case "_":
 		if r.scope.element == nil do return fail(r, .Invalid, e.offset, "_ is only defined in repeat-until")
 		e.type = value_type(r, e, r.scope.element, "_") or_return
@@ -401,6 +468,8 @@ struct_node :: proc(e: ^mdata.Expr) -> ^mdata.Node {
 		return x.node
 	case mdata.Index:
 		return struct_node(x.operand)
+	case mdata.Array_Method:
+		return struct_node(x.operand)
 	}
 	panic("struct_node: not a set")
 }
@@ -423,6 +492,8 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 		e.type = .Int
 		return true
 	}
+
+	if m.name == "_sizeof" do return resolve_member_size_of(r, e, m.operand)
 
 	resolve(r, m.operand) or_return
 	operand := m.operand
@@ -458,10 +529,13 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 	case .Stream:
 		return fail(r, .Unsupported, e.offset, "%s of a stream other than _io is not supported", m.name)
 	case .Array, .Bytes:
-		if m.name == "size" {
+		switch m.name {
+		case "size":
 			e.variant = mdata.Size{operand}
 			e.type = .Int
 			return true
+		case "first", "last", "min", "max":
+			return resolve_array_method(r, e, operand, m.name)
 		}
 	case .String:
 		switch m.name {
@@ -475,11 +549,106 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 			return true
 		}
 	case .Int:
-		if m.name == "to_s" {
+		switch m.name {
+		case "to_s":
 			e.variant = mdata.To_S{operand}
 			e.type = .String
 			return true
+		case "to_i":
+			// an enum's value is its integer
+			e.variant = operand.variant
+			e.type = .Int
+			return true
+		}
+	case .Bool:
+		if m.name == "to_i" {
+			e.variant = mdata.To_I{operand}
+			e.type = .Int
+			return true
 		}
 	}
-	return fail(r, .Unsupported, e.offset, "%s has no member %s (of methods, only .size, .length, .to_i and .to_s are supported)", type_name(operand.type), m.name)
+	return fail(r, .Unsupported, e.offset, "%s has no member %s (of methods, only _sizeof, .size, .length, .first, .last, .min, .max, .to_i and .to_s are supported)", type_name(operand.type), m.name)
+}
+
+// operand.name, where name is first, last, min or max, and operand an
+// Array or Bytes.
+@(private = "file")
+resolve_array_method :: proc(r: ^Resolver, e: ^mdata.Expr, operand: ^mdata.Expr, name: string) -> bool {
+	method: mdata.Array_Method_Kind
+	switch name {
+	case "first":
+		method = .First
+	case "last":
+		method = .Last
+	case "min":
+		method = .Min
+	case "max":
+		method = .Max
+	}
+	t := mdata.Expr_Type.Int
+	if operand.type == .Array {
+		// an Array is only ever all the values of a field
+		field := operand.variant.(mdata.Field_Ref).node
+		t = value_type(r, e, field, field.ref_name) or_return
+	}
+	if (method == .Min || method == .Max) && t != .Int do return fail(r, .Unsupported, e.offset, ".%s of an array is only supported when its values are integers, not %s", name, type_name(t))
+	e.variant = mdata.Array_Method{operand, method}
+	e.type = t
+	return true
+}
+
+// operand._sizeof: the size of an attribute or parse instance, a field
+// name or base.name, or of the type of _root or _parent. It is known
+// from the schema, so the attribute need not come before the expression.
+@(private = "file")
+resolve_member_size_of :: proc(r: ^Resolver, e: ^mdata.Expr, operand: ^mdata.Expr) -> bool {
+	#partial switch x in operand.variant {
+	case mdata.Name:
+		if !is_special(x.name) {
+			types := r.scope.types
+			return resolve_size_of(r, e, types[len(types) - 1], x.name, false, false)
+		}
+	case mdata.Member:
+		if !is_special(x.name) {
+			resolve(r, x.operand) or_return
+			if x.operand.type != .Struct do return fail(r, .Invalid, operand.offset, "%s has no field %s", type_name(x.operand.type), x.name)
+			return resolve_size_of(r, e, struct_node(x.operand), x.name, false, false)
+		}
+	}
+	resolve(r, operand) or_return
+	if inst, is_instance := operand.variant.(mdata.Instance); is_instance {
+		return resolve_size_of(r, e, inst.node, "", false, false)
+	}
+	return fail(r, .Unsupported, e.offset, "_sizeof is only supported of an attribute, a parse instance, _root and _parent")
+}
+
+// True for the names Kaitai gives special meanings: _root, _parent, _io,
+// _ and _index.
+@(private = "file")
+is_special :: proc(name: string) -> bool {
+	switch name {
+	case "_root", "_parent", "_io", "_", "_index":
+		return true
+	}
+	return false
+}
+
+// Makes e the Int_Literal of a size found with scope.size_of (Scope): in
+// bytes, rounded up from the bits, unless bits is set.
+@(private = "file")
+resolve_size_of :: proc(r: ^Resolver, e: ^mdata.Expr, set: ^mdata.Node, name: string, of_type, bits: bool) -> bool {
+	if r.scope.size_of == nil do return fail(r, .Invalid, e.offset, "sizes cannot be used here")
+	n, err := r.scope.size_of(r.scope.data, set, name, of_type)
+	if err.kind != .None {
+		if r.err.kind == .None {
+			err.offset = e.offset
+			r.err = err
+		} else {
+			destroy_error(&err)
+		}
+		return false
+	}
+	e.variant = mdata.Int_Literal{bits ? n : (n + 7) / 8}
+	e.type = .Int
+	return true
 }

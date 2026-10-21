@@ -39,6 +39,9 @@ PRECEDENCE_CASES := [?][2]string {
 	{`'a\n' + "b\t\"\\\101\u00e9"`, `("a\\n" + "b\011\"\\A\303\251")`},
 	{"a[1][b + 2].c", "a[1][(b + 2)].c"},
 	{"x.length + y.to_s.to_i", "(x.length + y.to_s.to_i)"},
+	{"sizeof<t> + bitsizeof < a :: b > * a._sizeof", "(sizeof<t> + (bitsizeof<a::b> * a._sizeof))"},
+	{"a.first + a.last.b + a.min - a.max", "(((a.first + a.last.b) + a.min) - a.max)"},
+	{"1.to_s", "1.to_s"},
 }
 
 @(test)
@@ -91,9 +94,12 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	{`"\400"`, .Syntax, 1, "above \\377"},
 	{`"\u12"`, .Syntax, 1, "four hex digits"},
 	{"a[1", .Syntax, 3, "expected ], found end of expression"},
+	{"sizeof<1>", .Syntax, 7, "expected a type name in sizeof<>, found 1"},
+	{"bitsizeof<a b", .Syntax, 12, "expected > after the type name, found b"},
 
 	// outside the subset
 	{"1.5", .Unsupported, 0, "float literals"},
+	{"2.", .Unsupported, 0, "float literals"},
 	{"[1, 2]", .Unsupported, 0, "array literals"},
 	{"a.to_s()", .Unsupported, 6, "method calls"},
 	{"a.as<u4>", .Unsupported, 2, "casts"},
@@ -135,6 +141,12 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	{"'a' < 1 ? 1 : 0", .Invalid, 6, "expected a string, found an integer"},
 	{"'a'.size", .Unsupported, 4, "a string has no member size"},
 	{"a.length", .Unsupported, 2, "an integer has no member length"},
+	{"items.min", .Unsupported, 6, ".min of an array is only supported when its values are integers, not a set"},
+	{"_io.size.to_i + 'a'.to_i + hdr.tag.to_i", .Unsupported, 35, "a byte array has no member to_i"},
+	{"_sizeof", .Invalid, 0, "sizes cannot be used here"},
+	{"a._sizeof", .Invalid, 2, "sizes cannot be used here"},
+	{"sizeof<u1>", .Invalid, 0, "sizes cannot be used here"},
+	{"items[0]._sizeof", .Unsupported, 9, "_sizeof is only supported of an attribute"},
 }
 
 @(test)

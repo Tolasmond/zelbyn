@@ -171,6 +171,20 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    size: later\n  - id: later\n    type: u1\n", .Invalid, 6, 11, "size: t has no field later"},
 	{HEAD + "seq:\n  - id: a\n    size: 'e::x'\nenums:\n  e:\n    1: y\n", .Invalid, 6, 12, "enum e has no value x"},
 
+	// sizes: what Kaitai's compiler cannot size, and what has no size
+	{HEAD + "seq:\n  - id: a\n    size: sizeof<s>\ntypes:\n  s:\n    seq:\n      - id: b\n        size-eos: true\n", .Invalid, 6, 11, "size: s has no fixed size: b has none"},
+	{HEAD + "seq:\n  - id: a\n    size: sizeof<s>\ntypes:\n  s:\n    seq:\n      - id: c\n        type: inner\n  inner:\n    seq:\n      - id: d\n        type: strz\n        encoding: ASCII\n", .Invalid, 6, 11, "size: s has no fixed size: c.d has none"},
+	{HEAD + "seq:\n  - id: a\n    size: sizeof<r>\ntypes:\n  r:\n    seq:\n      - id: next\n        type: r\n", .Invalid, 6, 11, "size: r has no fixed size: next has none"},
+	{HEAD + "seq:\n  - id: a\n    size: _sizeof\n  - id: b\n    type: u1\n", .Invalid, 6, 11, "size: t has no fixed size: a has none"},
+	{HEAD + "seq:\n  - id: a\n    size: sizeof<nope>\n", .Invalid, 6, 11, "size: unknown type nope"},
+	{HEAD + "seq:\n  - id: a\n    size: sizeof<str>\n", .Invalid, 6, 11, "size: str has no fixed size"},
+	{HEAD + "seq:\n  - id: a\n    size: sizeof<s::x>\n", .Unsupported, 6, 11, "size: a type of another type (s::x) is not supported"},
+	{HEAD + "seq:\n  - id: a\n    size: nope._sizeof\n", .Invalid, 6, 16, "size: t has no field nope"},
+	{HEAD + "seq:\n  - id: n\n    type: u1\n    repeat: expr\n    repeat-expr: 2\n  - id: a\n    size: n._sizeof\n", .Unsupported, 10, 13, "size: n is repeated; _sizeof of a repeated attribute is not supported"},
+	{HEAD + "seq:\n  - id: a\n    size: v._sizeof\ninstances:\n  v:\n    value: 1\n", .Invalid, 6, 13, "size: v is a value instance, which has no _sizeof"},
+	{HEAD + "seq:\n  - id: a\n    type: s(1)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u1\n    seq:\n      - id: b\n        size: p._sizeof\n", .Invalid, 14, 17, "size: p is a param, which has no _sizeof"},
+	{HEAD + "seq:\n  - id: a\n    size: 2.\n", .Unsupported, 6, 11, "size: float literals are not supported"},
+
 	// valid
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid: 256\n", .Invalid, 7, 12, "a: 256 does not fit in a UInt8"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid: x + 1\n", .Invalid, 7, 12, "valid: t has no field x"},
@@ -839,6 +853,132 @@ t[0].tail2[0] = <1 bytes> f1
 	// in the second group, whose k is 2, grand has no value
 	absent, _ := strings.replace_all(src, "size: groups[0].entries[1].grand", "size: groups[1].entries[1].grand", context.temp_allocator)
 	expect_dump(t, "absent", ksy_dump(t, absent, input), "error: Absent_Field at 14 in t[0].tail2[0]")
+}
+
+// Sizes and methods: sizeof<t> and bitsizeof<t> of a type with bit fields,
+// which add up without alignment, as in Kaitai; _sizeof of a field, of a
+// later field and of _parent's field, and of a type in the valid of its
+// own field; sizes of primitive types; .to_i of a boolean, an enum and an enum
+// constant; .first, .last, .min and .max of an array of integers, of bytes,
+// and of an array of sets. A valid min of _sizeof fails, and .first of an
+// empty array is Index_Out_Of_Range.
+@(test)
+ksy_sizes_and_methods :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: hdr
+    type: header
+  - id: flag
+    type: b1
+  - id: kind
+    type: b7
+    enum: kind
+  - id: empty
+    type: u1
+    repeat: expr
+    repeat-expr: 0
+  - id: first_of_empty
+    size: empty.first
+    if: not flag
+  - id: packed_size
+    size: sizeof<packed> + bitsizeof<packed> - 24
+  - id: hdr_rest
+    size: hdr._sizeof - hdr.len._sizeof
+  - id: prims
+    size: _root.hdr.magic._sizeof + sizeof<u2> + sizeof<b9> - bitsizeof<b3>
+  - id: later_size
+    size: later._sizeof
+  - id: to_i
+    size: flag.to_i + kind.to_i + kind::two.to_i
+  - id: nums
+    type: u2
+    repeat: expr
+    repeat-expr: 3
+  - id: ends
+    size: nums.first + nums.last
+  - id: extremes
+    size: nums.min + nums.max
+  - id: raw
+    size: 3
+  - id: raw_methods
+    size: raw.first + raw.last + raw.min + raw.max
+  - id: items
+    type: item
+    repeat: expr
+    repeat-expr: 2
+  - id: last_item
+    size: items.last.v - items.first.v
+  - id: entry
+    type: entry
+  - id: later
+    type: u1
+types:
+  header:
+    seq:
+      - id: magic
+        contents: [0x4d, 'X']
+      - id: len
+        type: u2
+        valid:
+          min: _sizeof
+      - id: rest
+        size: 2 * 2 - 3
+      - id: maybe
+        type: u1
+        if: false
+  packed:
+    seq:
+      - id: p1
+        type: b4
+      - id: p2
+        type: u1
+      - id: p3
+        type: b4
+      - id: p4
+        type: u1
+  item:
+    seq:
+      - id: v
+        type: u1
+  entry:
+    seq:
+      - id: body
+        size: _parent.hdr._sizeof - sizeof<item> * 4
+enums:
+  kind:
+    1: one
+    2: two
+`
+	input := []byte{'M', 'X', 6, 0, 'r', 0x81, 'P', 'P', 'P', 'H', 'H', 'H', 'H', 'S', 'S', 'S', 'L', 'T', 'T', 'T', 'T', 1, 0, 3, 0, 2, 0, 'E', 'E', 'E', 'X', 'X', 'X', 'X', 0, 2, 1, 'R', 'R', 'R', 5, 7, 'I', 'I', 'B', 'B', 9}
+	expect_dump(t, "sizes", ksy_dump(t, src, input), `t[0].hdr[0].magic[0] = <2 bytes> 4d 58
+t[0].hdr[0].len[0] = 6
+t[0].hdr[0].rest[0] = <1 bytes> 72
+t[0].flag[0] = true
+t[0].kind[0] = 1
+t[0].packed_size[0] = <3 bytes> 50 50 50
+t[0].hdr_rest[0] = <4 bytes> 48 48 48 48
+t[0].prims[0] = <3 bytes> 53 53 53
+t[0].later_size[0] = <1 bytes> 4c
+t[0].to_i[0] = <4 bytes> 54 54 54 54
+t[0].nums[0] = 1
+t[0].nums[1] = 3
+t[0].nums[2] = 2
+t[0].ends[0] = <3 bytes> 45 45 45
+t[0].extremes[0] = <4 bytes> 58 58 58 58
+t[0].raw[0] = <3 bytes> 00 02 01
+t[0].raw_methods[0] = <3 bytes> 52 52 52
+t[0].items[0].v[0] = 5
+t[0].items[1].v[0] = 7
+t[0].last_item[0] = <2 bytes> 49 49
+t[0].entry[0].body[0] = <2 bytes> 42 42
+t[0].later[0] = 9
+`)
+
+	short := slice.clone(input, context.temp_allocator)
+	short[2] = 5
+	expect_dump(t, "valid min _sizeof", ksy_dump(t, src, short), "error: Less_Than_Min at 2 in t[0].hdr[0].len[0]")
+	no_flag := slice.clone(input, context.temp_allocator)
+	no_flag[5] = 0x01
+	expect_dump(t, "first of empty", ksy_dump(t, src, no_flag), "error: Index_Out_Of_Range at 6 in t[0].first_of_empty[0]")
 }
 
 // size, terminator and size-eos on a switch-on field: the case chosen is

@@ -205,6 +205,12 @@ EVAL_CASES := [?]Eval_Case {
 	{text = "hdr.tag[1]", want = "238"},
 	{text = "hdr.tag[2]", err = .Index_Out_Of_Range},
 	{text = "later", err = .Absent_Field},
+
+	// methods
+	{text = "items.first.v + items.last.v * 100", want = "1210"},
+	{text = "hdr.tag.first + hdr.tag.last + hdr.tag.min + hdr.tag.max", want = "952"},
+	{text = "(a == 5).to_i * 2 + (a == 4).to_i", want = "2"},
+	{text = "a.to_i + hdr.n.to_i", want = "8"},
 }
 
 @(test)

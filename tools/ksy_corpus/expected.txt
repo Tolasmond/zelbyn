@@ -1,15 +1,15 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 74 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 83 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
-ERR	archive/android_bootldr_huawei.ksy	Invalid	archive/android_bootldr_huawei.ksy:38:53	size: meta_header has no field _sizeof
+OK	archive/android_bootldr_huawei.ksy
 ERR	archive/android_bootldr_qcom.ksy	Unsupported	archive/android_bootldr_qcom.ksy:181:16	value instance img_header: only integer, boolean and string values are supported
 OK	archive/android_dto.ksy
 OK	archive/android_img.ksy
-ERR	archive/android_sparse.ksy	Invalid	archive/android_sparse.ksy:29:52	size: header_prefix has no field _sizeof
+ERR	archive/android_sparse.ksy	Unsupported	archive/android_sparse.ksy:78:16	value instance version: only integer, boolean and string values are supported
 ERR	archive/cpio_old_le.ksy	Unsupported	archive/cpio_old_le.ksy:36:26	if: array literals are not supported
 OK	archive/gzip.ksy
 OK	archive/lzh.ksy
-ERR	archive/mozilla_mar.ksy	Unsupported	archive/mozilla_mar.ksy:64:37	size: an integer has no member _sizeof (of methods, only .size, .length, .to_i and .to_s are supported)
+OK	archive/mozilla_mar.ksy
 ERR	archive/phar_without_stub.ksy	Unsupported	archive/phar_without_stub.ksy:190:5	type api_version: meta in a type is not supported
 ERR	archive/rar.ksy	Unsupported	archive/rar.ksy:39:18	blocks: a repeated switch-on without a _ case, size or size-eos is not supported
 OK	archive/respack.ksy
@@ -27,19 +27,19 @@ ERR	common/utf16_with_bom.ksy	Unsupported	common/utf16_with_bom.ksy:41:15	encodi
 OK	common/utf8_string.ksy
 ERR	common/vlq_base128_be.ksy	Unsupported	common/vlq_base128_be.ksy:47:12	value: casts are not supported
 ERR	common/vlq_base128_le.ksy	Unsupported	common/vlq_base128_le.ksy:85:45	valid: casts are not supported
-ERR	database/dbf.ksy	Invalid	database/dbf.ksy:31:40	size: header1 has no field _sizeof
+OK	database/dbf.ksy
 ERR	database/gettext_mo.ksy	Unsupported	database/gettext_mo.ksy:67:15	param current: type hash_lookup_iteration is not supported; only integer types, bool and bytes are
 ERR	database/sqlite3.ksy	Unsupported	database/sqlite3.ksy:211:15	param serial_type: type serial is not supported; only integer types, bool and bytes are
 OK	database/tsm.ksy
 OK	executable/android_nanoapp_header.ksy
 ERR	executable/dex.ksy	Unsupported	common/vlq_base128_le.ksy:85:45	valid: casts are not supported
-ERR	executable/dos_mz.ksy	Invalid	executable/dos_mz.ksy:46:34	size: mz has no field _sizeof
+OK	executable/dos_mz.ksy
 ERR	executable/elf.ksy	Unsupported	executable/elf.ksy:361:5	type endian_elf: meta in a type is not supported
 ERR	executable/java_class.ksy	Unsupported	executable/java_class.ksy:179:60	value: casts are not supported
 ERR	executable/mach_o.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
 ERR	executable/mach_o_fat.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
 ERR	executable/microsoft_pe.ksy	Invalid	executable/microsoft_pe.ksy:24:3	instance pe refers to itself
-ERR	executable/python_pyc_27.ksy	Unsupported	executable/python_pyc_27.ksy:58:22	if: an integer has no member to_i (of methods, only .size, .length, .to_i and .to_s are supported)
+ERR	executable/python_pyc_27.ksy	Unsupported	executable/python_pyc_27.ksy:218:5	type py_object contains itself; recursive types are not supported
 ERR	executable/swf.ksy	Unsupported	executable/swf.ksy:56:5	attribute zlib_body: process is not supported
 ERR	executable/uefi_te.ksy	Unsupported	executable/uefi_te.ksy:225:82	pos: size of a stream other than _io is not supported
 OK	filesystem/amlogic_emmc_partitions.ksy
@@ -54,8 +54,8 @@ ERR	filesystem/iso9660.ksy	Unsupported	filesystem/iso9660.ksy:138:5	type dir_ent
 OK	filesystem/luks.ksy
 ERR	filesystem/lvm2.ksy	Unsupported	filesystem/lvm2.ksy:131:21	type metadata_area_header contains itself; recursive types are not supported
 OK	filesystem/mbr_partition_table.ksy
-ERR	filesystem/tr_dos_image.ksy	Unsupported	filesystem/tr_dos_image.ksy:142:27	value: an integer has no member to_i (of methods, only .size, .length, .to_i and .to_s are supported)
-ERR	filesystem/ubifs.ksy	Invalid	filesystem/ubifs.ksy:162:45	size: header has no field _sizeof
+OK	filesystem/tr_dos_image.ksy
+ERR	filesystem/ubifs.ksy	Unsupported	filesystem/ubifs.ksy:341:5	type index_header contains itself; recursive types are not supported
 ERR	filesystem/vdi.ksy	Unsupported	filesystem/vdi.ksy:217:20	value instance block: only integer, boolean and string values are supported
 OK	filesystem/vfat.ksy
 OK	filesystem/vmware_vmdk.ksy
@@ -63,12 +63,12 @@ OK	filesystem/zx_spectrum_tap.ksy
 OK	firmware/andes_firmware.ksy
 ERR	firmware/broadcom_trx.ksy	Unsupported	firmware/broadcom_trx.ksy:130:42	value: size of a stream other than _io is not supported
 OK	firmware/ines.ksy
-ERR	firmware/uf2.ksy	Unsupported	firmware/uf2.ksy:269:24	value: an integer has no member _sizeof (of methods, only .size, .length, .to_i and .to_s are supported)
+OK	firmware/uf2.ksy
 OK	firmware/uimage.ksy
 ERR	font/grub2_font.ksy	Invalid	font/grub2_font.ksy:20:5	magic: contents cannot have size
 ERR	font/pcf_font.ksy	Invalid	font/pcf_font.ksy:130:29	io: body has no field strings
-ERR	font/ttf.ksy	Unsupported	font/ttf.ksy:230:40	value: an array has no member max (of methods, only .size, .length, .to_i and .to_s are supported)
-ERR	game/allegro_dat.ksy	Unsupported	game/allegro_dat.ksy:57:27	value: an array has no member last (of methods, only .size, .length, .to_i and .to_s are supported)
+ERR	font/ttf.ksy	Unsupported	font/ttf.ksy:966:23	encoding "utf-16be" is not supported; only ASCII and UTF-8 are
+OK	game/allegro_dat.ksy
 OK	game/doom_wad.ksy
 ERR	game/dune_2_pak.ksy	Unsupported	game/dune_2_pak.ksy:39:44	value: size of a stream other than _io is not supported
 ERR	game/fallout2_dat.ksy	Unsupported	game/fallout2_dat.ksy:55:9	instance contents_zlib: process is not supported
@@ -76,7 +76,7 @@ OK	game/fallout_dat.ksy
 OK	game/ftl_dat.ksy
 OK	game/gran_turismo_vol.ksy
 ERR	game/heaps_pak.ksy	Unsupported	game/heaps_pak.ksy:41:26	body: switch-on over a boolean is not supported; only over an integer or a string
-ERR	game/heroes_of_might_and_magic_agg.ksy	Unsupported	game/heroes_of_might_and_magic_agg.ksy:37:18	pos: an array has no member last (of methods, only .size, .length, .to_i and .to_s are supported)
+OK	game/heroes_of_might_and_magic_agg.ksy
 OK	game/heroes_of_might_and_magic_bmp.ksy
 ERR	game/minecraft_nbt.ksy	Unsupported	game/minecraft_nbt.ksy:118:24	payload: a case of type s1 is not supported; only user types are
 ERR	game/quake2_md2.ksy	Unsupported	game/quake2_md2.ksy:340:24	value: float literals are not supported
@@ -94,14 +94,14 @@ ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:391:5	type bitmap_v5_extension: meta
 ERR	image/dicom.ksy	Unsupported	image/dicom.ksy:112:22	value_len: switch-on over a boolean is not supported; only over an integer or a string
 ERR	image/exif.ksy	Unsupported	image/exif.ksy:46:5	type exif_body: meta in a type is not supported
 OK	image/gif.ksy
-ERR	image/gimp_brush.ksy	Unsupported	image/gimp_brush.ksy:30:35	size: an integer has no member _sizeof (of methods, only .size, .length, .to_i and .to_s are supported)
+OK	image/gimp_brush.ksy
 ERR	image/icc_4.ksy	Unsupported	image/icc_4.ksy:1341:31	encoding "UTF-16BE" is not supported; only ASCII and UTF-8 are
 ERR	image/ico.ksy	Unsupported	image/ico.ksy:86:30	value: array literals are not supported
 ERR	image/jpeg.ksy	Unsupported	image/exif.ksy:46:5	type exif_body: meta in a type is not supported
 ERR	image/nitf.ksy	Unsupported	image/nitf.ksy:166:9	an attribute in type date_time has no id; attributes without one are not supported
 OK	image/pcx.ksy
 OK	image/pcx_dcx.ksy
-ERR	image/pif.ksy	Invalid	image/pif.ksy:49:34	value: file_header has no field _sizeof
+ERR	image/pif.ksy	Unsupported	image/pif.ksy:138:41	entries: a case of type b24 is not supported; only user types are
 ERR	image/png.ksy	Unsupported	image/png.ksy:410:9	attribute profile: process is not supported
 OK	image/psx_tim.ksy
 ERR	image/tga.ksy	Unsupported	image/tga.ksy:94:34	value: array literals are not supported
@@ -111,12 +111,12 @@ OK	image/xwd.ksy
 OK	log/aix_utmp.ksy
 OK	log/glibc_utmp.ksy
 OK	log/hashcat_restore.ksy
-ERR	log/mcap.ksy	Syntax	log/mcap.ksy:35:83	value: comparisons cannot be chained
+ERR	log/mcap.ksy	Unsupported	log/mcap.ksy:35:13	value: _io in a value instance is not supported
 OK	log/sudoers_ts.ksy
 ERR	log/systemd_journal.ksy	Unsupported	log/systemd_journal.ksy:137:5	type journal_object contains itself; recursive types are not supported
 OK	log/windows_evt_log.ksy
 ERR	machine_code/code_6502.ksy	Unsupported	machine_code/code_6502.ksy:26:34	args: a case of type u1 is not supported; only user types are
-ERR	macos/compressed_resource.ksy	Invalid	macos/compressed_resource.ksy:62:52	size: common_part has no field _sizeof
+ERR	macos/compressed_resource.ksy	Unsupported	macos/compressed_resource.ksy:68:16	value instance type_specific_part_raw: only integer, boolean and string values are supported
 ERR	macos/ds_store.ksy	Unsupported	macos/ds_store.ksy:107:7	instance directories: an instance without pos or value is not supported
 ERR	macos/mac_os_resource_snd.ksy	Unsupported	macos/mac_os_resource_snd.ksy:118:9	an attribute in type sound_header has no id; attributes without one are not supported
 ERR	macos/resource_compression/dcmp_0.ksy	Unsupported	macos/resource_compression/dcmp_0.ksy:178:23	index_separate_minus: a case of type u1 is not supported; only user types are
@@ -125,7 +125,7 @@ ERR	macos/resource_compression/dcmp_2.ksy	Unsupported	macos/resource_compression
 ERR	macos/resource_compression/dcmp_variable_length_integer.ksy	Unsupported	macos/resource_compression/dcmp_variable_length_integer.ksy:49:15	more: a case of type s4 is not supported; only user types are
 ERR	macos/resource_fork.ksy	Unsupported	macos/resource_fork.ksy:94:12	value instance data_blocks: only integer, boolean and string values are supported
 OK	media/android_opengl_shaders_cache.ksy
-ERR	media/au.ksy	Unsupported	media/au.ksy:47:28	size: a byte array has no member _sizeof (of methods, only .size, .length, .to_i and .to_s are supported)
+ERR	media/au.ksy	Unsupported	media/au.ksy:50:47	value: _io in a value instance is not supported
 ERR	media/avi.ksy	Unsupported	media/avi.ksy:30:5	type blocks contains itself; recursive types are not supported
 ERR	media/blender_blend.ksy	Unsupported	media/blender_blend.ksy:35:42	value: casts are not supported
 ERR	media/creative_voice_file.ksy	Unsupported	media/creative_voice_file.ksy:90:16	value: float literals are not supported
@@ -170,7 +170,7 @@ OK	network/websocket.ksy
 ERR	scientific/nt_mdt/nt_mdt.ksy	Unsupported	scientific/nt_mdt/nt_mdt.ksy:63:19	encoding "cp1251" is not supported; only ASCII and UTF-8 are
 ERR	scientific/nt_mdt/nt_mdt_pal.ksy	Unsupported	scientific/nt_mdt/nt_mdt_pal.ksy:5:13	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
 ERR	scientific/spectroscopy/avantes_roh60.ksy	Unsupported	scientific/spectroscopy/avantes_roh60.ksy:64:18	repeat-expr: ipixlast is a Float32; only integer, boolean, blob, string and set fields can be used in expressions
-ERR	scientific/spectroscopy/specpr.ksy	Unsupported	scientific/spectroscopy/specpr.ksy:72:21	value: a boolean has no member to_i (of methods, only .size, .length, .to_i and .to_s are supported)
+ERR	scientific/spectroscopy/specpr.ksy	Unsupported	scientific/spectroscopy/specpr.ksy:91:33	value: float literals are not supported
 ERR	security/efivar_signature_list.ksy	Unsupported	security/efivar_signature_list.ksy:68:34	value: array literals are not supported
 ERR	security/openpgp_message.ksy	Unsupported	security/openpgp_message.ksy:42:22	body: switch-on over a boolean is not supported; only over an integer or a string
 OK	security/ssh_public_key.ksy
