@@ -25,6 +25,8 @@ import "core:strings"
 //     KS_VERSION), imports, and title, application, file-extension, xref,
 //     license and tags (ignored); seq, types, instances, enums and doc,
 //     doc-ref
+//   - meta in a type, with the same keys but imports, whose endian,
+//     bit-endian and encoding apply in it and the types declared in it
 //   - imported schemas, whose top-level types are used by their meta id,
 //     each with its own meta
 //   - attributes: id, type, size, size-eos, terminator with consume, include
@@ -34,8 +36,9 @@ import "core:strings"
 //   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), b1-b64
 //     (le/be suffixes or meta bit-endian), str and byte arrays (no type)
 //     with size, size-eos or terminator, strz, user types (with size,
-//     size-eos or terminator, read from a substream), and switch-on whose
-//     cases are user types, also with size, size-eos or terminator
+//     size-eos or terminator, read from a substream), and switch-on, also
+//     with size, size-eos or terminator, whose cases are user types or any
+//     of those types
 //   - value instances, with if and enum, over their type and through
 //     _parent and _root those enclosing it, and parse instances: instances
 //     with pos, io (_io or the _io of a set instance) and the keys of an
@@ -49,7 +52,8 @@ import "core:strings"
 // Not supported yet (Unsupported): instances without pos or value, params
 // of other types (str, user types, struct, io, any) and on the top-level
 // type of the schema compiled, _io in a value instance, valid on a float,
-// and min and max on a type other than an integer.
+// min and max on a type other than an integer, an endian that is a
+// switch-on, and imports in a type.
 
 Error_Kind :: enum {
 	None,
@@ -132,19 +136,25 @@ Set_Type :: struct {
 // A .ksy file: the schema being compiled, or one it imports.
 @(private = "file")
 Schema :: struct {
-	path:     string,                   // the file it was read from; "" for source compiled without one
-	bit_endian: endian.Byte_Order,        // meta bit-endian; .Big when absent, as in Kaitai
-	endian:     Maybe(endian.Byte_Order), // meta endian
-	encoding:   string,                   // meta encoding; "" when absent
-	imports:    []^Type_Def,              // the top-level type of each schema in meta imports, in order
+	path:    string,      // the file it was read from; "" for source compiled without one
+	imports: []^Type_Def, // the top-level type of each schema in meta imports, in order
 }
 
 @(private = "file")
 new_schema :: proc(c: ^Compiler, path: string) -> ^Schema {
 	s := new(Schema, c.scratch)
 	s.path = path
-	s.bit_endian = .Big
 	return s
+}
+
+// The keys of meta that apply to the attributes of a type: those of the
+// schema's meta at the top level, and in a type, those of its own meta
+// over those of the type it is declared in, as in Kaitai.
+@(private = "file")
+Meta :: struct {
+	bit_endian: endian.Byte_Order,        // bit-endian; .Big when absent, as in Kaitai
+	endian:     Maybe(endian.Byte_Order), // endian
+	encoding:   string,                   // encoding; "" when absent
 }
 
 // Parses src, the text of c.schema, in scratch, and returns the root of its
@@ -203,6 +213,7 @@ Type_Def :: struct {
 	spec:        ^yml.Node,
 	schema:      ^Schema,   // the schema it is in
 	parent:      ^Type_Def, // the type it is declared in; nil at the top level
+	meta:        Meta,
 	types:       []^Type_Def,
 	instances:   []yml.Entry, // the entries of instances, each checked
 	enums:       []expr.Enum,
@@ -316,7 +327,7 @@ META_KEYS :: Keys {
 }
 
 @(private = "file")
-TYPE_ALLOWED :: []string{"seq", "types", "instances", "enums", "doc", "doc-ref", "params"}
+TYPE_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "doc-ref", "params"}
 
 @(private = "file")
 TOP_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "doc-ref", "params"}
@@ -410,20 +421,8 @@ load_schema :: proc(c: ^Compiler, root: ^yml.Node) -> (top: ^Type_Def, ok: bool)
 	if id_node == nil do return nil, fail(c, .Invalid, meta, "meta has no id")
 	id := identifier(c, id_node, "meta id") or_return
 
-	if n := get(meta, "endian"); n != nil {
-		c.schema.endian = byte_order(c, n, "endian") or_return
-	}
-	if n := get(meta, "bit-endian"); n != nil {
-		c.schema.bit_endian = byte_order(c, n, "bit-endian") or_return
-	}
-	if n := get(meta, "encoding"); n != nil {
-		c.schema.encoding = encoding(c, n) or_return
-	}
-	if n := get(meta, "ks-version"); n != nil {
-		check_ks_version(c, n) or_return
-	}
-
-	top = build_type(c, id, root, nil) or_return
+	m := meta_of(c, meta, {bit_endian = .Big}) or_return
+	top = build_type(c, id, root, nil, m) or_return
 	// registered before its imports, which may import it in turn
 	if c.schema.path != "" {
 		path, _ := filepath.clean(c.schema.path, c.scratch)
@@ -433,6 +432,26 @@ load_schema :: proc(c: ^Compiler, root: ^yml.Node) -> (top: ^Type_Def, ok: bool)
 		c.schema.imports = load_imports(c, n) or_return
 	}
 	return top, true
+}
+
+// The Meta that meta, the meta of a schema or of a type, gives over
+// inherited, and checks its ks-version.
+@(private = "file")
+meta_of :: proc(c: ^Compiler, meta: ^yml.Node, inherited: Meta) -> (m: Meta, ok: bool) {
+	m = inherited
+	if n := get(meta, "endian"); n != nil {
+		m.endian = byte_order(c, n, "endian") or_return
+	}
+	if n := get(meta, "bit-endian"); n != nil {
+		m.bit_endian = byte_order(c, n, "bit-endian") or_return
+	}
+	if n := get(meta, "encoding"); n != nil {
+		m.encoding = encoding(c, n) or_return
+	}
+	if n := get(meta, "ks-version"); n != nil {
+		check_ks_version(c, n) or_return
+	}
+	return m, true
 }
 
 // meta imports: each a schema file named without its .ksy, relative to the
@@ -560,23 +579,27 @@ display_name :: proc(c: ^Compiler, m: ^yml.Node, id: string) -> (name: string, o
 @(private = "file")
 new_node :: proc(c: ^Compiler, name, ref_name: string) -> ^mdata.Node {
 	node := new(mdata.Node, c.allocator)
-	node^ = {name = name, ref_name = ref_name, order = c.schema.endian.? or_else .Little}
+	node^ = {name = name, ref_name = ref_name}
 	return node
 }
 
-// Builds the type spec (the top level when parent is nil) and the types
-// declared in it, and checks the keys of every attribute, so that a key
-// outside the subset is rejected even in a type nothing uses.
+// Builds the type spec (the top level when parent is nil, whose meta is
+// top_meta) and the types declared in it, and checks the keys of every
+// attribute, so that a key outside the subset is rejected even in a type
+// nothing uses.
 @(private = "file")
-build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_Def) -> (td: ^Type_Def, ok: bool) {
+build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_Def, top_meta: Meta = {}) -> (td: ^Type_Def, ok: bool) {
 	td = new(Type_Def, c.scratch)
-	td^ = {name = name, spec = spec, schema = c.schema, parent = parent}
+	td^ = {name = name, spec = spec, schema = c.schema, parent = parent, meta = top_meta}
 
 	if parent != nil {
 		if spec.kind != .Map do return nil, fail(c, .Invalid, spec, "type %s must be a mapping", name)
-		if k := get_key(spec, "meta"); k != nil do return nil, fail(c, .Unsupported, k, "type %s: meta in a type is not supported", name)
 		// -orig-id on a type documents its original name; nothing shows it
 		check_keys(c, spec, {what = "type %s", name = name, allowed = TYPE_ALLOWED, unsupported = TYPE_UNSUPPORTED, extensions = {"-orig-id"}}) or_return
+		td.meta = parent.meta
+		if meta := get(spec, "meta"); meta != nil {
+			td.meta = type_meta(c, name, meta, parent.meta) or_return
+		}
 	}
 
 	if seq := get(spec, "seq"); seq != nil {
@@ -621,6 +644,23 @@ build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_De
 		td.types = list
 	}
 	return td, true
+}
+
+// The meta of type name, over inherited, that of the type it is declared
+// in. It has the keys of the schema's meta, as in Kaitai: an id, which
+// names nothing, and the keys that document the schema, are checked and
+// ignored.
+@(private = "file")
+type_meta :: proc(c: ^Compiler, name: string, meta: ^yml.Node, inherited: Meta) -> (m: Meta, ok: bool) {
+	expect_map(c, meta, "meta") or_return
+	keys := META_KEYS
+	keys.what, keys.name = "type %s: meta", name
+	check_keys(c, meta, keys) or_return
+	if n := get(meta, "id"); n != nil {
+		_ = identifier(c, n, "meta id") or_return
+	}
+	if k := get_key(meta, "imports"); k != nil do return {}, fail(c, .Unsupported, k, "type %s: imports in a type are not supported, only in the schema's meta", name)
+	return meta_of(c, meta, inherited)
 }
 
 @(private = "file")
@@ -1229,26 +1269,13 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	case:
 		type_name := expect_scalar(c, type_node, "type") or_return
 		type_name, call = split_call(c, type_node, id, type_name) or_return
-		sizes := TYPE_SIZE
 		// a type with arguments is a user type
-		if prim, order, is_primitive := primitive(type_name); is_primitive && !call.given {
-			node.type = prim
-			if o, has_order := order.?; has_order {
-				node.order = o
-			} else if sizes[prim] > 1 && c.schema.endian == nil {
-				return fail(c, .Invalid, type_node, "%s: %s needs le or be, or meta endian", id, type_name)
-			}
-			if bytes_key != nil do return fail(c, .Invalid, bytes_key, "%s: %s does not apply to %s", id, bytes_key.text, type_name)
-		} else if (type_name == "str" || type_name == "strz") && !call.given {
-			node.type = .String
-			strz = type_name == "strz"
-			if !strz && !ends do return fail(c, .Invalid, type_node, "%s: str needs size, size-eos or terminator", id)
-		} else if width, bit_order, is_bits := bit_type(type_name); is_bits && !call.given {
-			node.width = u8(width)
-			node.order = bit_order.? or_else c.schema.bit_endian
-			// b1 is a boolean, unless it has an enum
-			node.type = width == 1 && get(attr, "enum") == nil ? .Bool : .Bits
-			if bytes_key != nil do return fail(c, .Invalid, bytes_key, "%s: %s does not apply to %s", id, bytes_key.text, type_name)
+		builtin := false
+		if !call.given {
+			builtin, strz = builtin_type(c, td, attr, type_node, id, type_name, ends, node) or_return
+		}
+		if builtin {
+			if node.type != .String && bytes_key != nil do return fail(c, .Invalid, bytes_key, "%s: %s does not apply to %s", id, bytes_key.text, type_name)
 		} else {
 			user = find_type(td, type_name)
 			if user == nil && strings.contains(type_name, "::") do return fail(c, .Unsupported, type_node, "%s: a type of another type (%s) is not supported", id, type_name)
@@ -1260,7 +1287,7 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	if n := get(attr, "encoding"); n != nil {
 		if node.type != .String do return fail(c, .Invalid, get_key(attr, "encoding"), "%s: encoding applies only to str", id)
 		_ = encoding(c, n) or_return
-	} else if node.type == .String && c.schema.encoding == "" {
+	} else if node.type == .String && td.meta.encoding == "" {
 		return fail(c, .Invalid, type_node, "%s: str needs an encoding, or meta encoding", id)
 	}
 
@@ -1285,7 +1312,8 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	} else if size_eos {
 		node.length = mdata.Eos_Length{}
 	}
-	compile_terminator(c, attr, id, node, strz) or_return
+	// a switch-on's strz cases take consume, include and eos-error
+	compile_terminator(c, attr, id, node, strz, switch_node != nil && has_strz_case(switch_node)) or_return
 
 	if bits := get(attr, "-bits"); bits != nil {
 		if node.width > 0 do return fail(c, .Invalid, bits, "%s: -bits does not apply to a bit type", id)
@@ -1299,7 +1327,7 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 		node.args = compile_args(c, type_node, id, user, call, element_scope) or_return
 	}
 	if switch_node != nil {
-		compile_switch(c, td, switch_node, id, node, element_scope) or_return
+		compile_switch(c, td, attr, switch_node, id, ends, node, element_scope) or_return
 	}
 	// after the type's fields, which an expr can refer to through _
 	if valid != nil {
@@ -1314,6 +1342,38 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 		node.count = mdata.Until_Count{compile_expr(c, get(attr, "repeat-until"), "repeat-until", until_scope, .Bool) or_return}
 	}
 	return true
+}
+
+// Compiles type_name, the type of id given in n, into node when it is a
+// primitive, bit or string type of an attribute attr of td: its type, and
+// its byte or bit order. is_builtin is false for any other type, a user
+// type. ends is set when attr has a size, size-eos or terminator, which a
+// str needs. strz is set for strz, whose terminator compile_terminator adds.
+@(private = "file")
+builtin_type :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id, type_name: string, ends: bool, node: ^mdata.Node) -> (is_builtin, strz, ok: bool) {
+	if prim, order, is_primitive := primitive(type_name); is_primitive {
+		sizes := TYPE_SIZE
+		node.type = prim
+		if order == nil && td.meta.endian == nil && sizes[prim] > 1 {
+			return true, false, fail(c, .Invalid, n, "%s: %s needs le or be, or meta endian", id, type_name)
+		}
+		node.order = order.? or_else (td.meta.endian.? or_else .Little)
+		return true, false, true
+	}
+	if type_name == "str" || type_name == "strz" {
+		node.type = .String
+		strz = type_name == "strz"
+		if !strz && !ends do return true, strz, fail(c, .Invalid, n, "%s: str needs size, size-eos or terminator", id)
+		return true, strz, true
+	}
+	if width, bit_order, is_bits := bit_type(type_name); is_bits {
+		node.width = u8(width)
+		node.order = bit_order.? or_else td.meta.bit_endian
+		// b1 is a boolean, unless it has an enum
+		node.type = width == 1 && get(attr, "enum") == nil ? .Bool : .Bits
+		return true, false, true
+	}
+	return false, false, true
 }
 
 // The chain of node, a field of type user in a type whose chain is types:
@@ -1334,12 +1394,16 @@ chain_with :: proc(c: ^Compiler, types: []^mdata.Node, node: ^mdata.Node) -> []^
 	return chain
 }
 
-// type: switch-on and cases, on node, a set, whose length and terminator
-// are already compiled. Each case is a user type, compiled as a set with
-// node's names. switch-on is an integer or a string; a case value is an
+// type: switch-on and cases, n, of attr, on node, a set, whose length and
+// terminator are already compiled. A case of a user type is compiled as a
+// set with node's names, and one of a primitive, bit or string type as a
+// field of that type. As the official compiler does, a string has node's
+// length, terminator and pad-right, and the other types have none, so
+// that their values are read whatever node's length. ends is as for
+// builtin_type. switch-on is an integer or a string; a case value is an
 // integer or enum constant, or a string literal, or _ for the default.
 @(private = "file")
-compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, node: ^mdata.Node, scope: expr.Scope) -> bool {
+compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: string, ends: bool, node: ^mdata.Node, scope: expr.Scope) -> bool {
 	keys := SWITCH_KEYS
 	keys.what, keys.name = "%s: type", id
 	check_keys(c, n, keys) or_return
@@ -1385,22 +1449,28 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, no
 		type_name := expect_scalar(c, e.value, "a case type") or_return
 		call: Call
 		type_name, call = split_call(c, e.value, id, type_name) or_return
-		user := find_type(td, type_name)
-		if user == nil {
-			_, _, is_primitive := primitive(type_name)
-			_, _, is_bits := bit_type(type_name)
-			if is_primitive || is_bits || type_name == "str" || type_name == "strz" {
-				return fail(c, .Unsupported, e.value, "%s: a case of type %s is not supported; only user types are", id, type_name)
-			}
-			if strings.contains(type_name, "::") do return fail(c, .Unsupported, e.value, "%s: a type of another type (%s) is not supported", id, type_name)
-			return fail(c, .Invalid, e.value, "%s: unknown type %s", id, type_name)
-		}
-
 		case_node := new_node(c, node.name, node.ref_name)
-		case_node.type = .Set
 		case_node.count = mdata.Fixed_Count{1}
-		compile_fields(c, user, case_node, chain_of(c, scope.types, user, case_node)) or_return
-		case_node.args = compile_args(c, e.value, id, user, call, scope) or_return
+
+		// a type with arguments is a user type
+		builtin, strz := false, false
+		if !call.given {
+			builtin, strz = builtin_type(c, td, attr, e.value, id, type_name, ends, case_node) or_return
+		}
+		if builtin {
+			if case_node.type == .String {
+				if td.meta.encoding == "" do return fail(c, .Invalid, e.value, "%s: a case of type %s needs meta encoding", id, type_name)
+				case_node.length = node.length
+				compile_terminator(c, attr, id, case_node, strz) or_return
+			}
+		} else {
+			user := find_type(td, type_name)
+			if user == nil && strings.contains(type_name, "::") do return fail(c, .Unsupported, e.value, "%s: a type of another type (%s) is not supported", id, type_name)
+			if user == nil do return fail(c, .Invalid, e.value, "%s: unknown type %s", id, type_name)
+			case_node.type = .Set
+			compile_fields(c, user, case_node, chain_of(c, scope.types, user, case_node)) or_return
+			case_node.args = compile_args(c, e.value, id, user, call, scope) or_return
+		}
 
 		if is_default {
 			sw.default = case_node
@@ -1417,6 +1487,17 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node, id: string, no
 	}
 	node.switch_on = sw
 	return true
+}
+
+// Whether a case of the switch-on n is strz.
+@(private = "file")
+has_strz_case :: proc(n: ^yml.Node) -> bool {
+	cases := get(n, "cases")
+	if cases == nil || cases.kind != .Map do return false
+	for e in cases.entries {
+		if e.value.kind == .Scalar && strings.trim_space(e.value.text) == "strz" do return true
+	}
+	return false
 }
 
 // The count from repeat (with repeat-expr or repeat-until), or from -peek,
@@ -1589,9 +1670,11 @@ compile_args :: proc(c: ^Compiler, n: ^yml.Node, id: string, user: ^Type_Def, ca
 // terminator, or strz's 0, with consume, include and eos-error, and
 // pad-right, on node, whose length is compiled. consume and eos-error
 // apply only without a length, and pad-right only with one; each defaults
-// as in Kaitai.
+// as in Kaitai. With strz_case, node is a switch-on with a strz case, which
+// consume, include and eos-error apply to, so they are allowed without a
+// terminator; node then has none.
 @(private = "file")
-compile_terminator :: proc(c: ^Compiler, attr: ^yml.Node, id: string, node: ^mdata.Node, strz: bool) -> bool {
+compile_terminator :: proc(c: ^Compiler, attr: ^yml.Node, id: string, node: ^mdata.Node, strz: bool, strz_case := false) -> bool {
 	sized := node.length != nil
 	t := mdata.Terminator{consume = true, eos_error = true}
 	terminated := strz
@@ -1616,11 +1699,11 @@ compile_terminator :: proc(c: ^Compiler, attr: ^yml.Node, id: string, node: ^mda
 		}
 	}
 
+	if sized && sized_key != nil && (terminated || strz_case) do return fail(c, .Invalid, sized_key, "%s: %s does not apply with a size", id, sized_key.text)
 	if !terminated {
-		if flag_key != nil do return fail(c, .Invalid, flag_key, "%s: %s applies only with terminator or strz", id, flag_key.text)
+		if flag_key != nil && !strz_case do return fail(c, .Invalid, flag_key, "%s: %s applies only with terminator or strz", id, flag_key.text)
 		return true
 	}
-	if sized && sized_key != nil do return fail(c, .Invalid, sized_key, "%s: %s does not apply with a size", id, sized_key.text)
 	node.terminator = t
 	return true
 }

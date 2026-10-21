@@ -322,7 +322,8 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 // after the bytes of the substream. A switch-on that chooses no set reads
 // nothing, or with a length, the bytes of the length, as a []byte: as the
 // official compiler does, without removing pad_right or cutting them at a
-// terminator.
+// terminator. One that chooses a case that is not a set reads a value of
+// its type, as a field of that type, in node's stream.
 @(private = "file", require_results)
 read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPANS: bool) -> dat.Read_Error {
 	set := node
@@ -349,6 +350,7 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPA
 			}
 		}
 		if set == nil do return read_unchosen(d, s, node, index)
+		if set.type != .Set do return read_case_value(d, s, set, index)
 	}
 
 	if node.length == nil && node.terminator == nil {
@@ -388,6 +390,16 @@ read_unchosen :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> d
 	bytes, err = dat.read_bytes(&d.r, n)
 	if err != .None do return fail(d, err, start)
 	push(s, 0, bytes)
+	return .None
+}
+
+// Reads element index of a switch-on field into s as node, the case it
+// chose, which is not a set: a value of node's type, with the length and
+// terminator the case has.
+@(private = "file", require_results)
+read_case_value :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> dat.Read_Error {
+	value := read_scalar(d, node, index) or_return
+	push(s, 0, value)
 	return .None
 }
 
