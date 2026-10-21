@@ -258,10 +258,11 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 }
 
 // The instance up levels above that of ctx (_parent is 1), from the
-// frames, or in a value instance, through base: a set has one place in the
-// plan, so the instances enclosing self are the values of the expressions
-// base is made of, innermost first, then those enclosing the instance it
-// starts from, in caller.
+// frames, or in a value instance, through base: the instances enclosing
+// self are the values of the expressions base is made of, innermost first,
+// then those enclosing the instance it starts from, in caller. A set of a
+// type that contains itself has several places in the tree, but its
+// expressions reach only the levels between them (members).
 @(private = "file", require_results)
 ancestor :: proc(d: ^Decoder, ctx: Eval_Context, up: int) -> (instance: ^fld.Instance, err: dat.Read_Error) {
 	if ctx.self == nil {

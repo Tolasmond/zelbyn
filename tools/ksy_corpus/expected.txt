@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 87 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 98 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -16,7 +16,7 @@ OK	archive/respack.ksy
 ERR	archive/rpm.ksy	Invalid	archive/rpm.ksy:316:21	io: signature has no field storage_section
 ERR	archive/xar.ksy	Unsupported	archive/xar.ksy:35:5	attribute toc: process is not supported
 ERR	archive/zchunk.ksy	Unsupported	archive/zchunk.ksy:330:49	valid: casts are not supported
-ERR	archive/zip.ksy	Unsupported	archive/zip.ksy:42:5	type pk_section contains itself; recursive types are not supported
+ERR	archive/zip.ksy	Invalid	archive/zip.ksy:133:17	if: header has no field compression_method
 ERR	archive/zisofs.ksy	Unsupported	archive/zisofs.ksy:36:3	instance blocks: an instance without pos or value is not supported
 OK	cad/monomakh_sapr_chg.ksy
 ERR	common/bcd.ksy	Unsupported	common/bcd.ksy:37:1	params on the top-level type are not supported, except in an imported schema
@@ -39,7 +39,7 @@ ERR	executable/java_class.ksy	Unsupported	executable/java_class.ksy:179:60	value
 ERR	executable/mach_o.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
 ERR	executable/mach_o_fat.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
 ERR	executable/microsoft_pe.ksy	Invalid	executable/microsoft_pe.ksy:24:3	instance pe refers to itself
-ERR	executable/python_pyc_27.ksy	Unsupported	executable/python_pyc_27.ksy:218:5	type py_object contains itself; recursive types are not supported
+OK	executable/python_pyc_27.ksy
 ERR	executable/swf.ksy	Unsupported	executable/swf.ksy:56:5	attribute zlib_body: process is not supported
 ERR	executable/uefi_te.ksy	Unsupported	executable/uefi_te.ksy:225:82	pos: size of a stream other than _io is not supported
 OK	filesystem/amlogic_emmc_partitions.ksy
@@ -47,15 +47,15 @@ OK	filesystem/android_super.ksy
 OK	filesystem/apm_partition_table.ksy
 OK	filesystem/apple_single_double.ksy
 OK	filesystem/btrfs_stream.ksy
-ERR	filesystem/cramfs.ksy	Unsupported	filesystem/cramfs.ksy:65:5	type inode contains itself; recursive types are not supported
+OK	filesystem/cramfs.ksy
 ERR	filesystem/ext2.ksy	Invalid	filesystem/ext2.ksy:15:3	instance bg1 refers to itself
 ERR	filesystem/gpt_partition_table.ksy	Unsupported	filesystem/gpt_partition_table.ksy:38:19	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
-ERR	filesystem/iso9660.ksy	Unsupported	filesystem/iso9660.ksy:138:5	type dir_entry contains itself; recursive types are not supported
+OK	filesystem/iso9660.ksy
 OK	filesystem/luks.ksy
-ERR	filesystem/lvm2.ksy	Unsupported	filesystem/lvm2.ksy:131:21	type metadata_area_header contains itself; recursive types are not supported
+OK	filesystem/lvm2.ksy
 OK	filesystem/mbr_partition_table.ksy
 OK	filesystem/tr_dos_image.ksy
-ERR	filesystem/ubifs.ksy	Unsupported	filesystem/ubifs.ksy:341:5	type index_header contains itself; recursive types are not supported
+OK	filesystem/ubifs.ksy
 ERR	filesystem/vdi.ksy	Unsupported	filesystem/vdi.ksy:217:20	value instance block: only integer, boolean and string values are supported
 OK	filesystem/vfat.ksy
 OK	filesystem/vmware_vmdk.ksy
@@ -78,7 +78,7 @@ OK	game/gran_turismo_vol.ksy
 ERR	game/heaps_pak.ksy	Unsupported	game/heaps_pak.ksy:41:26	body: switch-on over a boolean is not supported; only over an integer or a string
 OK	game/heroes_of_might_and_magic_agg.ksy
 OK	game/heroes_of_might_and_magic_bmp.ksy
-ERR	game/minecraft_nbt.ksy	Unsupported	game/minecraft_nbt.ksy:151:5	type tag_list contains itself; recursive types are not supported
+ERR	game/minecraft_nbt.ksy	Unsupported	game/minecraft_nbt.ksy:160:22	tags: a repeated switch-on without a _ case, size or size-eos is not supported
 ERR	game/quake2_md2.ksy	Unsupported	game/quake2_md2.ksy:340:24	value: float literals are not supported
 OK	game/quake_mdl.ksy
 OK	game/quake_pak.ksy
@@ -113,7 +113,7 @@ OK	log/glibc_utmp.ksy
 OK	log/hashcat_restore.ksy
 ERR	log/mcap.ksy	Unsupported	log/mcap.ksy:35:13	value: _io in a value instance is not supported
 OK	log/sudoers_ts.ksy
-ERR	log/systemd_journal.ksy	Unsupported	log/systemd_journal.ksy:137:5	type journal_object contains itself; recursive types are not supported
+OK	log/systemd_journal.ksy
 OK	log/windows_evt_log.ksy
 OK	machine_code/code_6502.ksy
 ERR	macos/compressed_resource.ksy	Unsupported	macos/compressed_resource.ksy:68:16	value instance type_specific_part_raw: only integer, boolean and string values are supported
@@ -126,14 +126,14 @@ ERR	macos/resource_compression/dcmp_variable_length_integer.ksy	Unsupported	maco
 ERR	macos/resource_fork.ksy	Unsupported	macos/resource_fork.ksy:94:12	value instance data_blocks: only integer, boolean and string values are supported
 OK	media/android_opengl_shaders_cache.ksy
 ERR	media/au.ksy	Unsupported	media/au.ksy:50:47	value: _io in a value instance is not supported
-ERR	media/avi.ksy	Unsupported	media/avi.ksy:30:5	type blocks contains itself; recursive types are not supported
+OK	media/avi.ksy
 ERR	media/blender_blend.ksy	Unsupported	media/blender_blend.ksy:35:42	value: casts are not supported
 ERR	media/creative_voice_file.ksy	Unsupported	media/creative_voice_file.ksy:90:16	value: float literals are not supported
 OK	media/genmidi_op2.ksy
 OK	media/id3v1_1.ksy
 OK	media/id3v2_3.ksy
 OK	media/id3v2_4.ksy
-ERR	media/magicavoxel_vox.ksy	Unsupported	media/magicavoxel_vox.ksy:25:5	type chunk contains itself; recursive types are not supported
+OK	media/magicavoxel_vox.ksy
 OK	media/ogg.ksy
 ERR	media/quicktime_mov.ksy	Unsupported	media/quicktime_mov.ksy:54:31	value: _io in a value instance is not supported
 ERR	media/standard_midi_file.ksy	Unsupported	common/vlq_base128_be.ksy:47:12	value: casts are not supported
@@ -144,7 +144,7 @@ OK	media/vp8_duck_ivf.ksy
 ERR	media/wav.ksy	Unsupported	media/wav.ksy:76:11	chunk: a type of another type (riff::chunk) is not supported
 OK	network/bitcoin_transaction.ksy
 OK	network/dime_message.ksy
-ERR	network/dns_packet.ksy	Unsupported	network/dns_packet.ksy:96:5	type domain_name contains itself; recursive types are not supported
+OK	network/dns_packet.ksy
 ERR	network/ethernet_frame.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
 OK	network/hccap.ksy
 OK	network/hccapx.ksy
@@ -174,12 +174,12 @@ ERR	scientific/spectroscopy/specpr.ksy	Unsupported	scientific/spectroscopy/specp
 ERR	security/efivar_signature_list.ksy	Unsupported	security/efivar_signature_list.ksy:68:34	value: array literals are not supported
 ERR	security/openpgp_message.ksy	Unsupported	security/openpgp_message.ksy:42:22	body: switch-on over a boolean is not supported; only over an integer or a string
 OK	security/ssh_public_key.ksy
-ERR	serialization/asn1/asn1_der.ksy	Invalid	serialization/asn1/asn1_der.ksy:72:15	entries: unknown type asn1_der
-ERR	serialization/bson.ksy	Invalid	serialization/bson.ksy:145:36	content: unknown type bson
+OK	serialization/asn1/asn1_der.ksy
+OK	serialization/bson.ksy
 ERR	serialization/chrome_pak.ksy	Unsupported	serialization/chrome_pak.ksy:101:16	value instance resource: only integer, boolean and string values are supported
 ERR	serialization/google_protobuf.ksy	Unsupported	common/vlq_base128_le.ksy:85:45	valid: casts are not supported
 ERR	serialization/microsoft_cfb.ksy	Unsupported	serialization/microsoft_cfb.ksy:88:19	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
-ERR	serialization/msgpack.ksy	Invalid	serialization/msgpack.ksy:62:11	array_elements: unknown type msgpack
+ERR	serialization/msgpack.ksy	Unsupported	serialization/msgpack.ksy:124:12	value: float_32_value is a Float32; only integer, boolean, blob, string and set fields can be used in expressions
 ERR	serialization/php_serialized_value.ksy	Unsupported	serialization/php_serialized_value.ksy:219:16	value instance value: only integer, boolean and string values are supported
 OK	serialization/python_pickle.ksy
 ERR	serialization/ruby_marshal.ksy	Unsupported	serialization/ruby_marshal.ksy:113:16	value: encoded is a switch-on field; it cannot be used in expressions

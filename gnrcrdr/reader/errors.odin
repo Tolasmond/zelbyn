@@ -21,16 +21,17 @@ Path_Segment :: struct {
 
 @(private)
 Decoder :: struct {
-	r:         dat.Reader,      // the stream being read: the input, or a substream of it
-	base:      int,             // the offset in the input of r.data[0]
-	arena:     ^arn.Arena,      // the value tree's; the decoder allocates its values here directly
-	allocator: mem.Allocator,   // the same arena, for path, frames and streams
-	path:      [dynamic]Path_Segment,
-	frames:    [dynamic]Frame,  // the set instances being decoded, outermost first
-	streams:   [dynamic]Stream, // the streams that substreams were taken from, outermost first, as they are now
-	kept:      map[^fld.Instance]Stream, // the streams of the instances of sets with keeps_stream, in the same arena; nil until one is read
-	spans:     bool,            // the tree records spans: read_parse_instance is called with SPANS
-	err:       Parse_Error,
+	r:           dat.Reader,      // the stream being read: the input, or a substream of it
+	base:        int,             // the offset in the input of r.data[0]
+	arena:       ^arn.Arena,      // the value tree's; the decoder allocates its values here directly
+	allocator:   mem.Allocator,   // the same arena, for path, frames and streams
+	path:        [dynamic]Path_Segment,
+	frames:      [dynamic]Frame,  // the set instances being decoded, outermost first
+	streams:     [dynamic]Stream, // the streams that substreams were taken from, outermost first, as they are now
+	kept:        map[^fld.Instance]Stream, // the streams of the instances of sets with keeps_stream, in the same arena; nil until one is read
+	stack_start: uintptr,         // the address of a local of decode, where the stack that decoding uses starts (stack_used)
+	spans:       bool,            // the tree records spans: read_parse_instance is called with SPANS
+	err:         Parse_Error,
 }
 
 // A set instance being decoded, and where: its stream is streams[stream],

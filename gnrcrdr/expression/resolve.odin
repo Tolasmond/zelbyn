@@ -18,8 +18,9 @@ Scope :: struct {
 
 	// Called when an expression refers to a value instance whose expr is
 	// nil, or a parse instance whose pos is nil, to compile it; on failure
-	// the callback reports its own error. When nil, such a reference is an
-	// error.
+	// the callback reports its own error. set is the set the expression
+	// reaches it through, whose members it is of (mdata.members). When nil,
+	// such a reference is an error.
 	compile_instance:       proc(data: rawptr, set: ^mdata.Node, instance: ^mdata.Value_Instance) -> bool,
 	compile_parse_instance: proc(data: rawptr, set: ^mdata.Node, instance: ^mdata.Node) -> bool,
 
@@ -339,7 +340,7 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 	switch name {
 	case "_root":
 		if r.scope.own_root {
-			e.variant = mdata.Instance{up = len(types) - 1, node = types[0]}
+			e.variant = mdata.Instance{up = len(types) - 1, node = types[0], imported_root = true}
 		} else {
 			e.variant = mdata.Instance{root = true, node = types[0]}
 		}
@@ -375,7 +376,7 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 // instance called name in the set instance base.
 @(private = "file")
 resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: string) -> bool {
-	set := struct_node(base)
+	set := mdata.members(struct_node(base))
 	field: ^mdata.Node
 	slot: int
 	for child, i in set.children {
@@ -389,7 +390,7 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 			if p.ref_name != name do continue
 			if p.pos == nil {
 				if r.scope.compile_parse_instance == nil do return fail(r, .Invalid, e.offset, "instance %s cannot be used here", name)
-				if !r.scope.compile_parse_instance(r.scope.data, set, p) do return fail(r, .Invalid, e.offset, "instance %s is not valid", name)
+				if !r.scope.compile_parse_instance(r.scope.data, struct_node(base), p) do return fail(r, .Invalid, e.offset, "instance %s is not valid", name)
 				assert(p.pos != nil, "resolve: compile_parse_instance left the instance uncompiled")
 			}
 			field, slot = p, k
@@ -406,7 +407,7 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 	}
 	if field == nil {
 		for inst in set.instances {
-			if inst.name == name do return resolve_value_ref(r, e, base, set, inst)
+			if inst.name == name do return resolve_value_ref(r, e, base, struct_node(base), inst)
 		}
 		return fail(r, .Invalid, e.offset, "%s has no field %s", set.ref_name, name)
 	}
