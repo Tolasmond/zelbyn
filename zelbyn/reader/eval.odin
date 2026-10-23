@@ -603,8 +603,10 @@ array_method :: proc(operand: Eval_Value, method: mdata.Array_Method_Kind) -> (v
 
 // Integer operations fail rather than wrap, and / and % round toward
 // negative infinity (as Python does, and so Kaitai's Python runtime); one
-// with an integer above max(int) is exact (eval_binary_wide). and and or
-// evaluate their right operand only when they need it.
+// with an integer above max(int), or whose result does not fit an int, is
+// exact (eval_binary_wide), so that every result from min(int) to
+// max(u64) is reached. and and or evaluate their right operand only when
+// they need it.
 @(private = "file", require_results)
 eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval_Value, err: dat.Read_Error) {
 	left := eval(d, x.left, ctx) or_return
@@ -640,7 +642,8 @@ eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval
 		n, overflow = intrinsics.overflow_sub(a, b)
 	case .Div:
 		if b == 0 do return nil, .Division_By_Zero
-		if a == min(int) && b == -1 do return nil, .Integer_Overflow
+		// 2^63, a u64
+		if a == min(int) && b == -1 do return eval_binary_wide(x.op, i128(a), i128(b))
 		n = a / b
 		if a % b != 0 && (a < 0) != (b < 0) do n -= 1
 	case .Mod:
@@ -675,13 +678,15 @@ eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval
 		unreachable()
 	}
 
-	if overflow do return nil, .Integer_Overflow
+	// a result beyond an int may still be a u64; in i128, two ints cannot
+	// overflow
+	if overflow do return eval_binary_wide(x.op, i128(a), i128(b))
 	return n, .None
 }
 
-// x op y for two integers of which one is above max(int), exactly, with
-// the integer rules of eval_binary: a result beyond min(int) to max(u64)
-// is Integer_Overflow.
+// x op y for two integers of which one is above max(int), or whose result
+// does not fit an int, exactly, with the integer rules of eval_binary: a
+// result beyond min(int) to max(u64) is Integer_Overflow.
 @(private = "file", require_results)
 eval_binary_wide :: proc(op: mdata.Binary_Op, a, b: i128) -> (v: Eval_Value, err: dat.Read_Error) {
 	n: i128
@@ -875,8 +880,9 @@ as_float :: proc(v: Eval_Value) -> (f: f64, is_number: bool) {
 	return
 }
 
-// The integer part of f, rounded toward zero: Integer_Overflow when it does
-// not fit an int, or f is not a number.
+// The integer part of f, rounded toward zero, an int or a u64:
+// Integer_Overflow when it is beyond min(int) to max(u64), or f is not a
+// number.
 @(private = "file", require_results)
 float_to_int :: proc(f: f64) -> (v: Eval_Value, err: dat.Read_Error) {
 	t := math.trunc(f)
@@ -909,7 +915,8 @@ int_to_string :: proc(d: ^Decoder, n: i128) -> string {
 }
 
 // The decimal integer s is, with an optional + or -: Invalid_Number when it
-// is not one, and Integer_Overflow when it does not fit an int.
+// is not one, and Integer_Overflow when it is beyond min(int) to max(u64),
+// as any other integer is.
 @(private = "file", require_results)
 string_to_int :: proc(s: string) -> (v: Eval_Value, err: dat.Read_Error) {
 	digits := s
@@ -919,18 +926,11 @@ string_to_int :: proc(s: string) -> (v: Eval_Value, err: dat.Read_Error) {
 		digits = digits[1:]
 	}
 	if len(digits) == 0 do return nil, .Invalid_Number
-	// counted as a negative number, which reaches min(int)
-	n := 0
+	n: i128
 	for c in transmute([]byte)digits {
 		if c < '0' || c > '9' do return nil, .Invalid_Number
-		overflow_mul, overflow_sub: bool
-		n, overflow_mul = intrinsics.overflow_mul(n, 10)
-		n, overflow_sub = intrinsics.overflow_sub(n, int(c - '0'))
-		if overflow_mul || overflow_sub do return nil, .Integer_Overflow
+		// once beyond max(u64), n stays beyond it, and so within an i128
+		if n <= i128(max(u64)) do n = n * 10 + i128(c - '0')
 	}
-	if !negative {
-		if n == min(int) do return nil, .Integer_Overflow
-		n = -n
-	}
-	return n, .None
+	return from_wide(negative ? -n : n)
 }
