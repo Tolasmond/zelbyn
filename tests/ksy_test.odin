@@ -9,6 +9,7 @@ import "core:fmt"
 import "core:slice"
 import "core:strings"
 import "core:testing"
+import "core:time"
 
 // The start of most test schemas: a top level with meta and endian le.
 @(private = "file")
@@ -1747,6 +1748,72 @@ t[0].item_ref[0] = <3 bytes> 44 44 44
 t[0].valid_indexed[0] = 7
 t[0].none_size[0] = <1 bytes> 45
 `)
+}
+
+// A value instance that reads a repeated field keeps the value it had when
+// first used, as Kaitai keeps every value instance's, though the field
+// grows after: in the valid of the field's elements, in their size, in its
+// repeat-until, and reached through another value instance.
+@(test)
+ksy_value_instance_kept :: proc(t: ^testing.T) {
+	Case :: struct {
+		name, src: string,
+		input:     []byte,
+		want:      string,
+	}
+	cases := [?]Case {
+		{"valid", HEAD + `seq:
+  - id: items
+    type: u1
+    repeat: expr
+    repeat-expr: 3
+    valid:
+      expr: saved == 1
+instances:
+  saved: {value: items.size}
+`, {1, 2, 3}, "t[0].items[0] = 1\nt[0].items[1] = 2\nt[0].items[2] = 3\n"},
+		{"size", HEAD + `seq:
+  - id: blocks
+    size: first_size
+    repeat: expr
+    repeat-expr: 3
+instances:
+  first_size: {value: blocks.size + 1}
+`, {'A', 'B', 'C'}, "t[0].blocks[0] = <1 bytes> 41\nt[0].blocks[1] = <1 bytes> 42\nt[0].blocks[2] = <1 bytes> 43\n"},
+		{"repeat-until", HEAD + `seq:
+  - id: vals
+    type: u1
+    repeat: until
+    repeat-until: vals.size - started >= 2
+instances:
+  started: {value: vals.size}
+`, {4, 5, 6, 7}, "t[0].vals[0] = 4\nt[0].vals[1] = 5\nt[0].vals[2] = 6\n"},
+		{"through a value instance", HEAD + `seq:
+  - id: more
+    type: u1
+    repeat: expr
+    repeat-expr: 2
+    valid:
+      expr: me.more_seen == 1
+instances:
+  me: {value: _root}
+  more_seen: {value: more.size}
+`, {7, 8}, "t[0].more[0] = 7\nt[0].more[1] = 8\n"},
+	}
+	for c in cases do expect_dump(t, c.name, ksy_dump(t, c.src, c.input), c.want)
+}
+
+// Each value instance that refers to others is evaluated once for its set
+// instance, so a chain in which each refers to the one before twice takes
+// as many evaluations as it has links, rather than doubling with each.
+@(test)
+ksy_value_instance_chain :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	LINKS :: 40
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, HEAD + "seq:\n  - id: n\n    type: u1\n  - id: data\n    size: v40 >> 40\ninstances:\n  v0: {value: n}\n")
+	for i in 1 ..= LINKS do fmt.sbprintf(&b, "  v%d: {{value: v%d + v%d}}\n", i, i - 1, i - 1)
+	expect_dump(t, "chain", ksy_dump(t, strings.to_string(b), {1, 'D'}), "t[0].n[0] = 1\nt[0].data[0] = <1 bytes> 44\n")
 }
 
 // size, terminator and size-eos on a switch-on field: the case chosen is

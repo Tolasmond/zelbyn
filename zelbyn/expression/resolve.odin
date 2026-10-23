@@ -14,7 +14,7 @@ Scope :: struct {
 	no_root:   bool,        // types[0] is a type declared in a schema other than the one it is used from, which has no _root there, as in Kaitai
 	in_repeat: bool,        // the expression is evaluated for each element of a repeated field, so _index is defined
 	element:   ^mdata.Node, // repeat-until and valid: the field whose element _ is; nil elsewhere
-	instance:  ^mdata.Value_Instance, // in a value instance's expression, the instance, marked cached when it uses _io.pos or _io.eof
+	instance:  ^mdata.Value_Instance, // in a value instance's expression, the instance, marked cached when its value can change or it refers to another (mark_cached)
 
 	// Called when an expression refers to a value instance whose expr is
 	// nil, or a parse instance whose pos is nil, to compile it; on failure
@@ -524,8 +524,25 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 		e.type = value_type(r, e, field, name) or_return
 	}
 
+	// a repeated field grows while it is read, and its values can be used
+	// before it is done
+	if !mdata.is_single(field) do mark_cached(r)
 	e.variant = mdata.Field_Ref{base = base, node = field, slot = slot}
 	return true
+}
+
+// Marks the value instance whose expression is resolved, if any, cached,
+// so that the decoder keeps the value it first has (reader.eval_cached),
+// as Kaitai keeps every value instance's: when it uses _io.pos or _io.eof,
+// or a repeated field, whose values change as decoding goes on, and when
+// it refers to another value instance, so that a chain of them is
+// evaluated once for each link rather than once for each path through it.
+// Any other is evaluated each time it is used, which gives the same value,
+// at the cost of an operation or two rather than a map lookup.
+@(private = "file")
+mark_cached :: proc(r: ^Resolver) {
+	// the operand of _sizeof is not evaluated
+	if r.scope.instance != nil && !r.type_only do r.scope.instance.cached = true
 }
 
 // The type of one value of field.
@@ -585,6 +602,7 @@ resolve_value_ref :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, set: 
 	if levels, via := through_indirect(base); via != "" && reach(inst) > levels {
 		return fail(r, .Unsupported, e.offset, "value instance %s refers to the sets that enclose its instance, which it cannot through %s", inst.name, via)
 	}
+	mark_cached(r)
 	e.variant = mdata.Value_Ref{base = base, instance = inst}
 	e.type = inst.expr.type
 	return true
@@ -947,7 +965,7 @@ resolve_stream_member :: proc(r: ^Resolver, e: ^mdata.Expr, stream: ^mdata.Expr,
 		// the one it had when first used, as in Kaitai
 		if stream == nil do r.scope.types[len(r.scope.types) - 1].keeps_stream = true
 		else do keep_streams(stream)
-		if name == "pos" || name == "eof" do r.scope.instance.cached = true
+		if name == "pos" || name == "eof" do mark_cached(r)
 	}
 	switch name {
 	case "pos":
