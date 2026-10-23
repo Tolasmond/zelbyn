@@ -35,7 +35,7 @@ import "core:strings"
 //     and repeat-until, encoding, doc, doc-ref
 //   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), b1-b64
 //     (le/be suffixes or meta bit-endian), str and byte arrays (no type)
-//     with size, size-eos or terminator, strz, user types (with size,
+//     with size, size-eos or terminator, strz (in ENCODINGS), user types (with size,
 //     size-eos or terminator, read from a substream; also inside
 //     themselves, and the schema's top-level type, by its meta id), and
 //     switch-on, also with size, size-eos or terminator, whose cases are
@@ -50,13 +50,13 @@ import "core:strings"
 //     (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
-// Not supported yet (Unsupported): instances without pos or value, params
-// of other types (str, user types, struct, io, any) and on the top-level
-// type of the schema compiled, _io in a value instance, valid on a float,
-// min and max on a type other than an integer, an endian that is a
-// switch-on, imports in a type, and in a type that contains itself, the
-// members of the sets enclosing it, other than through the schema's _root,
-// and an instance that refers to itself through a field of its type.
+// Not supported yet (Unsupported): other encodings, instances without pos
+// or value, params of other types (str, user types, struct, io, any) and on
+// the top-level type of the schema compiled, _io in a value instance, valid
+// on a float, min and max on a type other than an integer, an endian that
+// is a switch-on, imports in a type, and in a type that contains itself,
+// the members of the sets enclosing it, other than through the schema's
+// _root, and an instance that refers to itself through a field of its type.
 
 Error_Kind :: enum {
 	None,
@@ -164,7 +164,7 @@ new_schema :: proc(c: ^Compiler, path: string) -> ^Schema {
 Meta :: struct {
 	bit_endian: endian.Byte_Order,        // bit-endian; .Big when absent, as in Kaitai
 	endian:     Maybe(endian.Byte_Order), // endian
-	encoding:   string,                   // encoding; "" when absent
+	encoding:   Maybe(mdata.Encoding),    // encoding
 }
 
 // Parses src, the text of c.schema, in scratch, and returns the root of its
@@ -528,16 +528,41 @@ byte_order :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (order: endian.B
 	return .Little, fail(c, .Invalid, n, "%s must be le or be, not %q", what, text)
 }
 
-// Strings are kept as their bytes, so the encodings supported are those
-// whose bytes need no decoding.
+// An encoding the decoder supports: its canonical name and its aliases,
+// as the official compiler lists them (its EncodingList), and how its
+// strings are decoded.
 @(private = "file")
-encoding :: proc(c: ^Compiler, n: ^yml.Node) -> (name: string, ok: bool) {
-	name = expect_scalar(c, n, "encoding") or_return
-	switch strings.to_upper(name, c.scratch) {
-	case "ASCII", "UTF-8", "UTF8":
-		return name, true
+Encoding_Name :: struct {
+	names:    []string, // the canonical name first
+	encoding: mdata.Encoding,
+}
+
+@(private = "file")
+ENCODINGS :: [?]Encoding_Name {
+	{{"ASCII", "US-ASCII", "US_ASCII", "IBM367", "cp367", "csASCII", "iso-ir-6"}, .None},
+	{{"UTF-8", "UTF8", "UTF_8", "ISO-10646/UTF-8", "ISO-10646/UTF8", "cp65001", "csUTF8", "unicode-1-1-utf-8", "unicode-2-0-utf-8"}, .None},
+	{{"UTF-16BE", "UTF16BE", "UTF16-BE", "UTF-16-BE", "UTF_16BE", "UTF16_BE", "UTF_16_BE", "csUTF16BE"}, .UTF_16BE},
+	{{"UTF-16LE", "UTF16LE", "UTF16-LE", "UTF-16-LE", "UTF_16LE", "UTF16_LE", "UTF_16_LE", "csUTF16LE"}, .UTF_16LE},
+	{{"UTF-32BE", "UTF32BE", "UTF32-BE", "UTF-32-BE", "UTF_32BE", "UTF32_BE", "UTF_32_BE", "csUTF32BE"}, .UTF_32BE},
+	{{"UTF-32LE", "UTF32LE", "UTF32-LE", "UTF-32-LE", "UTF_32LE", "UTF32_LE", "UTF_32_LE", "csUTF32LE"}, .UTF_32LE},
+	{{"ISO-8859-1", "ISO8859-1", "ISO_8859-1", "ISO88591", "ISO_8859_1", "ISO8859_1", "8859_1", "8859-1", "88591", "latin1", "latin-1", "latin_1", "L1", "csISOLatin1", "iso-ir-100", "IBM819", "cp819", "windows-28591"}, .ISO_8859_1},
+	{{"windows-1251", "cp1251", "cswindows1251"}, .Windows_1251},
+	{{"windows-1252", "cp1252", "cswindows1252"}, .Windows_1252},
+	{{"IBM437", "cp437", "437", "csPC8CodePage437"}, .IBM437},
+}
+
+// The encoding n names, by any of its names, in any case, as the official
+// compiler finds it. ASCII and UTF-8 strings are kept as their bytes, and
+// the others decoded into UTF-8 when they are read.
+@(private = "file")
+encoding :: proc(c: ^Compiler, n: ^yml.Node) -> (e: mdata.Encoding, ok: bool) {
+	name := expect_scalar(c, n, "encoding") or_return
+	for known in ENCODINGS {
+		for alias in known.names {
+			if strings.equal_fold(alias, name) do return known.encoding, true
+		}
 	}
-	return "", fail(c, .Unsupported, n, "encoding %q is not supported; only ASCII and UTF-8 are", name)
+	return .None, fail(c, .Unsupported, n, "encoding %q is not supported; only ASCII, UTF-8, UTF-16LE, UTF-16BE, UTF-32LE, UTF-32BE, ISO-8859-1, windows-1251, windows-1252 and IBM437 are", name)
 }
 
 // The Kaitai Struct version gnrcrdr follows: that of the official compiler
@@ -1401,9 +1426,11 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 
 	if n := get(attr, "encoding"); n != nil {
 		if node.type != .String do return fail(c, .Invalid, get_key(attr, "encoding"), "%s: encoding applies only to str", id)
-		_ = encoding(c, n) or_return
-	} else if node.type == .String && td.meta.encoding == "" {
-		return fail(c, .Invalid, type_node, "%s: str needs an encoding, or meta encoding", id)
+		node.encoding = encoding(c, n) or_return
+	} else if node.type == .String {
+		meta, has_meta := td.meta.encoding.?
+		if !has_meta do return fail(c, .Invalid, type_node, "%s: str needs an encoding, or meta encoding", id)
+		node.encoding = meta
 	}
 
 	if n := get(attr, "enum"); n != nil {
@@ -1574,7 +1601,9 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 		}
 		if builtin {
 			if case_node.type == .String {
-				if td.meta.encoding == "" do return fail(c, .Invalid, e.value, "%s: a case of type %s needs meta encoding", id, type_name)
+				meta, has_meta := td.meta.encoding.?
+				if !has_meta do return fail(c, .Invalid, e.value, "%s: a case of type %s needs meta encoding", id, type_name)
+				case_node.encoding = meta
 				case_node.length = node.length
 				compile_terminator(c, attr, id, case_node, strz) or_return
 			}

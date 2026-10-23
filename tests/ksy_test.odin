@@ -55,7 +55,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: T\n", .Invalid, 2, 7, `meta id "T" is not an identifier`},
 	{"meta:\n  id: t\n  endian: little\n", .Invalid, 3, 11, `endian must be le or be, not "little"`},
 	{"meta:\n  id: t\n  endian:\n    switch-on: x\n", .Unsupported, 4, 5, "endian: switch-on is not supported"},
-	{"meta:\n  id: t\n  encoding: UTF-16LE\n", .Unsupported, 3, 13, `encoding "UTF-16LE" is not supported`},
+	{"meta:\n  id: t\n  encoding: Shift_JIS\n", .Unsupported, 3, 13, `encoding "Shift_JIS" is not supported; only ASCII, UTF-8, UTF-16LE, UTF-16BE, UTF-32LE, UTF-32BE, ISO-8859-1, windows-1251, windows-1252 and IBM437 are`},
+	{"meta:\n  id: t\n  encoding: UTF-16\n", .Unsupported, 3, 13, `encoding "UTF-16" is not supported`},
 	{"meta:\n  id: t\n  ks-version: 0.12\n", .Unsupported, 3, 15, "ks-version 0.12 is newer than 0.11, the Kaitai version gnrcrdr follows"},
 	{"meta:\n  id: t\n  ks-version: 0.11.1\n", .Unsupported, 3, 15, "ks-version 0.11.1 is newer than 0.11"},
 	{"meta:\n  id: t\n  ks-version: 1\n", .Unsupported, 3, 15, "ks-version 1 is newer than 0.11"},
@@ -75,7 +76,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "types:\n  u:\n    meta:\n      imports: [x]\n", .Unsupported, 7, 7, "type u: imports in a type are not supported"},
 	{HEAD + "types:\n  u:\n    meta:\n      id: U\n", .Invalid, 7, 11, `meta id "U" is not an identifier`},
 	{HEAD + "types:\n  u:\n    meta:\n      endian:\n        switch-on: x\n", .Unsupported, 8, 9, "endian: switch-on is not supported"},
-	{HEAD + "types:\n  u:\n    meta:\n      encoding: UTF-16LE\n", .Unsupported, 7, 17, `encoding "UTF-16LE" is not supported`},
+	{HEAD + "types:\n  u:\n    meta:\n      encoding: Shift_JIS\n", .Unsupported, 7, 17, `encoding "Shift_JIS" is not supported`},
 	{HEAD + "types:\n  u:\n    meta:\n      ks-version: 0.12\n", .Unsupported, 7, 19, "ks-version 0.12 is newer than 0.11"},
 	{"meta:\n  id: t\nseq:\n  - id: a\n    type: u\ntypes:\n  u:\n    meta:\n      encoding: ASCII\n    seq:\n      - id: b\n        type: w\n  w:\n    seq:\n      - id: s\n        type: strz\n", .Invalid, 16, 15, "s: str needs an encoding, or meta encoding"},
 
@@ -1420,6 +1421,79 @@ ksy_too_deep :: proc(t: ^testing.T) {
 	ones := make([]byte, rdr.MAX_DEPTH, context.temp_allocator)
 	slice.fill(ones, 1)
 	testing.expect(t, strings.has_prefix(ksy_dump(t, through_instances, ones), "error: Too_Deep at "), "parse instances read from expressions")
+}
+
+// Encodings: each one gnrcrdr decodes, by names in other cases and by
+// aliases, as the official compiler finds them, from meta and from an
+// attribute. A UTF-16 or UTF-32 sequence that is not a character is
+// U+FFFD (odd, wide), and a byte-order mark is kept (bom). The bytes that
+// windows-1251 and windows-1252 leave undefined are their own code points,
+// as in WHATWG's tables. pad-right and the terminator apply to the bytes,
+// before they are decoded, so a pad of 0 cuts UTF-16 mid-character, as in
+// Kaitai (padded). Expressions see the text: valid compares it, switch-on
+// chooses by it, and .length counts its code points.
+@(test)
+ksy_encodings :: proc(t: ^testing.T) {
+	src := HEAD + `  encoding: UTF-16LE
+seq:
+  - id: le
+    type: str
+    size: 8
+  - id: be
+    type: str
+    size: 4
+    encoding: utf_16_be
+    valid: '"Ωx"'
+  - id: odd
+    type: str
+    size: 5
+  - id: bom
+    type: str
+    size: 4
+    encoding: utf16le
+  - id: wide
+    type: str
+    size: 8
+    encoding: UTF-32BE
+  - id: latin
+    type: str
+    size: 3
+    encoding: latin1
+  - id: cyrillic
+    type: str
+    size: 3
+    encoding: CP1251
+  - id: western
+    type: str
+    size: 2
+    encoding: windows-1252
+  - id: dos
+    type: strz
+    encoding: IBM437
+  - id: padded
+    type: str
+    size: 6
+    pad-right: 0
+  - id: body
+    type:
+      switch-on: le
+      cases:
+        '"Hé😀"': hit
+  - id: len
+    size: le.length
+types:
+  hit:
+    seq:
+      - id: v
+        type: u1
+`
+	input := []byte{0x48, 0x00, 0xe9, 0x00, 0x3d, 0xd8, 0x00, 0xde, 0x03, 0xa9, 0x00, 0x78, 0x61, 0x00, 0x62, 0x00, 0x07, 0xff, 0xfe, 0x78, 0x00, 0x00, 0x00, 0x00, 0x41, 0x00, 0x11, 0x00, 0x00, 0x80, 0xe9, 0xff, 0xc0, 0xe0, 0x98, 0x80, 0x81, 0xc9, 0xcd, 0xbb, 0x00, 0x6f, 0x00, 0x6b, 0x00, 0x00, 0x00, 0x2a, 0x4c, 0x4c, 0x4c}
+	expect_dump(t, "json", ksy_json(t, src, input), `{"t":[{"le":["Hé\ud83d\ude00"],"be":["\u03a9x"],"odd":["ab\ufffd"],"bom":["\ufeffx"],"wide":["A\ufffd"],"latin":["\u0080éÿ"],"cyrillic":["\u0410\u0430\u0098"],"western":["\u20ac\u0081"],"dos":["\u2554\u2550\u2557"],"padded":["o\ufffd"],"body":[{"v":[42]}],"len":["4c4c4c"]}]}` + "\n")
+	text := ksy_dump(t, src, input)
+	testing.expectf(t, strings.has_prefix(text, "t[0].le[0] = \"Hé\\U0001f600\"\nt[0].be[0] = \"\\u03a9x\"\n"), "text: %q", text[:min(len(text), 60)])
+	wrong := slice.clone(input, context.temp_allocator)
+	wrong[9] = 0xaa
+	expect_dump(t, "valid on text", ksy_dump(t, src, wrong), "error: Not_Equal at 8 in t[0].be[0]")
 }
 
 // io on parse instances: each is read at its pos in the stream io gives,

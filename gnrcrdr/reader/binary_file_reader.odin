@@ -9,7 +9,8 @@ import "core:slice"
 
 // Reads the file name into tree's arena, closes it, and decodes it into
 // tree, which must be zero or destroyed. Strings and blobs are views of that
-// copy, so the tree owns its input: it needs neither the file nor the
+// copy, or for a string in an encoding that is decoded, in the arena too,
+// so the tree owns its input: it needs neither the file nor the
 // schema once read returns. With spans, the tree records the span of each
 // value (field.value_span), which costs memory and time.
 @(require_results)
@@ -31,7 +32,8 @@ read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, sp
 }
 
 // Decodes data into tree, which must be zero or destroyed. Strings and
-// blobs are views of data, which the tree borrows: keep data alive and
+// blobs are views of data, which the tree borrows, but for strings in an
+// encoding that is decoded, which are in the tree's arena: keep data alive and
 // unchanged for as long as the tree is used. The tree references nothing
 // in the schema. spans is as for read.
 @(require_results)
@@ -585,7 +587,8 @@ read_scalar :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) ->
 	case .Float64:
 		value, err = to_value(dat.read(&d.r, f64, node.order))
 	case .String:
-		value = fld.Value(string(element_bytes(d, node, index) or_return))
+		bytes := element_bytes(d, node, index) or_return
+		value = fld.Value(node.encoding == .None ? string(bytes) : decode_text(d, bytes, node.encoding))
 	case .Blob:
 		value = fld.Value(element_bytes(d, node, index) or_return)
 	case .Set:
