@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 104 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 112 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -11,7 +11,7 @@ OK	archive/gzip.ksy
 OK	archive/lzh.ksy
 OK	archive/mozilla_mar.ksy
 ERR	archive/phar_without_stub.ksy	Unsupported	serialization/php_serialized_value.ksy:219:16	value instance value: only integer, boolean and string values are supported
-ERR	archive/rar.ksy	Unsupported	archive/rar.ksy:39:18	blocks: a repeated switch-on without a _ case, size or size-eos is not supported
+OK	archive/rar.ksy
 OK	archive/respack.ksy
 ERR	archive/rpm.ksy	Invalid	archive/rpm.ksy:316:21	io: signature has no field storage_section
 ERR	archive/xar.ksy	Unsupported	archive/xar.ksy:35:5	attribute toc: process is not supported
@@ -75,10 +75,10 @@ ERR	game/fallout2_dat.ksy	Unsupported	game/fallout2_dat.ksy:55:9	instance conten
 OK	game/fallout_dat.ksy
 OK	game/ftl_dat.ksy
 OK	game/gran_turismo_vol.ksy
-ERR	game/heaps_pak.ksy	Unsupported	game/heaps_pak.ksy:41:26	body: switch-on over a boolean is not supported; only over an integer or a string
+OK	game/heaps_pak.ksy
 OK	game/heroes_of_might_and_magic_agg.ksy
 OK	game/heroes_of_might_and_magic_bmp.ksy
-ERR	game/minecraft_nbt.ksy	Unsupported	game/minecraft_nbt.ksy:160:22	tags: a repeated switch-on without a _ case, size or size-eos is not supported
+OK	game/minecraft_nbt.ksy
 ERR	game/quake2_md2.ksy	Unsupported	game/quake2_md2.ksy:340:24	value: float literals are not supported
 OK	game/quake_mdl.ksy
 OK	game/quake_pak.ksy
@@ -90,8 +90,8 @@ OK	geospatial/shapefile_main.ksy
 OK	hardware/dtb.ksy
 ERR	hardware/edid.ksy	Unsupported	hardware/edid.ksy:140:28	value: float literals are not supported
 ERR	hardware/mifare/mifare_classic.ksy	Unsupported	hardware/mifare/mifare_classic.ksy:221:23	param ac: type ac is not supported; only integer types, bool and bytes are
-ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:222:22	image_width: switch-on over a boolean is not supported; only over an integer or a string
-ERR	image/dicom.ksy	Unsupported	image/dicom.ksy:112:22	value_len: switch-on over a boolean is not supported; only over an integer or a string
+ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:488:23	value: float literals are not supported
+ERR	image/dicom.ksy	Unsupported	image/dicom.ksy:150:25	value: array literals are not supported
 ERR	image/exif.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supported
 OK	image/gif.ksy
 OK	image/gimp_brush.ksy
@@ -101,7 +101,7 @@ ERR	image/jpeg.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supp
 ERR	image/nitf.ksy	Unsupported	image/nitf.ksy:166:9	an attribute in type date_time has no id; attributes without one are not supported
 OK	image/pcx.ksy
 OK	image/pcx_dcx.ksy
-ERR	image/pif.ksy	Unsupported	image/pif.ksy:136:22	entries: a repeated switch-on without a _ case, size or size-eos is not supported
+OK	image/pif.ksy
 ERR	image/png.ksy	Unsupported	image/png.ksy:410:9	attribute profile: process is not supported
 OK	image/psx_tim.ksy
 ERR	image/tga.ksy	Unsupported	image/tga.ksy:94:34	value: array literals are not supported
@@ -119,10 +119,10 @@ OK	machine_code/code_6502.ksy
 ERR	macos/compressed_resource.ksy	Unsupported	macos/compressed_resource.ksy:68:16	value instance type_specific_part_raw: only integer, boolean and string values are supported
 ERR	macos/ds_store.ksy	Unsupported	macos/ds_store.ksy:107:7	instance directories: an instance without pos or value is not supported
 ERR	macos/mac_os_resource_snd.ksy	Unsupported	macos/mac_os_resource_snd.ksy:118:9	an attribute in type sound_header has no id; attributes without one are not supported
-ERR	macos/resource_compression/dcmp_0.ksy	Unsupported	macos/resource_compression/dcmp_0.ksy:212:20	value: index_separate_minus is a switch-on field; it cannot be used in expressions
+ERR	macos/resource_compression/dcmp_0.ksy	Unsupported	macos/resource_compression/dcmp_0.ksy:250:20	value: array literals are not supported
 ERR	macos/resource_compression/dcmp_1.ksy	Unsupported	macos/resource_compression/dcmp_1.ksy:231:20	value: array literals are not supported
 ERR	macos/resource_compression/dcmp_2.ksy	Unsupported	macos/resource_compression/dcmp_2.ksy:38:11	param header_parameters_with_io: type bytes_with_io is not supported; only integer types, bool and bytes are
-ERR	macos/resource_compression/dcmp_variable_length_integer.ksy	Unsupported	macos/resource_compression/dcmp_variable_length_integer.ksy:63:12	value: more is a switch-on field; it cannot be used in expressions
+OK	macos/resource_compression/dcmp_variable_length_integer.ksy
 ERR	macos/resource_fork.ksy	Unsupported	macos/resource_fork.ksy:94:12	value instance data_blocks: only integer, boolean and string values are supported
 OK	media/android_opengl_shaders_cache.ksy
 ERR	media/au.ksy	Unsupported	media/au.ksy:50:47	value: _io in a value instance is not supported
@@ -167,12 +167,12 @@ ERR	network/tcp_segment.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags:
 OK	network/tls_client_hello.ksy
 OK	network/udp_datagram.ksy
 OK	network/websocket.ksy
-ERR	scientific/nt_mdt/nt_mdt.ksy	Unsupported	scientific/nt_mdt/nt_mdt.ksy:393:34	items: a repeated switch-on without a _ case, size or size-eos is not supported
+OK	scientific/nt_mdt/nt_mdt.ksy
 OK	scientific/nt_mdt/nt_mdt_pal.ksy
 ERR	scientific/spectroscopy/avantes_roh60.ksy	Unsupported	scientific/spectroscopy/avantes_roh60.ksy:64:18	repeat-expr: ipixlast is a Float32; only integer, boolean, blob, string and set fields can be used in expressions
 ERR	scientific/spectroscopy/specpr.ksy	Unsupported	scientific/spectroscopy/specpr.ksy:91:33	value: float literals are not supported
 ERR	security/efivar_signature_list.ksy	Unsupported	security/efivar_signature_list.ksy:68:34	value: array literals are not supported
-ERR	security/openpgp_message.ksy	Unsupported	security/openpgp_message.ksy:42:22	body: switch-on over a boolean is not supported; only over an integer or a string
+OK	security/openpgp_message.ksy
 OK	security/ssh_public_key.ksy
 OK	serialization/asn1/asn1_der.ksy
 OK	serialization/bson.ksy
@@ -182,7 +182,7 @@ OK	serialization/microsoft_cfb.ksy
 ERR	serialization/msgpack.ksy	Unsupported	serialization/msgpack.ksy:124:12	value: float_32_value is a Float32; only integer, boolean, blob, string and set fields can be used in expressions
 ERR	serialization/php_serialized_value.ksy	Unsupported	serialization/php_serialized_value.ksy:219:16	value instance value: only integer, boolean and string values are supported
 OK	serialization/python_pickle.ksy
-ERR	serialization/ruby_marshal.ksy	Unsupported	serialization/ruby_marshal.ksy:113:16	value: encoded is a switch-on field; it cannot be used in expressions
+OK	serialization/ruby_marshal.ksy
 OK	windows/regf.ksy
 ERR	windows/windows_lnk_file.ksy	Unsupported	windows/windows_lnk_file.ksy:128:9	an attribute in type link_flags has no id; attributes without one are not supported
 OK	windows/windows_minidump.ksy

@@ -238,7 +238,9 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		assert(ctx.index >= 0, "eval: _index outside a repeat")
 		return ctx.index, .None
 	case mdata.Repeat_Element:
-		assert(ctx.element != nil, "eval: _ outside repeat-until")
+		// nil after an element of a switch-on that chose no case, which has
+		// no value
+		if ctx.element == nil do return nil, .Absent_Field
 		return single_value(ctx.element)
 	case mdata.Value_Ref:
 		base := eval(d, x.base, ctx) or_return

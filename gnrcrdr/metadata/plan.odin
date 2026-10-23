@@ -198,18 +198,20 @@ Terminator :: struct {
 // length, terminator and pad_right: as the official compiler reads them,
 // a String has those of the switch-on field, and the other types none, so
 // that their values are read in the field's stream whatever its length.
-// With no match and no default, the field is not read, unless it has a
-// length: then, as the official compiler does, the bytes of the length are
-// read, without removing pad_right or cutting them at a terminator, and
-// are its value, a []byte where an instance would be. The compiler allows
-// a field that is not read only when it is read at most once.
+// With no match and no default, the element is not read and adds no
+// value, so a repeated field can have fewer values than elements, as in
+// Kaitai, unless the field has a length: then, as the official compiler
+// does, the bytes of the length are read, without removing pad_right or
+// cutting them at a terminator, and are its value, a []byte where an
+// instance would be.
 Switch :: struct {
-	on:      ^Expr, // an Int or String expression
+	on:      ^Expr, // an Int, Bool or String expression
 	cases:   []Switch_Case,
 	default: ^Node, // nil when there is no _ case
 }
 
-// value for a Switch whose on is an Int, text for one whose on is a String.
+// value for a Switch whose on is an Int, or a Bool as 0 or 1; text for one
+// whose on is a String.
 Switch_Case :: struct {
 	value: int,
 	text:  string,
