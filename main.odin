@@ -28,7 +28,7 @@ Options :: struct {
 // core:flags parses the rest: as a field of Options, a list of strings,
 // core:flags costs every run some 7,000 instructions, 0.3% of decoding a
 // small file, even when it is not given.
-PARAM_USAGE :: "\t--param <string>, multiple   | An argument for a param of the schema's top-level type, name=value: an integer (decimal, or 0x, 0o or 0b), true or false, hex bytes (0a1b), or the text of a str. Give one for each param."
+PARAM_USAGE :: "\t--param <string>, multiple   | An argument for a param of the schema's top-level type, name=value: an integer (decimal, or 0x, 0o or 0b), true or false, hex bytes (0a1b), also for a user type, which they are read as, or the text of a str. Give one for each param."
 
 
 Dump_Kind :: enum {
@@ -231,7 +231,8 @@ root_args :: proc(root: ^mdat.Node, params: []string) -> (args: []fld.Value, ok:
 				return
 			}
 			args[k] = text == "true"
-		case .Blob:
+		case .Blob, .Set:
+			// the bytes of a user type are read as an instance of it
 			bytes, is_hex := hex_bytes(text)
 			if !is_hex {
 				fmt.eprintfln("error: --param %s: %s is bytes, in hex (0a1b), not %q", param, name, text)

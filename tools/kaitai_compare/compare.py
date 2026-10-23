@@ -41,6 +41,7 @@ differ after it.
 import argparse
 import json
 import os
+import re
 import subprocess
 import struct
 import sys
@@ -136,8 +137,9 @@ def as_f4(x):
 def root_args(ksy, params):
     """The arguments that params, each name=value as gnrcrdr's --param takes
     it, give the params of the top-level type of ksy, in their order, as
-    decode.js takes them: integers, booleans, strings, and byte arrays as
-    lists of integers."""
+    decode.js takes them: integers, booleans, strings, byte arrays as lists
+    of integers, and for a user type, its name and the bytes it is read
+    from."""
     given = dict(p.split('=', 1) for p in params)
     args = []
     for param in ksy.get('params', []):
@@ -148,8 +150,10 @@ def root_args(ksy, params):
             args.append(list(bytes.fromhex(text)))
         elif t == 'str':
             args.append(text)
-        else:
+        elif re.fullmatch(r'[us][1248](le|be)?', t):
             args.append(int(text, 0))
+        else:
+            args.append({'type': t, 'bytes': list(bytes.fromhex(text))})
     return args
 
 

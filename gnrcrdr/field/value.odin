@@ -2,6 +2,8 @@ package field
 
 import arn "../arena"
 
+// One value of a field. An array, []Value, is never in a tree: it is an
+// item of an array literal of arrays, the value of an expression.
 Value :: union {
 	i8,
 	i16,
@@ -17,6 +19,7 @@ Value :: union {
 	[]byte,
 	bool,
 	^Instance,
+	[]Value,
 }
 
 // A decoded set instance. slots holds the values of each field of the set

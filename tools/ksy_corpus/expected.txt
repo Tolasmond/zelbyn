@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 187 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 190 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -79,7 +79,7 @@ OK	game/heaps_pak.ksy
 OK	game/heroes_of_might_and_magic_agg.ksy
 OK	game/heroes_of_might_and_magic_bmp.ksy
 OK	game/minecraft_nbt.ksy
-ERR	game/quake2_md2.ksy	Unsupported	game/quake2_md2.ksy:166:12	value: an array literal of an array is not supported; only of integers, floats, booleans, strings and byte arrays
+OK	game/quake2_md2.ksy
 OK	game/quake_mdl.ksy
 OK	game/quake_pak.ksy
 OK	game/renderware_binary_stream.ksy
@@ -111,7 +111,7 @@ OK	image/xwd.ksy
 OK	log/aix_utmp.ksy
 OK	log/glibc_utmp.ksy
 OK	log/hashcat_restore.ksy
-ERR	log/mcap.ksy	Invalid	log/mcap.ksy:35:12	value instance ofs_footer refers to itself
+OK	log/mcap.ksy
 OK	log/sudoers_ts.ksy
 OK	log/systemd_journal.ksy
 OK	log/windows_evt_log.ksy
@@ -121,7 +121,7 @@ OK	macos/ds_store.ksy
 OK	macos/mac_os_resource_snd.ksy
 OK	macos/resource_compression/dcmp_0.ksy
 OK	macos/resource_compression/dcmp_1.ksy
-ERR	macos/resource_compression/dcmp_2.ksy	Unsupported	macos/resource_compression/dcmp_2.ksy:37:9	param header_parameters_with_io: a param of a user type on the top-level type of the schema compiled is not supported, as no argument can be given for it
+OK	macos/resource_compression/dcmp_2.ksy
 OK	macos/resource_compression/dcmp_variable_length_integer.ksy
 OK	macos/resource_fork.ksy
 OK	media/android_opengl_shaders_cache.ksy

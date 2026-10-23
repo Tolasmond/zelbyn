@@ -123,6 +123,7 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	{"a.as<bytes>.size", .Invalid, 2, "an integer cannot be cast to bytes"},
 	{"a.as<1>", .Syntax, 5, "expected a type name in .as<>, found 1"},
 	{"a::b::c", .Invalid, 0, "no enum a::b"},
+	{"[[1.5], ['a']][0][0]", .Invalid, 8, "the items of an array literal must have one type: an array of a float, not of a string"},
 	{"a::b::", .Syntax, 6, "expected an enum value after ::, found end of expression"},
 	{"_io", .Invalid, 0, "expected an integer, found a stream"},
 	{"_root._io.foo", .Unsupported, 10, "foo of a stream is not supported; only .pos, .size and .eof are"},

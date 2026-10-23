@@ -17,7 +17,8 @@ import "core:slice"
 // value (field.value_span), which costs memory and time. args are the
 // arguments of the params of the schema's top-level type, one of each
 // param's type: an i64 for an integer type, a bool, []byte for bytes or a
-// string for str, which the tree copies; else Invalid_Arguments.
+// string for str, which the tree copies, or for a user type, []byte, read
+// as an instance of it in a stream of their own; else Invalid_Arguments.
 @(require_results)
 read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false, args: []fld.Value = nil) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read: tree must be zero or destroyed")
@@ -49,7 +50,8 @@ read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Val
 }
 
 // args, the arguments of the params of params, copied into the tree's
-// arena; ok is false unless there is one of each param's type.
+// arena; ok is false unless there is one of each param's type, bytes for a
+// param of a user type (read_root_arg).
 @(private = "file")
 root_args :: proc(params: []^mdata.Node, args: []fld.Value, arena: ^arn.Arena) -> (copied: []fld.Value, ok: bool) {
 	if len(args) != len(params) do return
@@ -62,7 +64,7 @@ root_args :: proc(params: []^mdata.Node, args: []fld.Value, arena: ^arn.Arena) -
 		case .Bool:
 			_ = args[k].(bool) or_return
 			copied[k] = args[k]
-		case .Blob:
+		case .Blob, .Set:
 			v := args[k].([]byte) or_return
 			b := arn.arena_make(arena, byte, len(v))
 			copy(b, v)
@@ -105,6 +107,15 @@ decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, 
 		args_ok: bool
 		d.args, args_ok = root_args(params, args, &tree.arena)
 		if !args_ok do return 0, Parse_Error{kind = .Invalid_Arguments}
+		for p, k in params {
+			if p.type != .Set do continue
+			set := format.root.args[k].variant.(mdata.Root_Arg).set
+			rerr := spans ? read_root_arg(&d, set, k, true) : read_root_arg(&d, set, k, false)
+			if rerr != .None {
+				if d.err.kind == .None do fail(&d, rerr, d.r.pos)
+				return 0, d.err
+			}
+		}
 	}
 
 	root := Sink{slots = ([^][]fld.Value)(&tree.root)[:1]}
@@ -117,6 +128,21 @@ decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, 
 		fail(&d, rerr, d.r.pos)
 	}
 	return consumed, d.err
+}
+
+// Reads the bytes of d.args[k], the argument of a param of a user type of
+// the root, in a stream of their own, as an instance of set, which becomes
+// the argument, as the caller of Kaitai's runtimes makes one from bytes.
+@(private = "file", require_results)
+read_root_arg :: proc(d: ^Decoder, set: ^mdata.Node, k: int, $SPANS: bool) -> dat.Read_Error {
+	r := d.r
+	defer d.r = r
+	dat.reader_init(&d.r, d.args[k].([]byte))
+	value: []fld.Value
+	sink := Sink{slots = ([^][]fld.Value)(&value)[:1]}
+	read_values(d, &sink, set, SPANS) or_return
+	d.args[k] = value[0]
+	return .None
 }
 
 // Reads the parse instances that no expression had read when their set

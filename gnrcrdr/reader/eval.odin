@@ -97,8 +97,11 @@ tree_value :: proc(v: Eval_Value) -> fld.Value {
 		return x
 	case ^fld.Instance:
 		return x
+	case []fld.Value:
+		// an item of an array literal of arrays
+		return x
 	}
-	panic("tree_value: not an Int, Float, Bool, String, Bytes or Struct value")
+	panic("tree_value: not a value")
 }
 
 // operand[index], when operand is an array literal, directly or as the
@@ -193,7 +196,7 @@ direct_field :: #force_inline proc(d: ^Decoder, f: mdata.Direct_Field, element: 
 	case u64:
 		if v > u64(max(int)) do return
 		return int(v), true
-	case f32, f64, string, []byte, bool, ^fld.Instance:
+	case f32, f64, string, []byte, bool, ^fld.Instance, []fld.Value:
 	}
 	return
 }
@@ -541,6 +544,8 @@ single_value :: proc(value: fld.Value) -> (Eval_Value, dat.Read_Error) {
 	case bool:
 		return v, .None
 	case ^fld.Instance:
+		return v, .None
+	case []fld.Value:
 		return v, .None
 	case f32:
 		return f64(v), .None

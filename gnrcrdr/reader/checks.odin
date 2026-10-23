@@ -58,6 +58,8 @@ check_constant :: proc(value: fld.Value, valid: mdata.Valid) -> dat.Read_Error {
 		panic("check_constant: a check on a boolean")
 	case ^fld.Instance:
 		panic("check_constant: called for a set")
+	case []fld.Value:
+		panic("check_constant: called for an array")
 	}
 	panic("check_constant: no value")
 }

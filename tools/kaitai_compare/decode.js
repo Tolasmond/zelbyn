@@ -7,7 +7,9 @@
 // import, as the compiler asks for it ("rel:" or "abs:" and its name, with
 // no / at the start of an absolute one), to its schema. --params gives the
 // arguments of the params of the top-level type, as a JSON array, with
-// byte arrays as arrays of integers. For each file, prints one
+// byte arrays as arrays of integers, and the argument of a param of a user
+// type as {"type": its name, "bytes": an array of integers}, from which it
+// is made. For each file, prints one
 // line of JSON in the shape of gnrcrdr's --dump json: a set instance is an
 // object of its seq fields in read order, then its parse instances
 // (instances with pos), each an array of its values (one for a field read
@@ -144,7 +146,7 @@ async function main() {
   }
   let params = [];
   if (args[0] === "--params") {
-    params = JSON.parse(args[1]).map((v) => (Array.isArray(v) ? new Uint8Array(v) : v));
+    params = JSON.parse(args[1]);
     args.splice(0, 2);
   }
   const withOffsets = args[0] === "--offsets";
@@ -181,6 +183,20 @@ async function main() {
   };
   const rootName = upperCamel(ksy.meta.id);
   const Root = load("./" + rootName)[rootName];
+  // byte arrays, and the argument of a param of a user type, made of its
+  // bytes as the caller of the runtime makes it: an imported schema's
+  // top-level type, or by path, a type declared in another
+  params = params.map((v) => {
+    if (Array.isArray(v)) return new Uint8Array(v);
+    if (v === null || typeof v !== "object") return v;
+    const path = v.type.split("::").map(upperCamel);
+    let cls = path[0] + ".js" in sources ? load("./" + path[0])[path[0]] : Root[path[0]];
+    for (const name of path.slice(1)) cls = cls[name];
+    const arg = new cls(new KaitaiStream(new Uint8Array(v.bytes)), null, null);
+    // in debug mode, the constructor does not read
+    if (withOffsets) arg._read();
+    return arg;
+  });
 
   for (const file of files) {
     try {
