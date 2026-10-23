@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 98 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 104 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -23,7 +23,7 @@ ERR	common/bcd.ksy	Unsupported	common/bcd.ksy:37:1	params on the top-level type 
 OK	common/bytes_with_io.ksy
 OK	common/dos_datetime.ksy
 ERR	common/riff.ksy	Unsupported	common/riff.ksy:71:16	value: _io in a value instance is not supported
-ERR	common/utf16_with_bom.ksy	Unsupported	common/utf16_with_bom.ksy:41:15	encoding "UTF-16BE" is not supported; only ASCII and UTF-8 are
+ERR	common/utf16_with_bom.ksy	Unsupported	common/utf16_with_bom.ksy:50:19	value: array literals are not supported
 OK	common/utf8_string.ksy
 ERR	common/vlq_base128_be.ksy	Unsupported	common/vlq_base128_be.ksy:47:12	value: casts are not supported
 ERR	common/vlq_base128_le.ksy	Unsupported	common/vlq_base128_le.ksy:85:45	valid: casts are not supported
@@ -49,7 +49,7 @@ OK	filesystem/apple_single_double.ksy
 OK	filesystem/btrfs_stream.ksy
 OK	filesystem/cramfs.ksy
 ERR	filesystem/ext2.ksy	Invalid	filesystem/ext2.ksy:15:3	instance bg1 refers to itself
-ERR	filesystem/gpt_partition_table.ksy	Unsupported	filesystem/gpt_partition_table.ksy:38:19	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
+OK	filesystem/gpt_partition_table.ksy
 OK	filesystem/iso9660.ksy
 OK	filesystem/luks.ksy
 OK	filesystem/lvm2.ksy
@@ -67,7 +67,7 @@ OK	firmware/uf2.ksy
 OK	firmware/uimage.ksy
 ERR	font/grub2_font.ksy	Invalid	font/grub2_font.ksy:20:5	magic: contents cannot have size
 ERR	font/pcf_font.ksy	Invalid	font/pcf_font.ksy:130:29	io: body has no field strings
-ERR	font/ttf.ksy	Unsupported	font/ttf.ksy:966:23	encoding "utf-16be" is not supported; only ASCII and UTF-8 are
+OK	font/ttf.ksy
 OK	game/allegro_dat.ksy
 OK	game/doom_wad.ksy
 ERR	game/dune_2_pak.ksy	Unsupported	game/dune_2_pak.ksy:39:44	value: size of a stream other than _io is not supported
@@ -90,12 +90,12 @@ OK	geospatial/shapefile_main.ksy
 OK	hardware/dtb.ksy
 ERR	hardware/edid.ksy	Unsupported	hardware/edid.ksy:140:28	value: float literals are not supported
 ERR	hardware/mifare/mifare_classic.ksy	Unsupported	hardware/mifare/mifare_classic.ksy:221:23	param ac: type ac is not supported; only integer types, bool and bytes are
-ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:392:17	encoding "windows-1252" is not supported; only ASCII and UTF-8 are
+ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:222:22	image_width: switch-on over a boolean is not supported; only over an integer or a string
 ERR	image/dicom.ksy	Unsupported	image/dicom.ksy:112:22	value_len: switch-on over a boolean is not supported; only over an integer or a string
 ERR	image/exif.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supported
 OK	image/gif.ksy
 OK	image/gimp_brush.ksy
-ERR	image/icc_4.ksy	Unsupported	image/icc_4.ksy:1341:31	encoding "UTF-16BE" is not supported; only ASCII and UTF-8 are
+OK	image/icc_4.ksy
 ERR	image/ico.ksy	Unsupported	image/ico.ksy:86:30	value: array literals are not supported
 ERR	image/jpeg.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supported
 ERR	image/nitf.ksy	Unsupported	image/nitf.ksy:166:9	an attribute in type date_time has no id; attributes without one are not supported
@@ -167,8 +167,8 @@ ERR	network/tcp_segment.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags:
 OK	network/tls_client_hello.ksy
 OK	network/udp_datagram.ksy
 OK	network/websocket.ksy
-ERR	scientific/nt_mdt/nt_mdt.ksy	Unsupported	scientific/nt_mdt/nt_mdt.ksy:63:19	encoding "cp1251" is not supported; only ASCII and UTF-8 are
-ERR	scientific/nt_mdt/nt_mdt_pal.ksy	Unsupported	scientific/nt_mdt/nt_mdt_pal.ksy:5:13	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
+ERR	scientific/nt_mdt/nt_mdt.ksy	Unsupported	scientific/nt_mdt/nt_mdt.ksy:393:34	items: a repeated switch-on without a _ case, size or size-eos is not supported
+OK	scientific/nt_mdt/nt_mdt_pal.ksy
 ERR	scientific/spectroscopy/avantes_roh60.ksy	Unsupported	scientific/spectroscopy/avantes_roh60.ksy:64:18	repeat-expr: ipixlast is a Float32; only integer, boolean, blob, string and set fields can be used in expressions
 ERR	scientific/spectroscopy/specpr.ksy	Unsupported	scientific/spectroscopy/specpr.ksy:91:33	value: float literals are not supported
 ERR	security/efivar_signature_list.ksy	Unsupported	security/efivar_signature_list.ksy:68:34	value: array literals are not supported
@@ -178,14 +178,14 @@ OK	serialization/asn1/asn1_der.ksy
 OK	serialization/bson.ksy
 ERR	serialization/chrome_pak.ksy	Unsupported	serialization/chrome_pak.ksy:101:16	value instance resource: only integer, boolean and string values are supported
 ERR	serialization/google_protobuf.ksy	Unsupported	common/vlq_base128_le.ksy:85:45	valid: casts are not supported
-ERR	serialization/microsoft_cfb.ksy	Unsupported	serialization/microsoft_cfb.ksy:88:19	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
+OK	serialization/microsoft_cfb.ksy
 ERR	serialization/msgpack.ksy	Unsupported	serialization/msgpack.ksy:124:12	value: float_32_value is a Float32; only integer, boolean, blob, string and set fields can be used in expressions
 ERR	serialization/php_serialized_value.ksy	Unsupported	serialization/php_serialized_value.ksy:219:16	value instance value: only integer, boolean and string values are supported
 OK	serialization/python_pickle.ksy
 ERR	serialization/ruby_marshal.ksy	Unsupported	serialization/ruby_marshal.ksy:113:16	value: encoded is a switch-on field; it cannot be used in expressions
 OK	windows/regf.ksy
-ERR	windows/windows_lnk_file.ksy	Unsupported	windows/windows_lnk_file.ksy:14:13	encoding "cp437" is not supported; only ASCII and UTF-8 are
-ERR	windows/windows_minidump.ksy	Unsupported	windows/windows_minidump.ksy:330:19	encoding "UTF-16LE" is not supported; only ASCII and UTF-8 are
+ERR	windows/windows_lnk_file.ksy	Unsupported	windows/windows_lnk_file.ksy:128:9	an attribute in type link_flags has no id; attributes without one are not supported
+OK	windows/windows_minidump.ksy
 ERR	windows/windows_resource_file.ksy	Unsupported	windows/windows_resource_file.ksy:147:16	value: _io in a value instance is not supported
 ERR	windows/windows_shell_items.ksy	Unsupported	windows/windows_shell_items.ksy:70:9	an attribute in type file_entry_body has no id; attributes without one are not supported
 OK	windows/windows_systemtime.ksy

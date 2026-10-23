@@ -20,6 +20,7 @@ Node :: struct {
 	length:          Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from. nil for a terminator alone, or for a Set read from its parent's stream
 	terminator:      Maybe(Terminator), // String, Blob and Set: the byte that ends each element's bytes (Kaitai's terminator, and strz)
 	pad_right:       Maybe(u8),         // String, Blob and Set with a length: removed from the end of each element's bytes (Kaitai's pad-right)
+	encoding:        Encoding,          // String only: how its bytes are decoded
 	children:        []^Node,           // Set only, in order; nil when switch_on is set
 	slot_count:      int,               // Set only: the slots in each instance (count_slots), recorded when children is set
 	switch_on:       ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
@@ -225,6 +226,21 @@ Switch_Case :: struct {
 // one is in the decoded tree. Its cond is evaluated before pos. Its values
 // are in its own slot of the set instance: those of the parse instances
 // come first, in order, before the children's.
+
+// The encoding of a String's bytes. None is ASCII or UTF-8, whose bytes
+// are kept as they are, so that the tree holds a view of the input; the
+// others are decoded, into UTF-8 (reader.decode_text).
+Encoding :: enum u8 {
+	None,
+	UTF_16LE,
+	UTF_16BE,
+	UTF_32LE,
+	UTF_32BE,
+	ISO_8859_1,
+	Windows_1251,
+	Windows_1252,
+	IBM437,
+}
 
 // The set instance was read as: node itself, or for a switch-on field the
 // case it records.

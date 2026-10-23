@@ -110,7 +110,8 @@ instance_cells :: proc(instance: ^Instance) -> []Value {
 }
 // A decoded value tree. Every instance and array reachable from root is
 // allocated in arena, so the tree is freed with one destroy_value_tree, and
-// it never references the schema. Strings and blobs are views of the input:
+// it never references the schema. Strings and blobs are views of the input,
+// but for strings in an encoding that is decoded (metadata.Encoding):
 // reader.read puts the input in arena too, so that tree owns it, while
 // reader.read_from_bytes borrows the caller's bytes. arena holds the list
 // of the tree's blocks, so a copy of a Value_Tree shares them: destroy only
