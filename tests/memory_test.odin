@@ -271,6 +271,79 @@ value_tree_from_read_outlives_file :: proc(t: ^testing.T) {
 	check_comment_gif(t, &d, slots)
 }
 
+// A string argument of a type's param, from a literal of the schema, part
+// of one, or one reached through a value instance or an array literal.
+STRING_ARGS_KSY :: `meta: {id: string_args}
+seq:
+  - id: literal
+    type: child("hello")
+  - id: part
+    type: child("hello world".substring(6, 11))
+  - id: through_instance
+    type: child(greeting)
+  - id: item
+    type: child(["no", "yes"][1])
+  - id: instance_item
+    type: child(answers[1])
+instances:
+  greeting: {value: '"hi"'}
+  answers: {value: '["no", "yes"]'}
+types:
+  child:
+    params:
+      - {id: text, type: str}
+`
+
+// The string arguments of params are in the tree, which needs no schema
+// once decoded, rather than in the schema's literals.
+@(test)
+value_tree_string_args_outlive_schema :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdat.File_Format
+	err := ksy.compile(STRING_ARGS_KSY, &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) {
+		mdat.destroy_file_format(&ff)
+		return
+	}
+
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, nil, &d)
+	if !testing.expectf(t, d.err.kind == .None, "decode: %v at %v in %s", d.err.kind, d.err.offset, d.err.path) {
+		mdat.destroy_file_format(&ff)
+		return
+	}
+
+	fields := [?]string{"literal", "part", "through_instance", "item", "instance_item"}
+	want := [len(fields)]string{"hello", "world", "hi", "yes", "yes"}
+	texts: [len(fields)]string
+	in_schema := false
+	root := root_instance(&ff, &d)
+	for name, i in fields {
+		child := field_instance(root, name)
+		texts[i] = child.instance.slots[mdat.param_slot(child.set, 0)][0].(string)
+		if !testing.expectf(t, !in_arena(&ff.arena, texts[i]), "%s: the argument is in the schema's arena", name) do in_schema = true
+	}
+	mdat.destroy_file_format(&ff)
+	// reading an argument in the schema's arena would fault once it is destroyed
+	if in_schema do return
+
+	for name, i in fields {
+		testing.expectf(t, texts[i] == want[i], "%s: got %q, want %q", name, texts[i], want[i])
+	}
+}
+
+// Whether s is in a block of a.
+@(private = "file")
+in_arena :: proc(a: ^arn.Arena, s: string) -> bool {
+	p := uintptr(raw_data(s))
+	for b := a.block; b != nil; b = b.prev {
+		if p >= uintptr(b.base) && p < uintptr(b.base) + uintptr(b.reserved) do return true
+	}
+	return false
+}
+
 // The index in set's children of the child whose .ksy id is name.
 @(private = "file")
 child_index :: proc(set: ^mdat.Node, name: string) -> int {
