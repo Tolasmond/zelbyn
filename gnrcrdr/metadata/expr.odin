@@ -31,6 +31,7 @@ Expr_Variant :: union {
 	Binary,
 	Ternary,
 	Index,
+	Array_Literal,
 
 	// syntax only
 	Name,
@@ -55,6 +56,7 @@ Expr_Variant :: union {
 	Repeat_Element,
 	Value_Ref,
 	Switch_Cast,
+	Bytes_Literal,
 }
 
 Int_Literal :: struct {
@@ -94,7 +96,7 @@ Binary_Op :: enum {
 	And, // &
 	Xor, // ^
 	Or,  // |
-	Eq,  // ==; this and the other comparisons also compare two strings, byte by byte
+	Eq,  // ==; this and the other comparisons also compare two strings, or two byte arrays, byte by byte
 	Ne,  // !=
 	Lt,  // <
 	Le,  // <=
@@ -118,6 +120,22 @@ Ternary :: struct {
 // one outside the array or bytes is Index_Out_Of_Range.
 Index :: struct {
 	operand, index: ^Expr,
+}
+
+// [a, b, ...]: an Array of the items, which resolution makes all of one
+// type, item_type, an Int, Bool, String or Bytes; one of integer literals
+// from 0 to 255 is a Bytes_Literal instead, as in Kaitai. Each evaluation
+// makes the array in the tree's arena.
+Array_Literal :: struct {
+	items:     []^Expr,
+	item_type: Expr_Type,
+}
+
+// An array literal of bytes, [0x50, 0x4b], a Bytes value, copied into the
+// tree's arena when it is evaluated, so that the tree never refers to the
+// plan.
+Bytes_Literal :: struct {
+	value: []byte,
 }
 
 // An identifier: a field name, or one of _root, _parent, _io, _ and _index.

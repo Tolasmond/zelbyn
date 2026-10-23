@@ -251,8 +251,7 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		case .Bytes:
 			e.type = .Int
 		case .Array:
-			field := array_field(x.operand)
-			e.type = value_type(r, e, field, field.ref_name) or_return
+			e.type = array_item_type(r, e, x.operand) or_return
 		case:
 			return fail(r, .Invalid, e.offset, "%s cannot be indexed; only an array and a byte array can", type_name(x.operand.type))
 		}
@@ -266,7 +265,9 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		return resolve_size_of(r, e, r.scope.types[len(r.scope.types) - 1], x.type_name, true, x.bits)
 	case mdata.Cast:
 		return resolve_cast(r, e, x)
-	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.String_Length, mdata.To_S, mdata.To_I, mdata.Array_Method, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref, mdata.Switch_Cast:
+	case mdata.Array_Literal:
+		return resolve_array_literal(r, e, x)
+	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.String_Length, mdata.To_S, mdata.To_I, mdata.Array_Method, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref, mdata.Switch_Cast, mdata.Bytes_Literal:
 		assert(e.type != .Unresolved, "resolve: a resolved variant without a type")
 	case:
 		panic("resolve: empty expression")
@@ -312,11 +313,11 @@ binary_type :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Binary) -> (t: mdata.
 		expect(r, x.right, .Int) or_return
 		return .Int, true
 	case .Lt, .Le, .Gt, .Ge:
-		if x.left.type != .String do expect(r, x.left, .Int) or_return
+		if x.left.type != .String && x.left.type != .Bytes do expect(r, x.left, .Int) or_return
 		expect(r, x.right, x.left.type) or_return
 		return .Bool, true
 	case .Eq, .Ne:
-		if x.left.type != .Int && x.left.type != .Bool && x.left.type != .String {
+		if x.left.type != .Int && x.left.type != .Bool && x.left.type != .String && x.left.type != .Bytes {
 			return .Unresolved, fail(r, .Unsupported, e.offset, "comparing %s is not supported", type_name(x.left.type))
 		}
 		expect(r, x.right, x.left.type) or_return
@@ -493,18 +494,54 @@ resolve_value_ref :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, set: 
 	return true
 }
 
-// The field whose values e, an expression of type Array, is: an Array is
-// only ever all the values of a field, given by a Field_Ref or by a value
-// instance whose expression is one.
+// The type of one item of array, an expression of type Array: all the
+// values of a field (a Field_Ref), an array literal, or a value instance
+// whose expression is one of those.
 @(private = "file")
-array_field :: proc(e: ^mdata.Expr) -> ^mdata.Node {
-	#partial switch x in e.variant {
+array_item_type :: proc(r: ^Resolver, e: ^mdata.Expr, array: ^mdata.Expr) -> (t: mdata.Expr_Type, ok: bool) {
+	#partial switch x in array.variant {
 	case mdata.Field_Ref:
-		return x.node
+		return value_type(r, e, x.node, x.node.ref_name)
+	case mdata.Array_Literal:
+		return x.item_type, true
 	case mdata.Value_Ref:
-		return array_field(x.instance.expr)
+		return array_item_type(r, e, x.instance.expr)
 	}
-	panic("array_field: not an array")
+	panic("array_item_type: not an array")
+}
+
+// [a, b, ...]: integer literals from 0 to 255 make a Bytes_Literal, as in
+// Kaitai; other items make an Array of their type, which must be one of
+// Int, Bool, String and Bytes, the same for all.
+@(private = "file")
+resolve_array_literal :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Array_Literal) -> bool {
+	if len(x.items) == 0 do return fail(r, .Invalid, e.offset, "an array literal cannot be empty; its type would be unknown")
+	bytes := true
+	for item in x.items {
+		resolve(r, item) or_return
+		lit, is_literal := item.variant.(mdata.Int_Literal)
+		bytes &&= is_literal && lit.value >= 0 && lit.value <= 255
+	}
+	if bytes {
+		value := make([]byte, len(x.items), r.allocator)
+		for item, i in x.items do value[i] = byte(item.variant.(mdata.Int_Literal).value)
+		e.variant = mdata.Bytes_Literal{value}
+		e.type = .Bytes
+		return true
+	}
+
+	t := x.items[0].type
+	#partial switch t {
+	case .Int, .Bool, .String, .Bytes:
+	case:
+		return fail(r, .Unsupported, x.items[0].offset, "an array literal of %s is not supported; only of integers, booleans, strings and byte arrays", type_name(t))
+	}
+	for item in x.items[1:] {
+		if item.type != t do return fail(r, .Invalid, item.offset, "the items of an array literal must have one type: %s, not %s", type_name(t), type_name(item.type))
+	}
+	e.variant = mdata.Array_Literal{x.items, t}
+	e.type = .Array
+	return true
 }
 
 // The set of an expression of type Struct.
@@ -641,10 +678,7 @@ resolve_array_method :: proc(r: ^Resolver, e: ^mdata.Expr, operand: ^mdata.Expr,
 		method = .Max
 	}
 	t := mdata.Expr_Type.Int
-	if operand.type == .Array {
-		field := array_field(operand)
-		t = value_type(r, e, field, field.ref_name) or_return
-	}
+	if operand.type == .Array do t = array_item_type(r, e, operand) or_return
 	if (method == .Min || method == .Max) && t != .Int do return fail(r, .Unsupported, e.offset, ".%s of an array is only supported when its values are integers, not %s", name, type_name(t))
 	e.variant = mdata.Array_Method{operand, method}
 	e.type = t

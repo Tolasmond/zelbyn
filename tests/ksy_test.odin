@@ -210,8 +210,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid: x + 1\n", .Invalid, 7, 12, "valid: t has no field x"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid: '\"x\"'\n", .Invalid, 7, 12, "valid: expected an integer, found a string"},
 	{HEAD + "seq:\n  - id: a\n    type: str\n    size: 1\n    encoding: ASCII\n    valid: G\n", .Invalid, 9, 12, "valid: t has no field G"},
-	{HEAD + "seq:\n  - id: a\n    size: 1\n    valid: 1\n", .Unsupported, 7, 12, "a: a valid constant for a blob must be a list of bytes"},
-	{HEAD + "seq:\n  - id: a\n    size: 1\n    valid: '[256]'\n", .Unsupported, 7, 12, "a: a valid constant for a blob must be a list of bytes"},
+	{HEAD + "seq:\n  - id: a\n    size: 1\n    valid: 1\n", .Invalid, 7, 12, "valid: expected a byte array, found an integer"},
+	{HEAD + "seq:\n  - id: a\n    size: 1\n    valid: '[256]'\n", .Invalid, 7, 13, "valid: expected a byte array, found an array"},
 	{HEAD + "seq:\n  - id: a\n    type: s\n    valid: 1\ntypes:\n  s: {}\n", .Invalid, 7, 12, "a: valid on a user type must be an expr"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid:\n      in-enum: true\n", .Invalid, 8, 16, "a: in-enum needs an enum"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid:\n      min: 2\n      max: 1\n", .Invalid, 8, 7, "a: min is above max"},
@@ -1722,6 +1722,68 @@ t[0].by_later[0] = <1 bytes> 4c
 	wrong := slice.clone(input, context.temp_allocator)
 	wrong[8] = 1
 	expect_dump(t, "cast to another case", ksy_dump(t, src, wrong), "error: Wrong_Type at 30 in t[0].by_cast[0]")
+}
+
+// Array literals: one of integer literals from 0 to 255 is a byte array,
+// compared byte by byte (is_pk, sorted) and in valid with an expression
+// (alt); others are arrays of integers (big), strings (names_len),
+// booleans (flags) and byte arrays (table), indexed, measured and with
+// their methods (arr_ops).
+@(test)
+ksy_array_literals :: proc(t: ^testing.T) {
+	src := HEAD + `  encoding: ASCII
+seq:
+  - id: magic
+    size: 2
+    valid:
+      any-of: ['[0x50, 0x4b]', alt]
+  - id: n
+    type: u1
+  - id: is_pk
+    size: 'magic == [0x50, 0x4b] ? 1 : 2'
+  - id: table_pick
+    size: table[n].size + table[n][1]
+  - id: big
+    size: '[1, 300, 2][n] % 7'
+  - id: names_len
+    size: '["ab", "cde"][n].length'
+  - id: sorted
+    size: 'magic < [0x50, 0x4c] ? 3 : 4'
+  - id: flags
+    size: '[true, false][n] ? 1 : 5'
+  - id: arr_ops
+    size: '[3, 1, 400].max - 397 + [9, 8, 7].size'
+instances:
+  alt:
+    value: '[0x4d, 0x5a]'
+  table:
+    value: |
+      [
+        [0x00, 0x01],
+        [0x02, 0x03, 0x04],
+      ]
+`
+	expect_dump(t, "PK", ksy_dump(t, src, {0x50, 0x4b, 0x01, 0x49, 0x54, 0x54, 0x54, 0x54, 0x54, 0x54, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x4e, 0x4e, 0x4e, 0x53, 0x53, 0x53, 0x46, 0x46, 0x46, 0x46, 0x46, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41}), `t[0].magic[0] = <2 bytes> 50 4b
+t[0].n[0] = 1
+t[0].is_pk[0] = <1 bytes> 49
+t[0].table_pick[0] = <6 bytes> 54 54 54 54 54 54
+t[0].big[0] = <6 bytes> 42 42 42 42 42 42
+t[0].names_len[0] = <3 bytes> 4e 4e 4e
+t[0].sorted[0] = <3 bytes> 53 53 53
+t[0].flags[0] = <5 bytes> 46 46 46 46 46
+t[0].arr_ops[0] = <6 bytes> 41 41 41 41 41 41
+`)
+	expect_dump(t, "MZ", ksy_dump(t, src, {0x4d, 0x5a, 0x00, 0x49, 0x49, 0x54, 0x54, 0x54, 0x42, 0x4e, 0x4e, 0x53, 0x53, 0x53, 0x53, 0x46, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41}), `t[0].magic[0] = <2 bytes> 4d 5a
+t[0].n[0] = 0
+t[0].is_pk[0] = <2 bytes> 49 49
+t[0].table_pick[0] = <3 bytes> 54 54 54
+t[0].big[0] = <1 bytes> 42
+t[0].names_len[0] = <2 bytes> 4e 4e
+t[0].sorted[0] = <3 bytes> 53 53 53
+t[0].flags[0] = <1 bytes> 53
+t[0].arr_ops[0] = <6 bytes> 46 41 41 41 41 41
+`)
+	expect_dump(t, "neither", ksy_dump(t, src, {'P', 'Z', 0}), "error: Not_Any_Of at 0 in t[0].magic[0]")
 }
 
 // io on parse instances: each is read at its pos in the stream io gives,

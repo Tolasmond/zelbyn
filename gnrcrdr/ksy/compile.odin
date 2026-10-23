@@ -47,7 +47,7 @@ import "core:strings"
 //     with pos, io (_io or the _io of a set instance) and the keys of an
 //     attribute
 //   - casts, .as<t>, to an integer type and, of a switch-on field, to the
-//     user type of a case
+//     user type of a case, and array literals, [a, b]
 //   - params of integer types, bool and bytes, in types and at the top
 //     level of an imported schema, given as t(a, b)
 //   - enums, whose values are names or mappings of id, doc and doc-ref
@@ -1065,7 +1065,9 @@ note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, s
 		note_escapes(c, n, what, x.base, scope)
 	case mdata.Switch_Cast:
 		note_escapes(c, n, what, x.operand, scope)
-	case mdata.Int_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element:
+	case mdata.Array_Literal:
+		for item in x.items do note_escapes(c, n, what, item, scope)
+	case mdata.Int_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element:
 	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast:
 		panic("note_escapes: unresolved expression")
 	}
@@ -2051,7 +2053,18 @@ compile_valid :: proc(c: ^Compiler, attr, n: ^yml.Node, id: string, node: ^mdata
 		if nodes[i] != nil && b.e == nil do return nil, fail(c, .Unsupported, nodes[i], "%s: %s cannot be compared with an expression", id, nodes[i].text)
 	}
 	checks := make([dynamic]mdata.Valid_Check, c.allocator)
-	value := new_expr(c, type == .Bool ? .Bool : type == .String ? .String : .Int, mdata.Repeat_Element{node})
+	value_type: mdata.Expr_Type
+	#partial switch type {
+	case .Bool:
+		value_type = .Bool
+	case .String:
+		value_type = .String
+	case .Blob:
+		value_type = .Bytes
+	case:
+		value_type = .Int
+	}
+	value := new_expr(c, value_type, mdata.Repeat_Element{node})
 	switch {
 	case eq != nil:
 		append(&checks, mdata.Valid_Check{new_expr(c, .Bool, mdata.Binary{.Eq, value, bounds[0].e}), .Not_Equal})
@@ -2084,9 +2097,11 @@ compile_bound :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Typ
 
 	#partial switch type {
 	case .Blob:
-		bytes, is_list := byte_literal(c, text)
-		if !is_list do return {}, fail(c, .Unsupported, n, "%s: a valid constant for a blob must be a list of bytes, as [0x50, 0x4b]", id)
-		return {value = bytes}, true
+		// a list of bytes, as contents takes one, or a Bytes expression
+		if bytes, is_list := byte_literal(c, text); is_list {
+			return {value = bytes, e = new_expr(c, .Bytes, mdata.Bytes_Literal{bytes})}, true
+		}
+		return {e = compile_expr(c, n, "valid", scope, .Bytes) or_return}, true
 	case .Bool:
 		return {e = compile_expr(c, n, "valid", scope, .Bool) or_return}, true
 	case .String:
