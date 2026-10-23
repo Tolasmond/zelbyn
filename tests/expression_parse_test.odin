@@ -41,6 +41,7 @@ PRECEDENCE_CASES := [?][2]string {
 	{"x.length + y.to_s.to_i", "(x.length + y.to_s.to_i)"},
 	{"sizeof<t> + bitsizeof < a :: b > * a._sizeof", "(sizeof<t> + (bitsizeof<a::b> * a._sizeof))"},
 	{"a.b.as<u4> + c[0].as < x :: y >.d", "(a.b.as<u4> + c[0].as<x::y>.d)"},
+	{"[a, [1, 2,], ][0]", "[a, [1, 2]][0]"},
 	{"a.first + a.last.b + a.min - a.max", "(((a.first + a.last.b) + a.min) - a.max)"},
 	{"1.to_s", "1.to_s"},
 }
@@ -101,7 +102,9 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	// outside the subset
 	{"1.5", .Unsupported, 0, "float literals"},
 	{"2.", .Unsupported, 0, "float literals"},
-	{"[1, 2]", .Unsupported, 0, "array literals"},
+	{"[]", .Invalid, 0, "an array literal cannot be empty"},
+	{"[1, true]", .Invalid, 4, "the items of an array literal must have one type: an integer, not a boolean"},
+	{"[1 2]", .Syntax, 3, "expected , or ] in an array literal, found 2"},
 	{"a.to_s()", .Unsupported, 6, "method calls"},
 	{"a.as<1>", .Syntax, 5, "expected a type name in .as<>, found 1"},
 	{"a::b::c", .Unsupported, 0, "a::b::c"},

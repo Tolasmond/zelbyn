@@ -68,15 +68,50 @@ eval_string :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (s: string, err
 @(private, require_results)
 eval_value :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (value: fld.Value, err: dat.Read_Error) {
 	v := eval(d, e, {index = index}) or_return
+	return tree_value(v), .None
+}
+
+// v, an Int, Bool, String or Bytes value, as a value of the tree: an Int is
+// an i64.
+@(private = "file")
+tree_value :: proc(v: Eval_Value) -> fld.Value {
 	#partial switch x in v {
 	case int:
-		return i64(x), .None
+		return i64(x)
 	case bool:
-		return x, .None
+		return x
+	case string:
+		return x
 	case []byte:
-		return x, .None
+		return x
 	}
-	panic("eval_value: not an Int, Bool or Bytes expression")
+	panic("tree_value: not an Int, Bool, String or Bytes value")
+}
+
+// operand[index], when operand is an array literal, directly or as the
+// expression of a value instance without an if: the item at index,
+// evaluated alone rather than with the whole array. found is false for any
+// other operand.
+@(private = "file", require_results)
+literal_item :: proc(d: ^Decoder, x: mdata.Index, ctx: Eval_Context) -> (v: Eval_Value, found: bool, err: dat.Read_Error) {
+	e := x.operand
+	item_ctx := ctx
+	caller := ctx
+	if ref, is_ref := e.variant.(mdata.Value_Ref); is_ref && ref.instance.cond == nil {
+		if _, is_literal := ref.instance.expr.variant.(mdata.Array_Literal); !is_literal do return
+		base, base_err := eval(d, ref.base, ctx)
+		if base_err != .None do return nil, true, base_err
+		item_ctx = Eval_Context{index = -1, self = base.(^fld.Instance), base = ref.base, caller = &caller}
+		e = ref.instance.expr
+	}
+	literal, is_literal := e.variant.(mdata.Array_Literal)
+	if !is_literal do return
+	index, index_err := eval(d, x.index, ctx)
+	if index_err != .None do return nil, true, index_err
+	i := index.(int)
+	if i < 0 || i >= len(literal.items) do return nil, true, .Index_Out_Of_Range
+	v, err = eval(d, literal.items[i], item_ctx)
+	return v, true, err
 }
 
 // The value of a direct form, a Bool as 0 or 1. ok is false when there is
@@ -160,6 +195,7 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 	case mdata.String_Literal:
 		return x.value, .None
 	case mdata.Index:
+		if item, found, item_err := literal_item(d, x, ctx); found do return item, item_err
 		operand := eval(d, x.operand, ctx) or_return
 		index := eval(d, x.index, ctx) or_return
 		i := index.(int)
@@ -251,6 +287,18 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 			if !cond.(bool) do return nil, .Absent_Field
 		}
 		return eval(d, x.instance.expr, self)
+	case mdata.Bytes_Literal:
+		// in the tree's arena, which may keep it, as an argument
+		bytes := arn.arena_make(d.arena, byte, len(x.value))
+		copy(bytes, x.value)
+		return bytes, .None
+	case mdata.Array_Literal:
+		values := arn.arena_make(d.arena, fld.Value, len(x.items))
+		for item, i in x.items {
+			value := eval(d, item, ctx) or_return
+			values[i] = tree_value(value)
+		}
+		return values, .None
 	case mdata.Switch_Cast:
 		operand := eval(d, x.operand, ctx) or_return
 		instance, is_instance := operand.(^fld.Instance)
@@ -502,6 +550,8 @@ eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval
 // x op y for two strings or two booleans.
 @(private = "file")
 eval_binary_other :: proc(d: ^Decoder, op: mdata.Binary_Op, x, y: Eval_Value) -> Eval_Value {
+	// byte arrays compare byte by byte, as strings do
+	if l, is_bytes := x.([]byte); is_bytes do return eval_binary_other(d, op, string(l), string(y.([]byte)))
 	if l, is_bool := x.(bool); is_bool {
 		r := y.(bool)
 		#partial switch op {

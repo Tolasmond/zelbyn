@@ -115,6 +115,20 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 		strings.write_string(b, x.bits ? "bitsizeof<" : "sizeof<")
 		strings.write_string(b, x.type_name)
 		strings.write_byte(b, '>')
+	case mdata.Array_Literal:
+		strings.write_byte(b, '[')
+		for item, i in x.items {
+			if i > 0 do strings.write_string(b, ", ")
+			write(b, item)
+		}
+		strings.write_byte(b, ']')
+	case mdata.Bytes_Literal:
+		strings.write_byte(b, '[')
+		for v, i in x.value {
+			if i > 0 do strings.write_string(b, ", ")
+			strings.write_int(b, int(v))
+		}
+		strings.write_byte(b, ']')
 	case mdata.Cast:
 		write_cast(b, x.operand, x.type_name)
 	case mdata.Switch_Cast:

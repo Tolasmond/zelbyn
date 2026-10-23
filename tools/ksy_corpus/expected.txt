@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 124 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 132 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -6,7 +6,7 @@ OK	archive/android_bootldr_qcom.ksy
 OK	archive/android_dto.ksy
 OK	archive/android_img.ksy
 OK	archive/android_sparse.ksy
-ERR	archive/cpio_old_le.ksy	Unsupported	archive/cpio_old_le.ksy:36:26	if: array literals are not supported
+OK	archive/cpio_old_le.ksy
 OK	archive/gzip.ksy
 OK	archive/lzh.ksy
 OK	archive/mozilla_mar.ksy
@@ -23,7 +23,7 @@ ERR	common/bcd.ksy	Unsupported	common/bcd.ksy:37:1	params on the top-level type 
 OK	common/bytes_with_io.ksy
 OK	common/dos_datetime.ksy
 ERR	common/riff.ksy	Unsupported	common/riff.ksy:71:16	value: _io in a value instance is not supported
-ERR	common/utf16_with_bom.ksy	Unsupported	common/utf16_with_bom.ksy:50:19	value: array literals are not supported
+OK	common/utf16_with_bom.ksy
 OK	common/utf8_string.ksy
 OK	common/vlq_base128_be.ksy
 ERR	common/vlq_base128_le.ksy	Unsupported	common/vlq_base128_le.ksy:46:11	type: integer literal 0x8000_0000_0000_0000 does not fit in a 64-bit signed integer, which expressions are
@@ -91,12 +91,12 @@ OK	hardware/dtb.ksy
 ERR	hardware/edid.ksy	Unsupported	hardware/edid.ksy:140:28	value: float literals are not supported
 ERR	hardware/mifare/mifare_classic.ksy	Unsupported	hardware/mifare/mifare_classic.ksy:221:23	param ac: type ac is not supported; only integer types, bool and bytes are
 ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:159:16	value: _io in a value instance is not supported
-ERR	image/dicom.ksy	Unsupported	image/dicom.ksy:150:25	value: array literals are not supported
+OK	image/dicom.ksy
 ERR	image/exif.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supported
 OK	image/gif.ksy
 OK	image/gimp_brush.ksy
 OK	image/icc_4.ksy
-ERR	image/ico.ksy	Unsupported	image/ico.ksy:86:30	value: array literals are not supported
+OK	image/ico.ksy
 ERR	image/jpeg.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supported
 ERR	image/nitf.ksy	Unsupported	image/nitf.ksy:166:9	an attribute in type date_time has no id; attributes without one are not supported
 OK	image/pcx.ksy
@@ -104,7 +104,7 @@ OK	image/pcx_dcx.ksy
 OK	image/pif.ksy
 ERR	image/png.ksy	Unsupported	image/png.ksy:410:9	attribute profile: process is not supported
 OK	image/psx_tim.ksy
-ERR	image/tga.ksy	Unsupported	image/tga.ksy:94:34	value: array literals are not supported
+OK	image/tga.ksy
 OK	image/webp.ksy
 OK	image/wmf.ksy
 OK	image/xwd.ksy
@@ -119,8 +119,8 @@ OK	machine_code/code_6502.ksy
 OK	macos/compressed_resource.ksy
 ERR	macos/ds_store.ksy	Unsupported	macos/ds_store.ksy:107:7	instance directories: an instance without pos or value is not supported
 ERR	macos/mac_os_resource_snd.ksy	Unsupported	macos/mac_os_resource_snd.ksy:118:9	an attribute in type sound_header has no id; attributes without one are not supported
-ERR	macos/resource_compression/dcmp_0.ksy	Unsupported	macos/resource_compression/dcmp_0.ksy:250:20	value: array literals are not supported
-ERR	macos/resource_compression/dcmp_1.ksy	Unsupported	macos/resource_compression/dcmp_1.ksy:231:20	value: array literals are not supported
+OK	macos/resource_compression/dcmp_0.ksy
+OK	macos/resource_compression/dcmp_1.ksy
 ERR	macos/resource_compression/dcmp_2.ksy	Unsupported	macos/resource_compression/dcmp_2.ksy:38:11	param header_parameters_with_io: type bytes_with_io is not supported; only integer types, bool and bytes are
 OK	macos/resource_compression/dcmp_variable_length_integer.ksy
 ERR	macos/resource_fork.ksy	Invalid	macos/resource_fork.ksy:109:3	instance resource_map refers to itself
@@ -171,7 +171,7 @@ OK	scientific/nt_mdt/nt_mdt.ksy
 OK	scientific/nt_mdt/nt_mdt_pal.ksy
 ERR	scientific/spectroscopy/avantes_roh60.ksy	Unsupported	scientific/spectroscopy/avantes_roh60.ksy:64:18	repeat-expr: ipixlast is a Float32; only integer, boolean, blob, string and set fields can be used in expressions
 ERR	scientific/spectroscopy/specpr.ksy	Unsupported	scientific/spectroscopy/specpr.ksy:91:33	value: float literals are not supported
-ERR	security/efivar_signature_list.ksy	Unsupported	security/efivar_signature_list.ksy:68:34	value: array literals are not supported
+OK	security/efivar_signature_list.ksy
 OK	security/openpgp_message.ksy
 OK	security/ssh_public_key.ksy
 OK	serialization/asn1/asn1_der.ksy

@@ -30,8 +30,7 @@ destroy_error :: proc(err: ^Error) {
 // right-associative and a comparison cannot be an operand of another
 // comparison. Integer literals are decimal, 0x hex, 0b binary or 0o octal,
 // with _ allowed between digits; string literals are as String_Literal
-// describes. Float and array literals and method calls are rejected
-// as Unsupported.
+// describes. Float literals and method calls are rejected as Unsupported.
 @(require_results)
 parse :: proc(text: string, allocator: mem.Allocator) -> (e: ^mdata.Expr, err: Error) {
 	p := Parser{text = text, allocator = allocator}
@@ -567,7 +566,7 @@ parse_atom :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 		next(p) or_return
 		return e, true
 	case .L_Bracket:
-		return nil, fail(p, .Unsupported, t.offset, "array literals are not supported")
+		return parse_array_literal(p)
 	case .Ident:
 		for k in KEYWORDS {
 			if t.text == k do return nil, fail(p, .Syntax, t.offset, "unexpected %s", t.text)
@@ -593,6 +592,22 @@ parse_atom :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 	}
 
 	return nil, fail(p, .Syntax, t.offset, "unexpected %s", describe(t))
+}
+
+// [a, b, ...], whose last item may be followed by a comma.
+@(private = "file")
+parse_array_literal :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
+	offset := p.tok.offset
+	next(p) or_return
+	items := make([dynamic]^mdata.Expr, p.allocator)
+	for p.tok.kind != .R_Bracket {
+		append(&items, parse_expr(p, 0) or_return)
+		if p.tok.kind == .R_Bracket do break
+		if p.tok.kind != .Comma do return nil, fail(p, .Syntax, p.tok.offset, "expected , or ] in an array literal, found %s", describe(p.tok))
+		next(p) or_return
+	}
+	next(p) or_return
+	return new_expr(p, offset, mdata.Array_Literal{items = items[:]}), true
 }
 
 // The rest of sizeof<t> or bitsizeof<t>, after keyword.
