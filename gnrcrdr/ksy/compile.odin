@@ -35,9 +35,11 @@ import "core:strings"
 //     level, it and the types inside it have no _root, as in Kaitai
 //   - attributes: id (without one, named _unnamed and their index in seq, as
 //     in Kaitai), type, size, size-eos, terminator with consume, include and
-//     eos-error, pad-right, process (zlib), contents, if, enum, valid (eq,
-//     min, max, any-of, in-enum, expr), repeat (expr, eos, until) with
-//     repeat-expr and repeat-until, encoding, doc, doc-ref
+//     eos-error, pad-right, process (zlib), contents (whose size, if any,
+//     is ignored, as in Kaitai), parent (on a user type, _parent,
+//     _parent._parent and so on), if, enum, valid (eq, min, max, any-of,
+//     in-enum, expr), repeat (expr, eos, until) with repeat-expr and
+//     repeat-until, encoding, doc, doc-ref
 //   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), b1-b64
 //     (le/be suffixes or meta bit-endian), str and byte arrays (no type)
 //     with size, size-eos or terminator, strz (in ENCODINGS), user types
@@ -50,7 +52,8 @@ import "core:strings"
 //     strings, byte arrays, set instances and arrays, over their type, its
 //     _io, and through _parent and _root those enclosing it, and parse
 //     instances: instances with pos, io (_io or the _io of a set instance)
-//     and the keys of an attribute, or without pos when they read nothing
+//     and the keys of an attribute, or without pos when they read nothing,
+//     as a switch-on whose cases' types read nothing does
 //   - .pos, .size and .eof of _io and of the _io of another set instance
 //   - ?: of sets of one type
 //   - integers in expressions exact from -2^63 to 2^64 - 1
@@ -66,7 +69,8 @@ import "core:strings"
 //     whose arguments the decoder is given (Root_Arg)
 //   - enums, whose values are names or mappings of id, doc and doc-ref
 //     (enum constants in expressions, a::e::v by path)
-//   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
+//   - the extensions -orig-id (a list of names leaves the id), -peek,
+//     -while-peek, -until-peek and -bits
 //
 // Not supported yet (Unsupported): other encodings, instances without pos or
 // value that read bytes, params of other types (struct, io, any) and of a
@@ -74,10 +78,11 @@ import "core:strings"
 // array literals of arrays, valid on a float, min and max on a type other
 // than an integer, an endian that is a switch-on on the top-level type or in
 // a type that contains itself, a bit-endian that is a switch-on, imports in
-// a type, and in a type that contains itself, the members of the sets
-// enclosing it, other than through _root (in a value instance, only that of
-// the schema compiled), and an instance that refers to itself through a
-// field of its type.
+// a type, parent other than _parent, _parent._parent and so on, in a type
+// that contains itself, the members of the sets enclosing it, other than
+// through _root (in a value instance, only that of the schema compiled),
+// unless a parent gives its fields inside it the same ones, and an
+// instance that refers to itself through a field of its type.
 
 Error_Kind :: enum {
 	None,
@@ -151,6 +156,7 @@ Compiler :: struct {
 	order:           Maybe(endian.Byte_Order),                   // the byte order of the set of a type whose endian is a switch-on being compiled (compile_type), which the types declared in it take
 	deferred:        [dynamic]Deferred,                          // the instances that nothing referred to by the end of their set, compiled once every set is; in scratch
 	rootless:        [dynamic]^mdata.Node,                       // the sets of types declared in another schema than the field's, not at its top level, which have no _root (chain_of); in scratch
+	current:         ^mdata.Node,                                // the set whose fields or parse instance are being compiled, which a set compiled now is inside (Set_Type.outer)
 	err:             Error,
 }
 
@@ -166,15 +172,19 @@ Deferred :: struct {
 // A set compiled, and its type. Sizes are rare, so the sets are searched
 // rather than hashed, which would cost every compile more. reused_by holds
 // the fields of its type inside it (Node.recursive), which are given its
-// members once it is compiled; escape is then an error: the first
-// expression in it, or in the sets inside it, that refers to an instance
-// enclosing it (note_escapes), with what it is.
+// members once it is compiled. When one of them is read with other
+// instances enclosing it than the set (reused_deeper), escape is an error:
+// the first expression in it, or in the sets inside it, that refers to an
+// instance enclosing it (note_escapes), with what it is.
 @(private = "file")
 Set_Type :: struct {
 	set:           ^mdata.Node,
 	td:            ^Type_Def,
+	chain:         []^mdata.Node,        // its scope (compile_fields)
+	outer:         ^mdata.Node,          // the set it is inside, of the field or parse instance it is of, whatever its chain; nil for the root
 	done:          bool,                 // its attributes and instances are compiled, but for value instances put off
 	reused_by:     [dynamic]^mdata.Node, // in scratch; nil until one
+	reused_deeper: bool,                 // a field of reused_by has other sets enclosing it in its chain than set has
 	escape:        ^yml.Node,
 	escape_what:   string,
 	escape_schema: ^Schema, // the schema escape is in
@@ -384,10 +394,10 @@ TYPE_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "d
 TOP_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "doc-ref", "params", "to-string"}
 
 @(private = "file")
-ATTR_ALLOWED :: []string{"id", "type", "size", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "process"}
+ATTR_ALLOWED :: []string{"id", "type", "size", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "process", "parent"}
 
 @(private = "file")
-ATTR_UNSUPPORTED :: []string{"io", "pos", "value", "parent"}
+ATTR_UNSUPPORTED :: []string{"io", "pos", "value"}
 
 // The keys of an attribute that say where the bytes of each element end.
 @(private = "file")
@@ -403,9 +413,8 @@ VALUE_INSTANCE_KEYS :: Keys {
 
 @(private = "file")
 PARSE_INSTANCE_KEYS :: Keys {
-	allowed     = {"pos", "io", "type", "size", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "process", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"},
-	unsupported = {"parent"},
-	extensions  = {"-orig-id"},
+	allowed    = {"pos", "io", "type", "size", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "process", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref", "parent"},
+	extensions = {"-orig-id"},
 }
 
 @(private = "file")
@@ -488,9 +497,9 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 	// are read as it is
 	for st in c.type_defs {
 		if st.set.keeps_stream do for field in st.reused_by do field.keeps_stream = true
-		if len(st.reused_by) > 0 && st.escape != nil {
+		if st.reused_deeper && st.escape != nil {
 			c.schema = st.escape_schema
-			return fail(c, .Unsupported, st.escape, "%s: type %s contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it, other than through the _root of the schema decoded, or in a value instance, to an imported schema's _root", st.escape_what, st.td.name)
+			return fail(c, .Unsupported, st.escape, "%s: type %s contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it, other than through the _root of the schema decoded, or in a value instance, to an imported schema's _root, unless a parent gives its fields inside it the same ones (parent: _parent)", st.escape_what, st.td.name)
 		}
 	}
 	return true
@@ -710,11 +719,12 @@ check_ks_version :: proc(c: ^Compiler, n: ^yml.Node) -> bool {
 	return true
 }
 
-// -orig-id when the mapping has one, else id.
+// -orig-id when the mapping has one, else id, as when it is a list of the
+// names of several original types (elf.ksy's Elf32_Versym, Elf64_Versym).
 @(private = "file")
 display_name :: proc(c: ^Compiler, m: ^yml.Node, id: string) -> (name: string, ok: bool) {
 	n := get(m, "-orig-id")
-	if n == nil do return id, true
+	if n == nil || n.kind == .Seq do return id, true
 	name = expect_scalar(c, n, "-orig-id") or_return
 	if name == "" do return "", fail(c, .Invalid, n, "-orig-id is empty")
 	return name, true
@@ -999,8 +1009,9 @@ find_enum :: proc(td: ^Type_Def, name: string) -> ^expr.Enum {
 // and to any instance whose expressions refer only to those. When set is
 // inside a set of td being compiled, a type that contains itself, set is
 // read as that set (Node.recursive), whose expressions must then not refer
-// to the instances enclosing it. Once that set is compiled, set gets its
-// members, so that the decoder and the dumps need not look for them.
+// to the instances enclosing it, unless set has the same ones (parent:
+// _parent). Once that set is compiled, set gets its members, so that the
+// decoder and the dumps need not look for them.
 @(private = "file")
 compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^mdata.Node, arg_sets: []^mdata.Node = nil) -> bool {
 	if td.compiling != nil {
@@ -1008,6 +1019,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 		st := set_type(c, td.compiling)
 		if st.reused_by == nil do st.reused_by = make([dynamic]^mdata.Node, c.scratch)
 		append(&st.reused_by, set)
+		if !slice.equal(chain[:len(chain) - 1], st.chain[:len(st.chain) - 1]) do st.reused_deeper = true
 		// reused from a value instance compiled after the set (compile_deferred)
 		if st.done do copy_members(set, td.compiling)
 		return true
@@ -1018,7 +1030,10 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 	td.compiling = set
 	defer td.compiling = nil
 	set_index := len(c.type_defs)
-	append(&c.type_defs, Set_Type{set = set, td = td})
+	append(&c.type_defs, Set_Type{set = set, td = td, chain = chain, outer = c.current})
+	current := c.current
+	defer c.current = current
+	c.current = set
 
 	ids := make([dynamic]^yml.Node, c.scratch) // the id nodes of the attributes, bit fields and instances
 
@@ -1127,20 +1142,22 @@ copy_members :: proc(field, set: ^mdata.Node) {
 	field.params = set.params
 }
 
-// Compiles item, an instance put off. The types of the sets enclosing it
-// are marked as being compiled again while it is, so that its type, or a
-// parse instance or a type it compiles on demand, finds that a type inside
-// one of them contains itself, as when it is compiled with its set.
+// Compiles item, an instance put off. The types of its set and the sets
+// it is inside (Set_Type.outer), which its chain can skip (parent), are
+// marked as being compiled again while it is, so that its type, or a parse
+// instance or a type it compiles on demand, finds that a type inside one
+// of them contains itself, as when it is compiled with its set.
 @(private = "file")
 compile_deferred :: proc(c: ^Compiler, item: Deferred) -> bool {
 	marked := make([dynamic]^Type_Def, c.scratch)
 	defer for td in marked do td.compiling = nil
-	types := item.value != nil ? c.instances[item.value].scope.types : c.parse_instances[item.parse].scope.types
-	for set in types {
+	for set := item.set; set != nil; {
 		st := set_type(c, set)
-		if st.td.compiling != nil do continue
-		st.td.compiling = set
-		append(&marked, st.td)
+		if st.td.compiling == nil {
+			st.td.compiling = set
+			append(&marked, st.td)
+		}
+		set = st.outer
 	}
 	if item.value != nil do return compile_instance(c, item.set, item.value)
 	return compile_parse_instance(c, item.set, item.parse)
@@ -1395,34 +1412,61 @@ attr_bits :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, id: string, elem
 	type_node := get(attr, "type")
 	if type_node != nil && type_node.kind != .Scalar do return 0, id
 	element: int
-	if size := get(attr, "size"); size != nil {
+	// as the official compiler does, contents reads its own length, whatever
+	// the size
+	if contents := get(attr, "contents"); contents != nil {
+		element = contents_length(contents) * 8
+	} else if size := get(attr, "size"); size != nil {
 		n, ok := constant_int(c, size)
 		if !ok || n < 0 || n > max(int) / 8 do return 0, id
 		element = n * 8
-	} else if contents := get(attr, "contents"); contents != nil {
-		element = contents_length(contents) * 8
 	} else {
 		if type_node == nil do return 0, id
-		name := strings.trim_space(type_node.text)
-		if open := strings.index_byte(name, '('); open >= 0 do name = strings.trim_space(name[:open])
-		if prim, _, is_primitive := primitive(name); is_primitive {
-			sizes := TYPE_SIZE
-			element = sizes[prim] * 8
-		} else if width, _, is_bits := bit_type(name); is_bits {
-			element = width
-		} else {
-			user := find_type(td, name)
-			// a type that contains itself has no fixed size
-			if user == nil || user.sizing do return 0, id
-			n, why := type_bits(c, user)
-			if why != "" do return 0, fmt.aprintf("%s.%s", id, why, allocator = c.scratch)
-			element = n
-		}
+		element, unsized = type_name_bits(c, td, type_node.text, id)
+		if unsized != "" do return
 	}
 	overflow: bool
 	bits, overflow = intrinsics.overflow_mul(element, count)
 	if overflow do return 0, id
 	return bits, ""
+}
+
+// The size in bits of the type that type_text names in td (with arguments,
+// t(a, b)), for attr_bits of id.
+@(private = "file")
+type_name_bits :: proc(c: ^Compiler, td: ^Type_Def, type_text, id: string) -> (bits: int, unsized: string) {
+	name := strings.trim_space(type_text)
+	if open := strings.index_byte(name, '('); open >= 0 do name = strings.trim_space(name[:open])
+	if prim, _, is_primitive := primitive(name); is_primitive {
+		sizes := TYPE_SIZE
+		return sizes[prim] * 8, ""
+	}
+	if width, _, is_bits := bit_type(name); is_bits do return width, ""
+	user := find_type(td, name)
+	// a type that contains itself has no fixed size
+	if user == nil || user.sizing do return 0, id
+	n, why := type_bits(c, user)
+	if why != "" do return 0, fmt.aprintf("%s.%s", id, why, allocator = c.scratch)
+	return n, ""
+}
+
+// Whether an element of attr, of id in td, reads no bytes: its size is 0,
+// or without a size, its type is a switch-on whose cases' types all read
+// none, which is no size for attr_bits, as for the official compiler.
+@(private = "file")
+reads_nothing :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, id: string) -> bool {
+	if type_node := get(attr, "type"); type_node != nil && type_node.kind == .Map && get(attr, "size") == nil {
+		if cases := get(type_node, "cases"); cases != nil && cases.kind == .Map {
+			for e in cases.entries {
+				if e.value.kind != .Scalar do return false
+				bits, unsized := type_name_bits(c, td, e.value.text, id)
+				if unsized != "" || bits != 0 do return false
+			}
+		}
+		return true
+	}
+	bits, unsized := attr_bits(c, td, attr, id, element_only = true)
+	return unsized == "" && bits == 0
 }
 
 // The number of bytes of contents, a string or a sequence of bytes and
@@ -1463,6 +1507,9 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 	schema := c.schema
 	defer c.schema = schema
 	c.schema = src.td.schema
+	current := c.current
+	defer c.current = current
+	c.current = mdata.members(set)
 	if src.compiling && set.recursive != nil do return fail(c, .Unsupported, src.entry.key, "instance %s refers to itself in a field of its type; a type that contains itself cannot be compiled that way", inst.ref_name)
 	if src.compiling do return fail(c, .Invalid, src.entry.key, "instance %s refers to itself", inst.ref_name)
 	src.compiling = true
@@ -1477,8 +1524,7 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 		// Kaitai reads it where its stream is when it is first used, and
 		// moves the stream past it, which is known only for one that reads
 		// nothing
-		bits, unsized := attr_bits(c, src.td, spec, inst.ref_name, element_only = true)
-		if unsized != "" || bits != 0 {
+		if !reads_nothing(c, src.td, spec, inst.ref_name) {
 			return fail(c, .Unsupported, src.entry.key, "instance %s: an instance without pos or value that reads bytes is not supported; only one whose type or size reads none is", inst.ref_name)
 		}
 	}
@@ -1670,7 +1716,11 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	switch {
 	case contents != nil:
 		if type_node != nil do return fail(c, .Invalid, get_key(attr, "type"), "%s: contents cannot have a type", id)
-		if bytes_key != nil do return fail(c, .Invalid, bytes_key, "%s: contents cannot have %s", id, bytes_key.text)
+		// the official compiler reads the contents' length whatever the size,
+		// which it does not compile; BYTES_KEYS starts with size
+		keys := BYTES_KEYS
+		if key := first_key(attr, keys[1:]); key != nil do return fail(c, .Invalid, key, "%s: contents cannot have %s", id, key.text)
+		size = nil
 		if valid != nil do return fail(c, .Invalid, get_key(attr, "valid"), "%s: contents already checks the value; it cannot have valid", id)
 		bytes := byte_list(c, contents, "contents") or_return
 		node.type = .Blob
@@ -1729,6 +1779,11 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	}
 
 	node.count = compile_count(c, attr, id, scope) or_return
+
+	if n := get(attr, "parent"); n != nil {
+		if node.type != .Set do return fail(c, .Invalid, get_key(attr, "parent"), "%s: parent applies only to a user type", id)
+		node.parent_up = compile_parent(c, n, id, scope) or_return
+	}
 
 	// size, switch-on and the bit fields are evaluated for each element
 	element_scope := scope
@@ -1815,14 +1870,14 @@ builtin_type :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id, type_n
 }
 
 // The chain of node, a field of type user in a type whose chain is types:
-// types followed by node, or node alone when user is declared in another
-// schema than the field's (c.schema). As in Kaitai, node then has no
-// _parent, and at the top level of its schema, is the root of its own
-// types (their _root); elsewhere, it and the types in it have no _root
-// (c.rootless).
+// types followed by node, without the parent_up innermost of types when
+// node has a parent, or node alone when user is declared in another schema
+// than the field's (c.schema). As in Kaitai, node then has no _parent, and
+// at the top level of its schema, is the root of its own types (their
+// _root); elsewhere, it and the types in it have no _root (c.rootless).
 @(private = "file")
 chain_of :: proc(c: ^Compiler, types: []^mdata.Node, user: ^Type_Def, node: ^mdata.Node) -> []^mdata.Node {
-	if user.schema == c.schema do return chain_with(c, types, node)
+	if user.schema == c.schema do return chain_with(c, types[:len(types) - node.parent_up], node)
 	if user.parent != nil do append(&c.rootless, node)
 	return chain_with(c, nil, node)
 }
@@ -1834,6 +1889,18 @@ chain_with :: proc(c: ^Compiler, types: []^mdata.Node, node: ^mdata.Node) -> []^
 	copy(chain, types)
 	chain[len(types)] = node
 	return chain
+}
+
+// parent: n, of id, a user type: as in Kaitai, the _parent of its
+// instances is the instance it gives, rather than the one each is read in.
+// It must be one enclosing that instance (_parent, _parent._parent), whose
+// levels out it returns (Node.parent_up).
+@(private = "file")
+compile_parent :: proc(c: ^Compiler, n: ^yml.Node, id: string, scope: expr.Scope) -> (up: int, ok: bool) {
+	e := compile_expr(c, n, "parent", scope, .Struct) or_return
+	inst, is_instance := e.variant.(mdata.Instance)
+	if !is_instance || inst.root || inst.imported_root do return 0, fail(c, .Unsupported, n, "%s: parent is only supported as _parent, _parent._parent and so on", id)
+	return inst.up, true
 }
 
 // type: switch-on and cases, n, of attr, on node, a set, whose length and
@@ -1905,6 +1972,7 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 		type_name, call = split_call(c, e.value, id, type_name) or_return
 		case_node := new_node(c, node.name, node.ref_name)
 		case_node.count = mdata.Fixed_Count{1}
+		case_node.parent_up = node.parent_up
 		user_type := "" // for casts
 
 		// a type with arguments is a user type

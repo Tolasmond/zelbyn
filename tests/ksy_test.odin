@@ -270,6 +270,12 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	// refer to the members of the sets enclosing it only through _root, and
 	// its instances cannot refer to themselves through a field of their type
 	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type: s\ntypes:\n  s:\n    seq:\n      - id: b\n        type: u1\n        if: _parent.n == 0\n      - id: c\n        type: s\n        if: b == 1\n", .Unsupported, 14, 13, "if: type s contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it"},
+	// parent
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    parent: _parent\n", .Invalid, 7, 5, "a: parent applies only to a user type"},
+	{HEAD + "seq:\n  - id: a\n    type: s\n    parent: _root\ntypes:\n  s: {}\n", .Unsupported, 7, 13, "a: parent is only supported as _parent, _parent._parent and so on"},
+	{HEAD + "seq:\n  - id: a\n    type: s\n    parent: _parent\ntypes:\n  s: {}\n", .Invalid, 7, 13, "parent: _parent: t has no enclosing set here"},
+	{HEAD + "seq:\n  - id: a\n    type: s\n    parent: 1\ntypes:\n  s: {}\n", .Invalid, 7, 13, "parent: expected"},
+	{HEAD + "instances:\n  i:\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n", .Unsupported, 5, 3, "instance i: an instance without pos or value that reads bytes is not supported"},
 	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type: s\ntypes:\n  s:\n    seq:\n      - id: b\n        type: u1\n      - id: u\n        type: u\n      - id: c\n        type: s\n        if: b == 1\n  u:\n    seq:\n      - id: x\n        type: u1\n        if: _parent.b == 0\n      - id: y\n        type: u1\n        if: _parent._parent.n == 0\n", .Unsupported, 26, 13, "if: type s contains itself"},
 	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    seq:\n      - id: n\n        type: u1\n      - id: kids\n        type: s\n        repeat: expr\n        repeat-expr: n\n    instances:\n      total:\n        value: 'n + (n > 0 ? kids[0].total : 0)'\n", .Unsupported, 18, 16, "value instance total refers to itself in a field of its type"},
 
@@ -500,6 +506,8 @@ t[0].z[0] = -2
 	// -orig-id on a type documents its original name, as in
 	// kaitai_struct_formats; nothing shows it
 	expect_dump(t, "-orig-id on a type", ksy_dump(t, HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    -orig-id: S\n    seq:\n      - id: b\n        type: u1\n", {7}), "t[0].a[0].b[0] = 7\n")
+	// a list of original names, as in elf.ksy, leaves the id
+	expect_dump(t, "-orig-id list", ksy_dump(t, HEAD + "seq:\n  - id: a\n    -orig-id: [A32, A64]\n    type: u1\n", {7}), "t[0].a[0] = 7\n")
 
 	// an attribute without an id is named _unnamed and its index in seq, as
 	// in Kaitai, also among bit fields
@@ -2162,6 +2170,77 @@ cycle_a[0].b[0].a[0].b[0].m[0] = 0
 	// the outermost n is not 0, until the input ends
 	expect_dump(t, "imported _root, 0", ksy_file_dump(t, DIR + "imported_root.ksy", nil, {0, 7}), "imported_root[0].c[0].n[0] = 0\n")
 	expect_dump(t, "imported _root, 1", ksy_file_dump(t, DIR + "imported_root.ksy", nil, {1, 0}), "error: Unexpected_EOF at 2 in imported_root[0].c[0].next[0].next[0].n[0]")
+
+	// with parent: _parent, an entry inside an entry has the same _parent,
+	// so the type can use it, also through the value instance that tail
+	// reaches through first.next; contents reads its own length whatever
+	// its size; and an instance without pos whose switch-on cases read
+	// nothing is read where it is used
+	parent := HEAD + `seq:
+  - id: sec
+    type: sec
+  - id: magic
+    contents: [0x11, 0x22]
+    size: 5
+  - id: flags
+    type: u1
+  - id: by_size
+    size: magic_size
+  - id: by_flags
+    size: flags_obj.as<bits>.low
+instances:
+  flags_obj:
+    type:
+      switch-on: flags
+      cases:
+        1: bits(flags)
+  magic_size:
+    value: magic._sizeof
+types:
+  sec:
+    seq:
+      - id: n
+        type: u1
+      - id: first
+        type: entry
+      - id: tail
+        size: first.next.scaled
+  entry:
+    seq:
+      - id: v
+        type: u1
+      - id: has_next
+        type: u1
+      - id: next
+        type: entry
+        parent: _parent
+        if: has_next != 0
+      - id: w
+        size: _parent.n
+    instances:
+      scaled:
+        value: v * _parent.n
+  bits:
+    params:
+      - id: value
+        type: u1
+    instances:
+      low:
+        value: value & 1
+`
+	expect_dump(t, "parent", ksy_dump(t, parent, {2, 1, 1, 3, 0, 0xaa, 0xbb, 0xcc, 0xdd, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x11, 0x22, 1, 0x77, 0x88, 0x99}), `t[0].sec[0].n[0] = 2
+t[0].sec[0].first[0].v[0] = 1
+t[0].sec[0].first[0].has_next[0] = 1
+t[0].sec[0].first[0].next[0].v[0] = 3
+t[0].sec[0].first[0].next[0].has_next[0] = 0
+t[0].sec[0].first[0].next[0].w[0] = <2 bytes> aa bb
+t[0].sec[0].first[0].w[0] = <2 bytes> cc dd
+t[0].sec[0].tail[0] = <6 bytes> 11 22 33 44 55 66
+t[0].magic[0] = <2 bytes> 11 22
+t[0].flags[0] = 1
+t[0].by_size[0] = <2 bytes> 77 88
+t[0].by_flags[0] = <1 bytes> 99
+`)
 }
 
 // Set instances nest at most reader.MAX_DEPTH deep, and through parse
