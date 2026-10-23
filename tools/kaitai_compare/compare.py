@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Compares gnrcrdr's decode of files with the official Kaitai Struct
-runtime's, value by value (decision record §8, step 6).
+runtime's, value by value.
 
     python3 tools/kaitai_compare/compare.py [--import-path DIRS] [--offsets] [--param NAME=VALUE]... <schema.ksy> <file>...
 
