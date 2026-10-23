@@ -375,11 +375,13 @@ Direct_Compare :: struct {
 
 // True when the field is read at most once in each instance of its parent,
 // so that a reference to it gives its value rather than an array: a fixed
-// count of 1, or a marker count of 0 or 1 (either with or without a cond).
+// count of 1 that is not a repeat, or a marker count of 0 or 1 (either with
+// or without a cond). A repeat is an array however many elements it has,
+// even when its count is a literal 1.
 is_single :: proc(node: ^Node) -> bool {
 	switch c in node.count {
 	case Fixed_Count:
-		return c.n == 1
+		return c.n == 1 && !c.repeat
 	case Marker_Count:
 		return true
 	case Rule_Count, Repeat_Count, Eos_Count, Until_Count:
