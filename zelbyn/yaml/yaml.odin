@@ -956,6 +956,7 @@ parse_flow :: proc(p: ^Parser) -> ^Node {
 
 			if !skip_flow_space(p) do return nil
 			if peek(p) != ':' do return fail(p, .Unsupported, p.pos, "a flow mapping entry without a value is not supported")
+			if !colon_on_key_line(p, key) do return nil
 			advance(p)
 
 			// libyaml places an empty value at the token after it
@@ -972,7 +973,10 @@ parse_flow :: proc(p: ^Parser) -> ^Node {
 			item := parse_flow_node(p)
 			if item == nil do return nil
 			if !skip_flow_space(p) do return nil
-			if peek(p) == ':' do return fail(p, .Unsupported, p.pos, "a mapping inside a flow sequence is not supported")
+			if peek(p) == ':' {
+				if !colon_on_key_line(p, item) do return nil
+				return fail(p, .Unsupported, p.pos, "a mapping inside a flow sequence is not supported")
+			}
 			append(&items, item)
 		}
 
@@ -994,6 +998,17 @@ parse_flow :: proc(p: ^Parser) -> ^Node {
 	}
 	p.end = mark(p)
 	return node
+}
+
+// Whether the : at the reader is on the line key starts on, as libyaml
+// requires of an implicit key, which skip_flow_space would otherwise let
+// a line break or a comment separate from its : ({"k"# c, then : v on the
+// next line); else fails at the :.
+@(private = "file")
+colon_on_key_line :: proc(p: ^Parser, key: ^Node) -> bool {
+	if p.line == key.line do return true
+	fail(p, .Syntax, p.pos, "a : after a key must be on the line the key starts on")
+	return false
 }
 
 @(private = "file")

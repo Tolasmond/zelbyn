@@ -240,6 +240,15 @@ YAML_ERROR_CASES := [?]Yaml_Error_Case {
 	{"a: \"\\q\"\n", .Syntax, 1, 5, `unknown escape \q`},
 	{"a:\n  b: \"1\"\n   c: 2\n", .Syntax, 3, 4, "unexpected indentation"},
 
+	// an implicit key in a flow collection and its : on two lines, which a
+	// comment or a line break between them cannot join, as in libyaml
+	{"meta: {\"id\"# comment\n : t}\nseq: []\n", .Syntax, 2, 2, "a : after a key must be on the line the key starts on"},
+	{"a: {\"id\" # c\n : t}\n", .Syntax, 2, 2, "a : after a key must be on the line the key starts on"},
+	{"a: {id\n : t}\n", .Syntax, 2, 2, "a : after a key must be on the line the key starts on"},
+	{"a: {a\n b: c}\n", .Syntax, 2, 3, "a : after a key must be on the line the key starts on"},
+	{"a: {\"x\n y\": t}\n", .Syntax, 2, 4, "a : after a key must be on the line the key starts on"},
+	{"a: [x\n : t]\n", .Syntax, 2, 2, "a : after a key must be on the line the key starts on"},
+
 	// escapes outside the Unicode scalar values, which wrapped when read
 	// as a rune
 	{"a: \"\\U00110000\"\n", .Syntax, 1, 5, `escape \U is not a valid character`},
