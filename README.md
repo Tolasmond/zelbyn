@@ -28,7 +28,7 @@ Decodes `<file>` with the Kaitai Struct schema and writes the decoded tree to st
 
 When the schema's top-level type has `params`, `--param name=value` gives the argument of each: an integer (decimal, or with `0x`, `0o` or `0b`), `true` or `false`, bytes in hex (`0a1b`), also for a user type, whose instance the decoder reads from them, or a `str`'s text as it is.
 
-`formats/gif.ksy` is `gif.ksy` from [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats), unchanged (CC0-1.0), and decodes the samples as the official Kaitai Struct runtime does (see [Kaitai runtime check](#kaitai-runtime-check)). `formats/gif89a.ksy` is a field-for-field port of the SQLite schema gnrcrdr used before `.ksy`, written with gnrcrdr's extensions, and gives the same output as that schema did. Options may also be written `--dump=json`. `--import-path` lists the directories that a schema's absolute imports (`/common/x`) are found in, separated by `:` (`;` on Windows), as the official compiler's `-I` does. `--help` (or `-h`) prints usage.
+`formats/gif.ksy` is `gif.ksy` from [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats), unchanged (CC0-1.0), and decodes the samples as the official Kaitai Struct runtime does (see [Kaitai runtime check](#kaitai-runtime-check)). Options may also be written `--dump=json`. `--import-path` lists the directories that a schema's absolute imports (`/common/x`) are found in, separated by `:` (`;` on Windows), as the official compiler's `-I` does. `--help` (or `-h`) prints usage.
 
 ### Output
 
