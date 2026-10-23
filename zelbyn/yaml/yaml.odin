@@ -4,13 +4,16 @@ import arn "../arena"
 import "core:fmt"
 import "core:mem"
 import "core:strings"
+import "core:unicode/utf8"
 
 // The subset of YAML that .ksy files use: block mappings and sequences, flow
 // sequences and mappings, plain, single- and double-quoted scalars, literal
 // (|) and folded (>) block scalars, and comments. Rejected as .Unsupported:
 // anchors, aliases, tags, merge keys (<<), complex keys (? and collections
-// as keys), directives and multi-document streams. Duplicate keys are
-// rejected as .Duplicate_Key.
+// as keys), directives, multi-document streams and UTF-16. Duplicate keys
+// are rejected as .Duplicate_Key. The source is UTF-8, of the characters
+// YAML allows, as libyaml requires: a raw control character other than tab
+// and line breaks is .Syntax, wherever it is.
 //
 // Scalars are not interpreted: 0x21, yes and ~ all reach the caller as
 // text, with the style they were written in.
@@ -98,6 +101,7 @@ parse_into :: proc(src: string, allocator: mem.Allocator) -> (root: ^Node, err: 
 	p := Parser{src = strings.clone(src, allocator), line = 1, allocator = allocator}
 
 	if strings.has_prefix(src, "\xef\xbb\xbf") do p.pos, p.line_start = 3, 3
+	if !check_characters(&p) do return nil, p.err
 
 	if skip_to_content(&p) {
 		if peek(&p) == '%' && column(&p) == 0 {
@@ -124,6 +128,48 @@ parse_into :: proc(src: string, allocator: mem.Allocator) -> (root: ^Node, err: 
 
 	if p.err.kind != .None do root = nil
 	return root, p.err
+}
+
+// Whether the source, from the reader's position, is UTF-8 of only the
+// characters YAML allows (c-printable: tab, line breaks, and printable
+// characters, not other controls, surrogates or U+FFFE and U+FFFF), as
+// libyaml requires before it scans; else fails at the first that is not.
+// The reader is left where it was. A NUL would also read as the end of
+// input (peek), and a byte that is not UTF-8 could not be counted in a
+// column.
+@(private = "file")
+check_characters :: proc(p: ^Parser) -> bool {
+	src := p.src
+	if strings.has_prefix(src, "\xff\xfe") || strings.has_prefix(src, "\xfe\xff") {
+		fail(p, .Unsupported, 0, "UTF-16 is not supported; only UTF-8")
+		return false
+	}
+	m := mark(p)
+	for m.pos < len(src) {
+		c := src[m.pos]
+		size := 1
+		switch {
+		case c >= 0x20 && c < 0x7f, c == '\t':
+		case c == '\n' || c == '\r':
+			if c == '\n' || m.pos + 1 >= len(src) || src[m.pos + 1] != '\n' do m.line, m.line_start = m.line + 1, m.pos + 1
+		case c < 0x80:
+			fail_at(p, .Syntax, m, "control character U+%04X is not allowed", c)
+			return false
+		case:
+			r: rune
+			r, size = utf8.decode_rune(src[m.pos:])
+			if r == utf8.RUNE_ERROR && size == 1 {
+				fail_at(p, .Syntax, m, "invalid UTF-8 (byte 0x%02x)", c)
+				return false
+			}
+			if (r < 0xa0 && r != 0x85) || r == 0xfffe || r == 0xffff {
+				fail_at(p, .Syntax, m, "character U+%04X is not allowed", r)
+				return false
+			}
+		}
+		m.pos += size
+	}
+	return true
 }
 
 @(private = "file")
@@ -743,14 +789,15 @@ write_escape :: proc(p: ^Parser, b: ^strings.Builder) -> bool {
 	}
 
 	if digits > 0 {
-		r: rune
+		// unsigned, so that eight digits cannot wrap below 0x10ffff
+		r: u32
 		for _ in 0 ..< digits {
 			d := peek(p)
-			v: rune
+			v: u32
 			switch d {
-			case '0' ..= '9': v = rune(d - '0')
-			case 'a' ..= 'f': v = rune(d - 'a' + 10)
-			case 'A' ..= 'F': v = rune(d - 'A' + 10)
+			case '0' ..= '9': v = u32(d - '0')
+			case 'a' ..= 'f': v = u32(d - 'a' + 10)
+			case 'A' ..= 'F': v = u32(d - 'A' + 10)
 			case:
 				fail(p, .Syntax, at, "\\%c needs %v hexadecimal digits", rune(c), digits)
 				return false
@@ -762,7 +809,7 @@ write_escape :: proc(p: ^Parser, b: ^strings.Builder) -> bool {
 			fail(p, .Syntax, at, "escape \\%c is not a valid character", rune(c))
 			return false
 		}
-		strings.write_rune(b, r)
+		strings.write_rune(b, rune(r))
 	}
 	return true
 }
