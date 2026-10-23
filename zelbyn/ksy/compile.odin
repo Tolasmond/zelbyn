@@ -2008,9 +2008,10 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 			seen[value] = e.key
 		} else {
 			key := compile_expr(c, e.key, "a case", scope, .Int) or_return
-			lit, is_literal := key.variant.(mdata.Int_Literal)
+			v, is_literal := int_literal(key)
 			if !is_literal do return fail(c, .Unsupported, e.key, "%s: a case must be an integer or an enum constant", id)
-			value = lit.value
+			if v < i128(min(int)) || v > i128(max(int)) do return fail(c, .Unsupported, e.key, "%s: case %s is not supported; only cases from -2^63 to 2^63 - 1", id, e.key.text)
+			value = int(v)
 			if prev, dup := seen[value]; dup do return fail(c, .Invalid, e.key, "%s: case %v is already given (line %v, column %v)", id, value, prev.line, prev.column)
 			seen[value] = e.key
 		}
@@ -2586,17 +2587,21 @@ compile_bound :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Typ
 	return b, true
 }
 
-// The value of e when it is an integer literal or a negated one; enum
-// constants are already literals.
+// The value of e when it is an integer literal or a negated one, such as
+// -1, or -9223372036854775808, the negation of a literal above max(int);
+// enum constants are already literals. As the parser reads -1 as the
+// negation of 1, valid bounds and switch-on cases take their integers here.
 @(private = "file")
 int_literal :: proc(e: ^mdata.Expr) -> (v: i128, ok: bool) {
 	#partial switch x in e.variant {
 	case mdata.Int_Literal:
 		return i128(x.value), true
+	case mdata.Big_Literal:
+		return i128(x.value), true
 	case mdata.Unary:
 		if x.op != .Neg do return
-		lit := x.operand.variant.(mdata.Int_Literal) or_return
-		return -i128(lit.value), true
+		v = int_literal(x.operand) or_return
+		return -v, true
 	}
 	return
 }
