@@ -1,9 +1,9 @@
 package tests
 
-import arn "../gnrcrdr/arena"
-import dat "../gnrcrdr/data"
-import expr "../gnrcrdr/expression"
-import mdat "../gnrcrdr/metadata"
+import arn "../zelbyn/arena"
+import dat "../zelbyn/data"
+import expr "../zelbyn/expression"
+import mdat "../zelbyn/metadata"
 import "core:fmt"
 import "core:mem"
 import "core:testing"

@@ -1,9 +1,9 @@
 package tests
 
-import fld "../gnrcrdr/field"
-import ksy "../gnrcrdr/ksy"
-import mdat "../gnrcrdr/metadata"
-import rdr "../gnrcrdr/reader"
+import fld "../zelbyn/field"
+import ksy "../zelbyn/ksy"
+import mdat "../zelbyn/metadata"
+import rdr "../zelbyn/reader"
 import "base:intrinsics"
 import "core:reflect"
 import "core:testing"

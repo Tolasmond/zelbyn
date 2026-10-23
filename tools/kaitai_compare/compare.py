@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compares gnrcrdr's decode of files with the official Kaitai Struct
+"""Compares zelbyn's decode of files with the official Kaitai Struct
 runtime's, value by value.
 
     python3 tools/kaitai_compare/compare.py [--import-path DIRS] [--offsets] [--param NAME=VALUE]... <schema.ksy> <file>...
@@ -7,33 +7,33 @@ runtime's, value by value.
 Run from the repository root, after `npm ci --prefix tools/kaitai_compare`.
 Needs Odin, Node.js and PyYAML. The schema is compiled with the official
 compiler to JavaScript and run with the JavaScript runtime (decode.js), and
-with gnrcrdr's --dump json. Both are brought to one shape: every field an
+with zelbyn's --dump json. Both are brought to one shape: every field an
 array of its values, set instances objects, byte arrays hex. Parse
 instances (instances with pos) are compared as fields. A field with no
 values (not read because of if or switch-on, or an empty repeat) is left
-out on both sides, as are value instances and params, which gnrcrdr does
+out on both sides, as are value instances and params, which zelbyn does
 not dump. Field names are compared as the generated code spells them,
-from their ids: gnrcrdr's names, which are the -orig-id where there is
+from their ids: zelbyn's names, which are the -orig-id where there is
 one, are mapped back to the id. Integers beyond 2^53, which the
 JavaScript runtime holds as doubles, are compared as doubles. A float is
 compared as a number, as the runtime writes one with an integer value as
-an integer, and gnrcrdr writes an f4 with the shortest digits that give
+an integer, and zelbyn writes an f4 with the shortest digits that give
 it, where the runtime writes the double it widens to: a float of
-gnrcrdr's is also equal to the runtime's when it rounds to it as an f4.
+zelbyn's is also equal to the runtime's when it rounds to it as an f4.
 Imports are read relative to the importing schema, or for an absolute one,
 from the directories of --import-path (separated as in PATH), and given to
 both. Each --param is an argument for a param of the schema's top-level
-type, as gnrcrdr's --param takes it, given to both. Exits 1 if any file
+type, as zelbyn's --param takes it, given to both. Exits 1 if any file
 differs, or fails to decode on either side.
 
 With --offsets, the offsets of the values are compared instead: those of
-gnrcrdr's text dump with --offsets, and the starts that the runtime
+zelbyn's text dump with --offsets, and the starts that the runtime
 records in debug mode, which the Kaitai Web IDE shows, for every value
 that is not a set instance, by its path.
 
 The JavaScript runtime (0.11.0) reads a terminator with include: true
 wrongly: with consume, it moves one byte past the terminator, and
-without it, past the terminator. The C++ runtime, and gnrcrdr, consume
+without it, past the terminator. The C++ runtime, and zelbyn, consume
 the terminator only with consume, so a schema with include: true can
 differ after it.
 """
@@ -85,12 +85,12 @@ def orig_ids(ksy):
 
 
 def name(dumped):
-    """A name in gnrcrdr's dump as the generated code spells it."""
+    """A name in zelbyn's dump as the generated code spells it."""
     return camel(ORIG_IDS.get(dumped, dumped))
 
 
 def ours(value):
-    """gnrcrdr's JSON dump of a set instance in decode.js's shape."""
+    """zelbyn's JSON dump of a set instance in decode.js's shape."""
     if isinstance(value, dict):
         return {name(k): [ours(x) for x in v] for k, v in value.items() if v}
     return value
@@ -135,7 +135,7 @@ def as_f4(x):
 
 
 def root_args(ksy, params):
-    """The arguments that params, each name=value as gnrcrdr's --param takes
+    """The arguments that params, each name=value as zelbyn's --param takes
     it, give the params of the top-level type of ksy, in their order, as
     decode.js takes them: integers, booleans, strings, byte arrays as lists
     of integers, and for a user type, its name and the bytes it is read
@@ -181,7 +181,7 @@ def first_difference(a, b, path):
 
 
 def dump_offsets(text):
-    """The offsets in gnrcrdr's text dump with --offsets, by path, with
+    """The offsets in zelbyn's text dump with --offsets, by path, with
     names as the generated code spells them."""
     out = {}
     for line in text.splitlines():
@@ -240,7 +240,7 @@ def main():
                              check=True, capture_output=True, text=True).stdout
         reference = [json.loads(line) for line in out.splitlines()]
 
-        tool = os.path.join(tmp, 'gnrcrdr')
+        tool = os.path.join(tmp, 'zelbyn')
         subprocess.run(['odin', 'build', '.', '-out:' + tool], check=True)
         mine = []
         for path in files:
@@ -259,7 +259,7 @@ def main():
     for path, a, b in zip(files, mine, reference):
         if 'error' in a or 'error' in b:
             failed += 1
-            print('FAILED: %s\n  gnrcrdr: %s\n  kaitai:  %s' % (path, a.get('error', 'ok'), b.get('error', 'ok')))
+            print('FAILED: %s\n  zelbyn: %s\n  kaitai:  %s' % (path, a.get('error', 'ok'), b.get('error', 'ok')))
             continue
         if args.offsets:
             offsets_difference.values = 0
@@ -271,7 +271,7 @@ def main():
             values = '%d values' % first_difference.values
         if d:
             failed += 1
-            print('DIFFERS: %s at %s\n  gnrcrdr: %s\n  kaitai:  %s' % (path, d[0], json.dumps(d[1])[:200], json.dumps(d[2])[:200]))
+            print('DIFFERS: %s at %s\n  zelbyn: %s\n  kaitai:  %s' % (path, d[0], json.dumps(d[1])[:200], json.dumps(d[2])[:200]))
         else:
             print('agree: %s (%s)' % (path, values))
 

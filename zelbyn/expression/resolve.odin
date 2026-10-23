@@ -550,7 +550,7 @@ value_type :: proc(r: ^Resolver, e: ^mdata.Expr, field: ^mdata.Node, name: strin
 // The type of one value of field, a switch-on: the type of the values of
 // every case, and with a length and no _ case, of the bytes that an
 // element no case chooses has. Cases of other types, as in Kaitai, give a
-// value of no type that expressions can use but as a whole, which gnrcrdr
+// value of no type that expressions can use but as a whole, which zelbyn
 // does not support. Nor does it support cases of user types, which in
 // Kaitai have fields only when they are all the same type.
 @(private = "file")

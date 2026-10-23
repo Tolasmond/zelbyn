@@ -10,7 +10,7 @@ official compiler pinned in tools/kaitai_compare/package.json generates its
 C++ parser, and that parser, the runtime and oneshot.cpp are compiled with
 $CXX (default g++) at -O2. On Linux, libstdc++ is linked statically, so
 that starting the process does not load it. Strings are kept as bytes
-(KS_STR_ENCODING_NONE), as gnrcrdr keeps them. Everything goes into
+(KS_STR_ENCODING_NONE), as zelbyn keeps them. Everything goes into
 tools/bench/cpp/build/, which is not committed; prints the binary's path.
 """
 

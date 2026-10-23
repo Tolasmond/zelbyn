@@ -10,11 +10,11 @@ import "core:os"
 import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
-import dmp "gnrcrdr/dump"
-import fld "gnrcrdr/field"
-import ksy "gnrcrdr/ksy"
-import mdat "gnrcrdr/metadata"
-import rdr "gnrcrdr/reader"
+import dmp "zelbyn/dump"
+import fld "zelbyn/field"
+import ksy "zelbyn/ksy"
+import mdat "zelbyn/metadata"
+import rdr "zelbyn/reader"
 
 Options :: struct {
 	schema:      string `args:"pos=0,required" usage:"Schema: a Kaitai Struct .ksy file."`,

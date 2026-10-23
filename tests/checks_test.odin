@@ -1,10 +1,10 @@
 package tests
 
-import arn "../gnrcrdr/arena"
-import dat "../gnrcrdr/data"
-import dmp "../gnrcrdr/dump"
-import fld "../gnrcrdr/field"
-import mdat "../gnrcrdr/metadata"
+import arn "../zelbyn/arena"
+import dat "../zelbyn/data"
+import dmp "../zelbyn/dump"
+import fld "../zelbyn/field"
+import mdat "../zelbyn/metadata"
 import "core:slice"
 import "core:strings"
 import "core:testing"

@@ -2,7 +2,7 @@
 // with that directory as the import path, and prints one tab-separated line
 // for each, in path order: OK and its path, or ERR, its path, the error's
 // kind, where it is (file:line:column, the file relative to the
-// directory) and its message. Not part of gnrcrdr's build: check.py builds
+// directory) and its message. Not part of zelbyn's build: check.py builds
 // and runs it.
 package ksy_corpus
 
@@ -13,8 +13,8 @@ import "core:os"
 import "core:path/filepath"
 import "core:slice"
 import "core:strings"
-import ksy "../../gnrcrdr/ksy"
-import mdata "../../gnrcrdr/metadata"
+import ksy "../../zelbyn/ksy"
+import mdata "../../zelbyn/metadata"
 
 main :: proc() {
 	if len(os.args) != 2 {

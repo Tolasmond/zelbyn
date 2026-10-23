@@ -1,6 +1,6 @@
 package tests
 
-import dat "../gnrcrdr/data"
+import dat "../zelbyn/data"
 import "core:encoding/endian"
 import "core:slice"
 import "core:testing"

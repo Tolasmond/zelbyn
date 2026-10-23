@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Compiles every .ksy file in a clone of kaitai_struct_formats with
-gnrcrdr's compiler, and compares the result with the one recorded in
+zelbyn's compiler, and compares the result with the one recorded in
 expected.txt, so that the supported subset is measured and changes to it
 are seen.
 

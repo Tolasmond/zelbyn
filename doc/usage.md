@@ -1,30 +1,30 @@
-# Using gnrcrdr
+# Using zelbyn
 
-How to build and run gnrcrdr, what it writes, and the subset of Kaitai Struct it supports. Commands are run from the repository root.
+How to build and run zelbyn, what it writes, and the subset of Kaitai Struct it supports. Commands are run from the repository root.
 
 ## Building
 
 Requires Odin `dev-2026-10` or newer. Build and run from the repository root:
 
 ```
-odin build . -out:build/gnrcrdr
+odin build . -out:build/zelbyn
 ```
 
-This produces `build/gnrcrdr`, or `build\gnrcrdr.exe` on Windows; `build/` holds only build output, which git ignores. There are no other dependencies.
+This produces `build/zelbyn`, or `build\zelbyn.exe` on Windows; `build/` holds only build output, which git ignores. There are no other dependencies.
 
 ## Running
 
 ```
-gnrcrdr <schema.ksy> <file> [--dump tree|json] [--offsets] [--import-path dirs] [--param name=value]...
+zelbyn <schema.ksy> <file> [--dump tree|json] [--offsets] [--import-path dirs] [--param name=value]...
 ```
 
 Decodes `<file>` with the Kaitai Struct schema and writes the decoded tree to stdout. For example:
 
 ```
-build/gnrcrdr formats/gif.ksy data/855.gif
-build/gnrcrdr formats/gif.ksy data/855.gif --dump json
-build/gnrcrdr formats/gif89a.ksy data/855.gif
-build/gnrcrdr ../kaitai_struct_formats/common/bcd.ksy number.bin --param num_digits=6 --param bits_per_digit=4 --param is_le=false
+build/zelbyn formats/gif.ksy data/855.gif
+build/zelbyn formats/gif.ksy data/855.gif --dump json
+build/zelbyn formats/gif89a.ksy data/855.gif
+build/zelbyn ../kaitai_struct_formats/common/bcd.ksy number.bin --param num_digits=6 --param bits_per_digit=4 --param is_le=false
 ```
 
 When the schema's top-level type has `params`, `--param name=value` gives the argument of each: an integer (decimal, or with `0x`, `0o` or `0b`), `true` or `false`, bytes in hex (`0a1b`), also for a user type, whose instance the decoder reads from them, or a `str`'s text as it is.
@@ -101,12 +101,12 @@ error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]
 
 ## Schemas
 
-`.ksy` schemas are read with gnrcrdr's own YAML parser, which accepts the YAML that `.ksy` files use and rejects anchors, aliases, tags, merge keys, complex keys, multi-document streams and duplicate keys. The compiler supports this subset of Kaitai Struct, and rejects everything else, naming the key and its location:
+`.ksy` schemas are read with zelbyn's own YAML parser, which accepts the YAML that `.ksy` files use and rejects anchors, aliases, tags, merge keys, complex keys, multi-document streams and duplicate keys. The compiler supports this subset of Kaitai Struct, and rejects everything else, naming the key and its location:
 
 | Area | Supported |
 |---|---|
 | Top level | `meta`, `params` (in an imported schema), `seq`, `types`, `instances`, `enums` (each value a name, or a mapping of `id`, `doc` and `doc-ref`), `doc`, `doc-ref`, `to-string`; an entry of `types` has the same keys, with `params` anywhere |
-| `meta` | `id`, `endian` (`le`, `be`, or in a type, a `switch-on` with `cases` of `le` and `be`), `bit-endian`, `encoding`, `ks-version` (0.11 or older, the Kaitai version gnrcrdr follows), `imports`; `title`, `application`, `file-extension`, `xref`, `license`, `tags` (ignored). Also in a type, without `imports`, where its `id` is ignored |
+| `meta` | `id`, `endian` (`le`, `be`, or in a type, a `switch-on` with `cases` of `le` and `be`), `bit-endian`, `encoding`, `ks-version` (0.11 or older, the Kaitai version zelbyn follows), `imports`; `title`, `application`, `file-extension`, `xref`, `license`, `tags` (ignored). Also in a type, without `imports`, where its `id` is ignored |
 | Attributes | `id` (an attribute without one is named `_unnamed` and its index in `seq`, as in Kaitai, and no expression can refer to it), `type`, `size`, `size-eos`, `terminator` (with `consume`, `include`, `eos-error`), `pad-right`, `process: zlib` (on a byte array, or a user type or `switch-on` of user types, with a `size`, `size-eos` or `terminator`), `contents` (with a `size`, which is ignored, as the official compiler ignores it), `parent` (on a user type: `_parent`, `_parent._parent` and so on, which gives its instances that `_parent` instead of the instance each is read in), `if`, `enum`, `valid` (a value, or `eq`, `min`/`max`, `any-of`, `in-enum`, `expr`; a value is a literal, a list of bytes such as `[0xfe, 0xff]` for a blob, or an expression, in which `_` is the value checked; on a user type, only `expr`), `repeat` (`expr` with `repeat-expr`, `eos`, `until` with `repeat-until`), `encoding`, `doc`, `doc-ref` |
 | Types | `u1`–`u8`, `s1`–`s8`, `f4`, `f8` (with `le`/`be` or `meta: endian`), `b1`–`b64` (with `le`/`be` or `meta: bit-endian`, else big-endian; `b1` is a boolean, unless it has an `enum`), `str` with `size`, `size-eos` or `terminator`, and `strz` (NULs included within a `size`; for the encodings, see below), byte arrays, user types (also inside themselves, and the schema's own top-level type, by its `meta` `id`; by path, `a::b`; with `size`, `size-eos` or `terminator`, read from a substream of those bytes; with arguments, `t(a, b)`, when they have `params`), `switch-on` over an integer, a boolean or a string, with `cases` of any of these types, including the `_` default case, also with `size`, `size-eos` or `terminator`, each case of a user type read from a substream |
 | Params | `id`, `type` (an integer type, `bool`, `bytes`, `str` or a user type), `enum` (on an integer), `doc`, `doc-ref` |
@@ -117,7 +117,7 @@ With a `size`, the bytes are read, `pad-right` is removed from their end, and th
 
 A bit type reads on from the bits left over in its stream, in its bit order, and then from as many more bytes as it needs. Bits are left over until something reads them: as in Kaitai, an attribute that follows a bit type, and is not one, starts at the next byte, but an attribute after a user type does not. So the bit type after a user type that ends with bits left over reads those bits, as Kaitai's runtimes do. `_io.eof` is true once every byte and every bit left over is read. A substream starts at its first byte, and so does a parse instance, which in Kaitai's runtimes reads on from whatever bits are left over when it is first used.
 
-A parse instance is read at `pos` in the stream of its type, which does not move, the first time an expression refers to it, as in Kaitai. Any that no expression has read are read once the whole input is, as the official runtime reads them when they are first used after the parse, so they can use fields read after them, such as the next element of their array. Instances that no expression refers to are compiled once every type is, as Kaitai compiles every instance against the whole schema, so their expressions can use any field of the instances enclosing them: one after the field they belong to (`_parent.body.len`), or a field of a parse instance they are inside (`_root.bg.super_block`); one that an expression refers to is compiled there, and uses the fields compiled before it. Every parse instance is in the decoded tree, and an error in one fails the decode, even if nothing uses it. A `pos` outside the stream is `Offset_Out_Of_Range`. An instance without `pos` or `value` is read where its stream is, as in Kaitai: when an expression first refers to it, or else where its instance ended. Kaitai's runtimes also move the stream past it, so what it reads depends on when it is first used; gnrcrdr supports only one that reads nothing, whose type has a fixed size of 0 (a type with no fields, such as one of only instances, or `size: 0`), or a `switch-on` whose cases' types all do, whatever its `repeat`.
+A parse instance is read at `pos` in the stream of its type, which does not move, the first time an expression refers to it, as in Kaitai. Any that no expression has read are read once the whole input is, as the official runtime reads them when they are first used after the parse, so they can use fields read after them, such as the next element of their array. Instances that no expression refers to are compiled once every type is, as Kaitai compiles every instance against the whole schema, so their expressions can use any field of the instances enclosing them: one after the field they belong to (`_parent.body.len`), or a field of a parse instance they are inside (`_root.bg.super_block`); one that an expression refers to is compiled there, and uses the fields compiled before it. Every parse instance is in the decoded tree, and an error in one fails the decode, even if nothing uses it. A `pos` outside the stream is `Offset_Out_Of_Range`. An instance without `pos` or `value` is read where its stream is, as in Kaitai: when an expression first refers to it, or else where its instance ended. Kaitai's runtimes also move the stream past it, so what it reads depends on when it is first used; zelbyn supports only one that reads nothing, whose type has a fixed size of 0 (a type with no fields, such as one of only instances, or `size: 0`), or a `switch-on` whose cases' types all do, whatever its `repeat`.
 
 A type can contain itself, directly or through other types, through a `switch-on` case or a parse instance, and schemas can import each other. Its fields inside it are read as the type's own fields are. Each instance is read from the input, and so nests only as deeply as the input does: set instances nest at most 256 deep, and a deeper one stops the decode with `Too_Deep`, so that no input can exhaust the stack. Parse instances read from expressions take more stack, and can stop it at a depth that depends on the build. As in Kaitai, `_parent` in a type that contains itself is a different type for each of its instances, so neither the type nor the types in it can refer to the members of the sets that enclose it, other than through `_root` (they can use `_parent._io`), unless a `parent` gives its fields inside it the same `_parent` as its own, as `elf.ksy`'s `next: {type: verdef_section_entry, parent: _parent}` does. In an imported schema, `_root` is the outermost instance of its top-level type, at any depth; a value instance in such a type cannot use it, as it can be evaluated once that instance is no longer decoded. A value instance or parse instance cannot refer to itself through a field of its type, `child.total` in `total`.
 
@@ -137,9 +137,9 @@ A field read once whose `switch-on` matches no case, without a `_` case, is not 
 
 Not supported yet: other encodings (such as `UTF-16` without `LE` or `BE`, `ISO-8859-2` or `Shift_JIS`), instances without `pos` or `value` that read bytes, params of other types (`struct`, `io`, `any`), a `parent` other than `_parent`, `_parent._parent` and so on (such as `_root`), an `endian` that is a `switch-on` on the top-level type of the schema decoded, or in a type that contains itself, a `bit-endian` that is a `switch-on`, a `switch-on` field in an expression when its cases are user types or have values of different types, `imports` in a type's `meta`, a cast to a user type of anything but a `switch-on` field read once, or to a type other than an integer or a user type, integer literals above 2^64 - 1 and float literals beyond a 64-bit float, `%` of a float, `?:` of arrays of sets or of arrays, other methods (such as `.to_i(radix)` and `.reverse`), `_sizeof` of a repeated field, and `valid` on a float or with `min` or `max` on a type other than an integer.
 
-`to-string`, which defines how Kaitai's tools show a type's instances, is parsed as an expression and otherwise ignored, as nothing gnrcrdr writes shows it: as in the official compiler, its names are not resolved.
+`to-string`, which defines how Kaitai's tools show a type's instances, is parsed as an expression and otherwise ignored, as nothing zelbyn writes shows it: as in the official compiler, its names are not resolved.
 
-Keys starting with `-` are extensions. The official Kaitai tools ignore them, and gnrcrdr ignores the ones it does not know, as well as `-orig-id` on a type. gnrcrdr's own extensions let `formats/gif89a.ksy` give the same dumps as the SQLite schema it was ported from:
+Keys starting with `-` are extensions. The official Kaitai tools ignore them, and zelbyn ignores the ones it does not know, as well as `-orig-id` on a type. zelbyn's own extensions let `formats/gif89a.ksy` give the same dumps as the SQLite schema it was ported from:
 
 | Extension | Meaning | In standard Kaitai |
 |---|---|---|

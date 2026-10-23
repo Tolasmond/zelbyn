@@ -1,7 +1,7 @@
 package tests
 
-import ksy "../gnrcrdr/ksy"
-import mdat "../gnrcrdr/metadata"
+import ksy "../zelbyn/ksy"
+import mdat "../zelbyn/metadata"
 import "core:os"
 import "core:testing"
 import "core:time"

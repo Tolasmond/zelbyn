@@ -1,10 +1,10 @@
 package tests
 
-import arn "../gnrcrdr/arena"
-import dat "../gnrcrdr/data"
-import fld "../gnrcrdr/field"
-import ksy "../gnrcrdr/ksy"
-import mdat "../gnrcrdr/metadata"
+import arn "../zelbyn/arena"
+import dat "../zelbyn/data"
+import fld "../zelbyn/field"
+import ksy "../zelbyn/ksy"
+import mdat "../zelbyn/metadata"
 import "core:log"
 import "core:mem"
 import "core:os"
@@ -233,7 +233,7 @@ value_tree_from_read_outlives_file :: proc(t: ^testing.T) {
 	}
 
 	data := comment_gif()
-	f, create_err := os.create_temp_file("", "gnrcrdr_test_*.gif")
+	f, create_err := os.create_temp_file("", "zelbyn_test_*.gif")
 	if !testing.expectf(t, create_err == nil, "creating a temporary file: %v", create_err) {
 		delete(data)
 		mdat.destroy_file_format(&ff)

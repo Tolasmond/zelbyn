@@ -17,7 +17,7 @@ import "core:strings"
 
 // The .ksy front end: a subset of Kaitai Struct, compiled into the plan.
 // Anything outside the subset is an error naming its key and location; keys
-// starting with - that gnrcrdr does not know are ignored, as the official
+// starting with - that zelbyn does not know are ignored, as the official
 // tools ignore them.
 //
 // Supported:
@@ -355,7 +355,7 @@ expect_scalar :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (text: string
 
 // The keys a mapping may have. Kaitai keys outside the subset are
 // Unsupported, other keys Invalid. Keys starting with - are allowed when in
-// extensions; any other - key is ignored unless gnrcrdr uses it elsewhere.
+// extensions; any other - key is ignored unless zelbyn uses it elsewhere.
 @(private = "file")
 Keys :: struct {
 	what:        string, // for errors: "meta", or a format of name, "attribute %s", formatted only for an error
@@ -379,7 +379,7 @@ check_keys :: proc(c: ^Compiler, m: ^yml.Node, keys: Keys) -> bool {
 		case slice.contains(EXTENSIONS, k):
 			return fail(c, .Invalid, e.key, "%s: the extension %s does not apply here", keys_what(keys), k)
 		case strings.has_prefix(k, "-"):
-			// an extension gnrcrdr does not know
+			// an extension zelbyn does not know
 		case:
 			return fail(c, .Invalid, e.key, "%s: unknown key %q", keys_what(keys), k)
 		}
@@ -722,7 +722,7 @@ encoding_named :: proc(name: string) -> (e: mdata.Encoding, ok: bool) {
 	return
 }
 
-// The Kaitai Struct version gnrcrdr follows: that of the official compiler
+// The Kaitai Struct version zelbyn follows: that of the official compiler
 // tools/kaitai_compare checks it against.
 @(private = "file")
 KS_VERSION :: [3]int{0, 11, 0}
@@ -753,7 +753,7 @@ check_ks_version :: proc(c: ^Compiler, n: ^yml.Node) -> bool {
 	follows := KS_VERSION
 	for v, i in version {
 		if v < follows[i] do break
-		if v > follows[i] do return fail(c, .Unsupported, n, "ks-version %s is newer than %v.%v, the Kaitai version gnrcrdr follows", text, follows[0], follows[1])
+		if v > follows[i] do return fail(c, .Unsupported, n, "ks-version %s is newer than %v.%v, the Kaitai version zelbyn follows", text, follows[0], follows[1])
 	}
 	return true
 }
@@ -859,7 +859,7 @@ type_meta :: proc(c: ^Compiler, name: string, meta: ^yml.Node, inherited: Meta) 
 }
 
 // to-string, which in Kaitai defines how a type's instances are shown, and
-// which nothing gnrcrdr writes shows: it is parsed, so that a schema that
+// which nothing zelbyn writes shows: it is parsed, so that a schema that
 // is not valid Kaitai, or is outside the subset, is rejected, but not
 // resolved, as the official compiler does not resolve its names either.
 @(private = "file")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compares gnrcrdr's YAML parser with libyaml on every .ksy file under a
+"""Compares zelbyn's YAML parser with libyaml on every .ksy file under a
 directory, normally a clone of
 https://github.com/kaitai-io/kaitai_struct_formats.
 
@@ -8,7 +8,7 @@ https://github.com/kaitai-io/kaitai_struct_formats.
 Run from the repository root. Needs Odin and PyYAML built with libyaml
 (yaml.CParser). Every file must either give the same node tree from both
 parsers (kinds, scalar styles and text, and every node's line and column),
-or be rejected by gnrcrdr as outside the subset (Unsupported or
+or be rejected by zelbyn as outside the subset (Unsupported or
 Duplicate_Key), or be rejected by both. Exits 1 if any file differs.
 """
 
@@ -55,7 +55,7 @@ def libyaml_events(path):
     return lines
 
 
-def gnrcrdr_events(tool, paths):
+def zelbyn_events(tool, paths):
     out = subprocess.run([tool] + paths, check=True, capture_output=True, text=True).stdout
     events, current = {}, None
     for line in out.splitlines():
@@ -78,7 +78,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         tool = os.path.join(tmp, 'yaml_corpus')
         subprocess.run(['odin', 'build', 'tools/yaml_corpus', '-out:' + tool], check=True)
-        mine = gnrcrdr_events(tool, paths)
+        mine = zelbyn_events(tool, paths)
 
     agree, rejected, both_failed, differ = 0, [], [], []
     for path in paths:
@@ -97,12 +97,12 @@ def main():
     for path, ours in rejected:
         print('rejected (outside the subset): %s: %s' % (path, ours[7:]))
     for path, ours, theirs in both_failed:
-        print('rejected by both: %s\n  gnrcrdr: %s\n  libyaml: %s' % (path, ours[7:], theirs[6:]))
+        print('rejected by both: %s\n  zelbyn: %s\n  libyaml: %s' % (path, ours[7:], theirs[6:]))
     for path, ours, theirs in differ:
         i = 0
         while i < min(len(ours), len(theirs)) and ours[i] == theirs[i]:
             i += 1
-        print('DIFFERS: %s, event %d\n  gnrcrdr: %s\n  libyaml: %s' % (
+        print('DIFFERS: %s, event %d\n  zelbyn: %s\n  libyaml: %s' % (
             path, i + 1, ours[i] if i < len(ours) else '(end)', theirs[i] if i < len(theirs) else '(end)'))
 
     print('%d files: %d agree, %d rejected as outside the subset, %d rejected by both, %d differ' % (

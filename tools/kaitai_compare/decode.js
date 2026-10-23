@@ -10,7 +10,7 @@
 // byte arrays as arrays of integers, and the argument of a param of a user
 // type as {"type": its name, "bytes": an array of integers}, from which it
 // is made. For each file, prints one
-// line of JSON in the shape of gnrcrdr's --dump json: a set instance is an
+// line of JSON in the shape of zelbyn's --dump json: a set instance is an
 // object of its seq fields in read order, then its parse instances
 // (instances with pos), each an array of its values (one for a field read
 // once), with byte arrays as lowercase hex. The runtime reads a parse
@@ -22,13 +22,13 @@
 // decode prints {"error": "..."}.
 //
 // With --offsets, the schema is compiled in debug mode, and each line maps
-// the path of every value that is not a set instance, as gnrcrdr's text
+// the path of every value that is not a set instance, as zelbyn's text
 // dump writes it (root[0].field[i]...), to the offset in the file that
 // the runtime's debug record gives it: where the read of the value
 // started. The runtime copies the bytes of a substream whose pad-right it
 // removes or that it cuts at a terminator, and decompresses those of one
 // with process: zlib; a debug record in such a stream gives offsets from
-// its start, which is taken to be where its field starts, as gnrcrdr does.
+// its start, which is taken to be where its field starts, as zelbyn does.
 
 "use strict";
 

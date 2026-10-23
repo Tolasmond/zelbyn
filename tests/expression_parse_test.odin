@@ -1,8 +1,8 @@
 package tests
 
-import arn "../gnrcrdr/arena"
-import expr "../gnrcrdr/expression"
-import mdat "../gnrcrdr/metadata"
+import arn "../zelbyn/arena"
+import expr "../zelbyn/expression"
+import mdat "../zelbyn/metadata"
 import "core:mem/virtual"
 import "core:strings"
 import "core:testing"

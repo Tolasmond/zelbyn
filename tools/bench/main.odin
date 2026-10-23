@@ -1,4 +1,4 @@
-// One cold measurement of gnrcrdr: in a fresh process, compiles a schema
+// One cold measurement of zelbyn: in a fresh process, compiles a schema
 // from its file, reads the input, decodes it and writes the JSON dump to
 // memory, once each, and prints how long each phase took. bench.py builds it
 // and runs it in a new process for every measurement; run that rather than
@@ -15,12 +15,12 @@
 // so that bench.py can time starting a process.
 package bench
 
-import arn "../../gnrcrdr/arena"
-import dmp "../../gnrcrdr/dump"
-import fld "../../gnrcrdr/field"
-import ksy "../../gnrcrdr/ksy"
-import mdat "../../gnrcrdr/metadata"
-import rdr "../../gnrcrdr/reader"
+import arn "../../zelbyn/arena"
+import dmp "../../zelbyn/dump"
+import fld "../../zelbyn/field"
+import ksy "../../zelbyn/ksy"
+import mdat "../../zelbyn/metadata"
+import rdr "../../zelbyn/reader"
 import "core:fmt"
 import "core:os"
 import "core:strings"

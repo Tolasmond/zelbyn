@@ -1,10 +1,10 @@
 package tests
 
-import dmp "../gnrcrdr/dump"
-import fld "../gnrcrdr/field"
-import ksy "../gnrcrdr/ksy"
-import mdat "../gnrcrdr/metadata"
-import rdr "../gnrcrdr/reader"
+import dmp "../zelbyn/dump"
+import fld "../zelbyn/field"
+import ksy "../zelbyn/ksy"
+import mdat "../zelbyn/metadata"
+import rdr "../zelbyn/reader"
 import "core:fmt"
 import "core:slice"
 import "core:strings"
@@ -69,7 +69,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\n  endian:\n    switch-on: x\n    cases:\n      1: le\n", .Unsupported, 4, 5, "endian: switch-on is not supported on the top-level type of the schema compiled"},
 	{"meta:\n  id: t\n  encoding: Shift_JIS\n", .Unsupported, 3, 13, `encoding "Shift_JIS" is not supported; only ASCII, UTF-8, UTF-16LE, UTF-16BE, UTF-32LE, UTF-32BE, ISO-8859-1, windows-1251, windows-1252 and IBM437 are`},
 	{"meta:\n  id: t\n  encoding: UTF-16\n", .Unsupported, 3, 13, `encoding "UTF-16" is not supported`},
-	{"meta:\n  id: t\n  ks-version: 0.12\n", .Unsupported, 3, 15, "ks-version 0.12 is newer than 0.11, the Kaitai version gnrcrdr follows"},
+	{"meta:\n  id: t\n  ks-version: 0.12\n", .Unsupported, 3, 15, "ks-version 0.12 is newer than 0.11, the Kaitai version zelbyn follows"},
 	{"meta:\n  id: t\n  ks-version: 0.11.1\n", .Unsupported, 3, 15, "ks-version 0.11.1 is newer than 0.11"},
 	{"meta:\n  id: t\n  ks-version: 1\n", .Unsupported, 3, 15, "ks-version 1 is newer than 0.11"},
 	{"meta:\n  id: t\n  ks-version: 0.9.\n", .Invalid, 3, 15, `ks-version "0.9." is not a version`},
@@ -493,7 +493,7 @@ t[0].z[0] = -2
 	expect_dump(t, "any-of", ksy_dump(t, checks, {'G', 'I', 9, 4, 0xfe, 0xff}), "error: Not_Any_Of at 3 in t[0].y[0]")
 	expect_dump(t, "eq", ksy_dump(t, checks, {'G', 'I', 9, 5, 0xfd, 0xff}), "error: Not_Equal at 4 in t[0].z[0]")
 
-	// - keys gnrcrdr does not know are ignored, as the official tools do
+	// - keys zelbyn does not know are ignored, as the official tools do
 	expect_dump(t, "unknown extension", ksy_dump(t, HEAD + "-webide-representation: x\nseq:\n  - id: a\n    type: u1\n    -note: y\n", {7}), "t[0].a[0] = 7\n")
 
 	// meta keys that affect no decoding are ignored, and ks-version is no
@@ -2270,7 +2270,7 @@ ksy_too_deep :: proc(t: ^testing.T) {
 	testing.expect(t, strings.has_prefix(ksy_dump(t, through_instances, ones), "error: Too_Deep at "), "parse instances read from expressions")
 }
 
-// Encodings: each one gnrcrdr decodes, by names in other cases and by
+// Encodings: each one zelbyn decodes, by names in other cases and by
 // aliases, as the official compiler finds them, from meta and from an
 // attribute. A UTF-16 or UTF-32 sequence that is not a character is
 // U+FFFD (odd, wide), and a byte-order mark is kept (bom). The bytes that

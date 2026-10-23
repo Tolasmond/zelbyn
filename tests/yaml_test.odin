@@ -1,6 +1,6 @@
 package tests
 
-import yml "../gnrcrdr/yaml"
+import yml "../zelbyn/yaml"
 import "core:fmt"
 import "core:strings"
 import "core:testing"

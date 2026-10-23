@@ -1,20 +1,20 @@
-# gnrcrdr
+# zelbyn
 
-gnrcrdr is a data-driven binary file reader written in [Odin](https://odin-lang.org/). It decodes a file with a [Kaitai Struct](https://kaitai.io/) `.ksy` schema and writes the decoded tree to stdout, as a text dump or as JSON, optionally with the offset of every value in the file.
+zelbyn is a data-driven binary file reader written in [Odin](https://odin-lang.org/). It decodes a file with a [Kaitai Struct](https://kaitai.io/) `.ksy` schema and writes the decoded tree to stdout, as a text dump or as JSON, optionally with the offset of every value in the file.
 
-The official Kaitai Struct compiler generates a parser for each format, in many languages but not Odin. gnrcrdr reads the schema at run time instead and compiles it into a checked plan, so a new format needs no generated code and no rebuild, and a schema error names its file, line and column.
+The official Kaitai Struct compiler generates a parser for each format, in many languages but not Odin. zelbyn reads the schema at run time instead and compiles it into a checked plan, so a new format needs no generated code and no rebuild, and a schema error names its file, line and column.
 
 ## Quick start
 
 With Odin `dev-2026-10` or newer:
 
 ```
-odin build . -out:build/gnrcrdr
-build/gnrcrdr formats/gif.ksy data/855.gif
-build/gnrcrdr formats/gif.ksy data/855.gif --dump json
+odin build . -out:build/zelbyn
+build/zelbyn formats/gif.ksy data/855.gif
+build/zelbyn formats/gif.ksy data/855.gif --dump json
 ```
 
-On Windows the build is `build\gnrcrdr.exe`. It has no other dependencies.
+On Windows the build is `build\zelbyn.exe`. It has no other dependencies.
 
 ## What a schema can use
 
@@ -32,7 +32,7 @@ Not yet: other processes (`xor`, `rotate`, custom ones), other encodings (such a
 
 ## How it is checked
 
-All 190 schemas in [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) compile. Decodes are compared with the official runtime's (0.11), value for value and offset for offset, on the GIF samples in `data/` and on the samples of all 18 formats in [kaitai_struct_samples](https://github.com/kaitai-io/kaitai_struct_samples). Two samples fail: a malformed one, in both decoders, and one whose schema tests a field it never read, which the JavaScript runtime takes as 0 and gnrcrdr, like the Python and Java runtimes, rejects. Development is on Linux; the Windows build is untested.
+All 190 schemas in [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) compile. Decodes are compared with the official runtime's (0.11), value for value and offset for offset, on the GIF samples in `data/` and on the samples of all 18 formats in [kaitai_struct_samples](https://github.com/kaitai-io/kaitai_struct_samples). Two samples fail: a malformed one, in both decoders, and one whose schema tests a field it never read, which the JavaScript runtime takes as 0 and zelbyn, like the Python and Java runtimes, rejects. Development is on Linux; the Windows build is untested.
 
 ## Documentation
 

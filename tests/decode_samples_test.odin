@@ -1,6 +1,6 @@
 package tests
 
-import mdat "../gnrcrdr/metadata"
+import mdat "../zelbyn/metadata"
 import "core:os"
 import "core:testing"
 import "core:time"

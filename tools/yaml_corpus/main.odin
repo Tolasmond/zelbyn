@@ -1,13 +1,13 @@
-// Prints the node tree that gnrcrdr's YAML parser builds for each file named
+// Prints the node tree that zelbyn's YAML parser builds for each file named
 // on the command line, in the event form compare.py also builds from
-// libyaml. Not part of gnrcrdr's build: compare.py builds and runs it.
+// libyaml. Not part of zelbyn's build: compare.py builds and runs it.
 package yaml_corpus
 
 import "core:bufio"
 import "core:fmt"
 import "core:io"
 import "core:os"
-import yml "../../gnrcrdr/yaml"
+import yml "../../zelbyn/yaml"
 
 main :: proc() {
 	out: bufio.Writer
