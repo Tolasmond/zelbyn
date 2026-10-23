@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 154 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 157 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -17,7 +17,7 @@ ERR	archive/rpm.ksy	Invalid	archive/rpm.ksy:316:21	io: signature has no field st
 ERR	archive/xar.ksy	Unsupported	archive/xar.ksy:35:5	attribute toc: process is not supported
 OK	archive/zchunk.ksy
 OK	archive/zip.ksy
-ERR	archive/zisofs.ksy	Unsupported	archive/zisofs.ksy:36:3	instance blocks: an instance without pos or value is not supported
+OK	archive/zisofs.ksy
 OK	cad/monomakh_sapr_chg.ksy
 ERR	common/bcd.ksy	Unsupported	common/bcd.ksy:37:1	params on the top-level type are not supported, except in an imported schema
 OK	common/bytes_with_io.ksy
@@ -36,8 +36,8 @@ ERR	executable/dex.ksy	Unsupported	common/vlq_base128_le.ksy:46:11	type: integer
 OK	executable/dos_mz.ksy
 ERR	executable/elf.ksy	Unsupported	executable/elf.ksy:363:9	endian: switch-on is not supported
 OK	executable/java_class.ksy
-ERR	executable/mach_o.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
-ERR	executable/mach_o_fat.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
+OK	executable/mach_o.ksy
+ERR	executable/mach_o_fat.ksy	Unsupported	executable/mach_o_fat.ksy:33:15	cpu_type: an enum of another type (mach_o::cpu_type) is not supported
 ERR	executable/microsoft_pe.ksy	Invalid	executable/microsoft_pe.ksy:24:3	instance pe refers to itself
 OK	executable/python_pyc_27.ksy
 ERR	executable/swf.ksy	Unsupported	executable/swf.ksy:56:5	attribute zlib_body: process is not supported
@@ -117,7 +117,7 @@ OK	log/systemd_journal.ksy
 OK	log/windows_evt_log.ksy
 OK	machine_code/code_6502.ksy
 OK	macos/compressed_resource.ksy
-ERR	macos/ds_store.ksy	Unsupported	macos/ds_store.ksy:107:7	instance directories: an instance without pos or value is not supported
+ERR	macos/ds_store.ksy	Invalid	macos/ds_store.ksy:25:3	instance buddy_allocator_body refers to itself
 OK	macos/mac_os_resource_snd.ksy
 OK	macos/resource_compression/dcmp_0.ksy
 OK	macos/resource_compression/dcmp_1.ksy
@@ -155,7 +155,7 @@ OK	network/microsoft_network_monitor_v2.ksy
 OK	network/packet_ppi.ksy
 ERR	network/pcap.ksy	Unsupported	network/pcap.ksy:35:9	endian: switch-on is not supported
 ERR	network/protocol_body.ksy	Unsupported	network/protocol_body.ksy:25:1	params on the top-level type are not supported, except in an imported schema
-ERR	network/rtcp_payload.ksy	Unsupported	network/rtcp_payload.ksy:158:7	instance packet_status: an instance without pos or value is not supported
+OK	network/rtcp_payload.ksy
 OK	network/rtp_packet.ksy
 OK	network/rtpdump.ksy
 OK	network/some_ip/some_ip.ksy

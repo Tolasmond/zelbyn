@@ -30,6 +30,7 @@ Node :: struct {
 	params:          []^Node,           // Set only: Kaitai's params, each a field read once, of type Int64 (any integer type), Bool, Blob, String, or Set for a user type, with the members of the set its argument is of, whose value is its argument (see args)
 	args:            []^Expr,           // a Set with params: an Int, Bool, Bytes, String or Struct expression for each, evaluated where each instance is read, after the bytes of its substream
 	pos:             ^Expr,             // a parse instance only: an Int expression, the offset it is read at (see below); nil for every other field
+	at_stream_pos:   bool,              // a parse instance without a pos in the schema, which reads nothing: read where its stream is, and pos is _io.pos
 	io:              ^Expr,             // a parse instance only: a Stream expression, the stream it is read from (Kaitai's io); nil for that of the set instance it belongs to
 	is_param:        bool,              // one of the params of its set
 	keeps_stream:    bool,              // Set only: an io expression, or _io in a value instance of the set, refers to the stream of its instances, which the decoder then keeps, as it is once each is read (Io, Io_Pos)

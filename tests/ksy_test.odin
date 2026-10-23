@@ -162,8 +162,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        _: s\n  - id: b\n    size: a.c\ntypes:\n  s:\n    seq:\n      - id: c\n        type: u1\n", .Unsupported, 11, 11, "size: a is a switch-on field whose cases are user types; it cannot be used in expressions"},
 
 	// instances: value instances and parse instances
-	{HEAD + "instances:\n  x:\n    doc: d\n", .Unsupported, 5, 3, "instance x: an instance without pos or value is not supported"},
-	{HEAD + "instances:\n  x:\n    size: 1\n", .Unsupported, 5, 3, "instance x: an instance without pos or value is not supported"},
+	{HEAD + "instances:\n  x:\n    doc: d\n", .Unsupported, 5, 3, "instance x: an instance without pos or value that reads bytes is not supported"},
+	{HEAD + "instances:\n  x:\n    size: 1\n", .Unsupported, 5, 3, "instance x: an instance without pos or value that reads bytes is not supported"},
 	{HEAD + "instances:\n  x:\n    value: 1\n    pos: 0\n", .Invalid, 7, 5, `instance x: unknown key "pos"`},
 	{HEAD + "instances:\n  x:\n    value: 1\n    if: 1\n", .Invalid, 7, 9, "if: expected a boolean, found an integer"},
 	{HEAD + "instances:\n  x:\n    value: 1\n    if: x == 1\n", .Invalid, 6, 12, "value instance x refers to itself"},
@@ -752,6 +752,69 @@ t[0].table[1] = 33
 	// it, fail with the instance's path
 	expect_dump(t, "pos out of range", ksy_dump(t, src, {9, 7, 0x10, 0x11, 0x12, 0x20, 0x21}), "error: Offset_Out_Of_Range at 4 in t[0].sub[0].parent_ofs[0]")
 	expect_dump(t, "read past the end", ksy_dump(t, src, {2, 7, 0x10, 0x11, 0x12, 0x20}), "error: Unexpected_EOF at 6 in t[0].table[1]")
+
+	// an instance without pos or value is read where its stream is, which
+	// can only be one that reads nothing: a type of no fields, or size 0
+	nopos := HEAD + `seq:
+  - id: n
+    type: u1
+  - id: hdr
+    type: hdr
+    size: 3
+  - id: tail
+    size: 2
+instances:
+  flags:
+    type: flags(n)
+  marks:
+    type: mark(_index)
+    repeat: expr
+    repeat-expr: n
+  empty:
+    size: 0
+  far:
+    io: hdr._io
+    type: mark(9)
+types:
+  hdr:
+    seq:
+      - id: a
+        type: u1
+    instances:
+      here:
+        size: 0
+      bits:
+        type: flags(a)
+  flags:
+    params:
+      - id: v
+        type: u1
+    instances:
+      low:
+        value: v & 1
+      byte:
+        pos: v
+        type: u1
+  mark:
+    params:
+      - id: i
+        type: u1
+    instances:
+      at:
+        pos: i % 3
+        type: u1
+`
+	expect_dump(t, "instances without pos", ksy_dump(t, nopos, {2, 1, 0x20, 0x30, 0x40, 0x50}), `t[0].n[0] = 2
+t[0].hdr[0].a[0] = 1
+t[0].hdr[0].here[0] = <0 bytes>
+t[0].hdr[0].bits[0].byte[0] = 32
+t[0].tail[0] = <2 bytes> 40 50
+t[0].flags[0].byte[0] = 32
+t[0].marks[0].at[0] = 2
+t[0].marks[1].at[0] = 1
+t[0].empty[0] = <0 bytes>
+t[0].far[0].at[0] = 1
+`)
 
 	// a parse instance of a set instance that has been read, first read by
 	// an expression after it, is read as it would have been once that

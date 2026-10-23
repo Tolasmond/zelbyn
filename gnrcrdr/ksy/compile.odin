@@ -46,7 +46,7 @@ import "core:strings"
 //     strings, byte arrays, set instances and arrays, over their type, its
 //     _io, and through _parent and _root those enclosing it, and parse
 //     instances: instances with pos, io (_io or the _io of a set instance)
-//     and the keys of an attribute
+//     and the keys of an attribute, or without pos when they read nothing
 //   - float literals and float fields in expressions, with + - * / and the
 //     comparisons, also with integers
 //   - casts, .as<t>, to an integer type and, of a switch-on field, to the
@@ -58,12 +58,13 @@ import "core:strings"
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
 // Not supported yet (Unsupported): other encodings, instances without pos or
-// value, params of other types (struct, io, any) and on the top-level type
-// of the schema compiled, % of a float, array literals of arrays, valid on a
-// float, min and max on a type other than an integer, an endian that is a
-// switch-on, imports in a type, and in a type that contains itself, the
-// members of the sets enclosing it, other than through the schema's _root,
-// and an instance that refers to itself through a field of its type.
+// value that read bytes, params of other types (struct, io, any) and on the
+// top-level type of the schema compiled, % of a float, array literals of
+// arrays, valid on a float, min and max on a type other than an integer, an
+// endian that is a switch-on, imports in a type, and in a type that contains
+// itself, the members of the sets enclosing it, other than through the
+// schema's _root, and an instance that refers to itself through a field of
+// its type.
 
 Error_Kind :: enum {
 	None,
@@ -694,9 +695,6 @@ build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_De
 			keys := get(e.value, "value") != nil ? VALUE_INSTANCE_KEYS : PARSE_INSTANCE_KEYS
 			keys.what, keys.name = "instance %s", inst_name
 			check_keys(c, e.value, keys) or_return
-			if get(e.value, "value") == nil && get(e.value, "pos") == nil {
-				return nil, fail(c, .Unsupported, e.key, "instance %s: an instance without pos or value is not supported", inst_name)
-			}
 		}
 		td.instances = instances.entries
 	}
@@ -1227,9 +1225,9 @@ type_bits :: proc(c: ^Compiler, td: ^Type_Def) -> (bits: int, unsized: string) {
 // unsized is then id, or the path of the attribute inside id's type that
 // has none.
 @(private = "file")
-attr_bits :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, id: string) -> (bits: int, unsized: string) {
+attr_bits :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, id: string, element_only := false) -> (bits: int, unsized: string) {
 	count := 1
-	if repeat := get(attr, "repeat"); repeat != nil {
+	if repeat := get(attr, "repeat"); repeat != nil && !element_only {
 		if repeat.text != "expr" do return 0, id
 		ok: bool
 		count, ok = constant_int(c, get(attr, "repeat-expr"))
@@ -1316,11 +1314,26 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 	defer src.compiling = false
 
 	spec := src.entry.value
+	pos := get(spec, "pos")
+	if pos == nil {
+		// Kaitai reads it where its stream is when it is first used, and
+		// moves the stream past it, which is known only for one that reads
+		// nothing
+		bits, unsized := attr_bits(c, src.td, spec, inst.ref_name, element_only = true)
+		if unsized != "" || bits != 0 {
+			return fail(c, .Unsupported, src.entry.key, "instance %s: an instance without pos or value that reads bytes is not supported; only one whose type or size reads none is", inst.ref_name)
+		}
+	}
 	compile_field(c, src.td, spec, inst, src.scope, nil) or_return
 	if n := get(spec, "io"); n != nil {
 		inst.io = compile_expr(c, n, "io", src.scope, .Stream) or_return
 	}
-	inst.pos = compile_expr(c, get(spec, "pos"), "pos", src.scope, .Int) or_return
+	if pos == nil {
+		inst.at_stream_pos = true
+		inst.pos = new_expr(c, .Int, mdata.Io_Pos{})
+		return true
+	}
+	inst.pos = compile_expr(c, pos, "pos", src.scope, .Int) or_return
 	return true
 }
 
