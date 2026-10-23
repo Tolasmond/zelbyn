@@ -519,9 +519,117 @@ resolve_value_ref :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, set: 
 		if !r.scope.compile_instance(r.scope.data, set, inst) do return fail(r, .Invalid, e.offset, "value instance %s is not valid", inst.name)
 		assert(inst.expr != nil, "resolve: compile_instance left the instance uncompiled")
 	}
+	// the instances enclosing an argument's are not those that hold the
+	// param, which is all the decoder can reach them through
+	if levels, through := through_param(base); through && reach(inst) > levels {
+		return fail(r, .Unsupported, e.offset, "value instance %s refers to the sets that enclose its instance, which it cannot through a param", inst.name)
+	}
 	e.variant = mdata.Value_Ref{base = base, instance = inst}
 	e.type = inst.expr.type
 	return true
+}
+
+// Whether e, a Struct expression, gives an instance reached through a param
+// of a user type, and levels, the fields between that param and it.
+@(private = "file")
+through_param :: proc(e: ^mdata.Expr) -> (levels: int, through: bool) {
+	e := e
+	for {
+		#partial switch x in e.variant {
+		case mdata.Field_Ref:
+			if x.node.is_param && x.node.type == .Set do return levels, true
+			levels += 1
+			e = x.base
+		case mdata.Index:
+			e = x.operand
+		case mdata.Array_Method:
+			e = x.operand
+		case mdata.Switch_Cast:
+			e = x.operand
+		case mdata.Value_Ref:
+			l, found := through_param(x.instance.expr)
+			return levels + l, found
+		case:
+			return 0, false
+		}
+	}
+}
+
+// The most levels above the instance it is evaluated for that value
+// instance inst reaches, through _parent (decoder.ancestor).
+@(private = "file")
+reach :: proc(inst: ^mdata.Value_Instance) -> int {
+	n := reach_of(inst.expr)
+	if inst.cond != nil do n = max(n, reach_of(inst.cond))
+	return n
+}
+
+@(private = "file")
+reach_of :: proc(e: ^mdata.Expr) -> int {
+	switch x in e.variant {
+	case mdata.Instance:
+		return x.root ? 0 : x.up
+	case mdata.Value_Ref:
+		// its instance's levels count from the instance its base gives
+		return max(reach_of(x.base), reach(x.instance) - depth(x.base))
+	case mdata.Field_Ref:
+		return reach_of(x.base)
+	case mdata.Unary:
+		return reach_of(x.operand)
+	case mdata.Binary:
+		return max(reach_of(x.left), reach_of(x.right))
+	case mdata.Ternary:
+		return max(reach_of(x.cond), reach_of(x.then), reach_of(x.otherwise))
+	case mdata.Index:
+		return max(reach_of(x.operand), reach_of(x.index))
+	case mdata.Array_Literal:
+		n := 0
+		for item in x.items do n = max(n, reach_of(item))
+		return n
+	case mdata.Size:
+		return reach_of(x.operand)
+	case mdata.String_Length:
+		return reach_of(x.operand)
+	case mdata.To_S:
+		return reach_of(x.operand)
+	case mdata.To_I:
+		return reach_of(x.operand)
+	case mdata.Array_Method:
+		return reach_of(x.operand)
+	case mdata.Io:
+		return reach_of(x.instance)
+	case mdata.Switch_Cast:
+		return reach_of(x.operand)
+	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element:
+		return 0
+	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast:
+		panic("reach_of: unresolved expression")
+	}
+	return 0
+}
+
+// The levels below the instance an expression is evaluated for that e, a
+// Struct expression, gives an instance at: 1 for a field of it, -1 for
+// _parent; the root is above every level an expression reaches.
+@(private = "file")
+depth :: proc(e: ^mdata.Expr) -> int {
+	#partial switch x in e.variant {
+	case mdata.Instance:
+		return x.root ? max(int) / 2 : -x.up
+	case mdata.Field_Ref:
+		return depth(x.base) + 1
+	case mdata.Index:
+		return depth(x.operand)
+	case mdata.Array_Method:
+		return depth(x.operand)
+	case mdata.Switch_Cast:
+		return depth(x.operand)
+	case mdata.Repeat_Element:
+		return 1
+	case mdata.Value_Ref:
+		return depth(x.base) + depth(x.instance.expr)
+	}
+	panic("depth: not a set instance")
 }
 
 // The type of one item of array, an expression of type Array: all the
@@ -585,7 +693,6 @@ resolve_array_literal :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Array_Liter
 }
 
 // The set of an expression of type Struct.
-@(private = "file")
 struct_node :: proc(e: ^mdata.Expr) -> ^mdata.Node {
 	#partial switch x in e.variant {
 	case mdata.Instance:
@@ -653,6 +760,7 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 		return true
 	case "_io":
 		if operand.type != .Struct do return fail(r, .Invalid, e.offset, "%s has no _io; only a set has", type_name(operand.type))
+		if _, through := through_param(operand); through do return fail(r, .Unsupported, e.offset, "_io of an instance given as an argument is not supported")
 		// the decoder finds the stream of an instance being decoded in its
 		// frame, and keeps that of the instances of any other set
 		if _, is_instance := operand.variant.(mdata.Instance); !is_instance do struct_node(operand).keeps_stream = true

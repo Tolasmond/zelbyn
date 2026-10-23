@@ -65,16 +65,16 @@ eval_string :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (s: string, err
 	return v.(string), .None
 }
 
-// Evaluates e, an Int, Bool or Bytes expression, as eval_int does, as a
-// value of the tree: an Int is an i64.
+// Evaluates e, an Int, Float, Bool, Bytes, String or Struct expression, as
+// eval_int does, as a value of the tree: an Int is an i64.
 @(private, require_results)
 eval_value :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (value: fld.Value, err: dat.Read_Error) {
 	v := eval(d, e, {index = index}) or_return
 	return tree_value(v), .None
 }
 
-// v, an Int, Float, Bool, String or Bytes value, as a value of the tree: an
-// Int is an i64.
+// v, an Int, Float, Bool, String, Bytes or Struct value, as a value of the
+// tree: an Int is an i64.
 @(private = "file")
 tree_value :: proc(v: Eval_Value) -> fld.Value {
 	#partial switch x in v {
@@ -88,8 +88,10 @@ tree_value :: proc(v: Eval_Value) -> fld.Value {
 		return x
 	case []byte:
 		return x
+	case ^fld.Instance:
+		return x
 	}
-	panic("tree_value: not an Int, Float, Bool, String or Bytes value")
+	panic("tree_value: not an Int, Float, Bool, String, Bytes or Struct value")
 }
 
 // operand[index], when operand is an array literal, directly or as the

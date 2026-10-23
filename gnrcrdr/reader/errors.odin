@@ -33,6 +33,7 @@ Decoder :: struct {
 	cache:       map[Cached]Eval_Value, // the values of the cached value instances evaluated, in the same arena; nil until one is
 	stack_start: uintptr,         // the address of a local of decode, where the stack that decoding uses starts (stack_used)
 	pending:     [dynamic]Pending, // the parse instances to read once the root is (read_pending), in the same arena
+	pending_at:  map[Pending_Key]int, // the index in pending of each, made when an expression first reads one (read_kept); nil until then
 	spans:       bool,            // the tree records spans: read_parse_instance is called with SPANS
 	err:         Parse_Error,
 }
@@ -69,6 +70,13 @@ Pending :: struct {
 Cached :: struct {
 	instance: ^fld.Instance,
 	value:    ^mdata.Value_Instance,
+}
+
+// Parse instance k of instance.
+@(private)
+Pending_Key :: struct {
+	instance: ^fld.Instance,
+	k:        int,
 }
 
 @(private)
