@@ -31,6 +31,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 
 	// keys: Kaitai keys outside the subset, unknown keys, misplaced extensions
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    pos: 1\n", .Unsupported, 7, 5, "attribute a: pos is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: s\n  - id: b\n    type: u\n  - id: c\n    size: '(1 == 1 ? a : b).x'\ntypes:\n  s:\n    seq:\n      - id: x\n        type: u1\n  u:\n    seq:\n      - id: x\n        type: u1\n", .Unsupported, 10, 20, "size: ?: on sets of different types is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: s\n  - id: b\n    type: s\n  - id: c\n    size: '(1 == 1 ? a : b).up'\ntypes:\n  s:\n    seq:\n      - id: x\n        type: u1\n    instances:\n      up:\n        value: _parent.a.x\n", .Unsupported, 10, 29, "size: value instance up refers to the sets that enclose its instance, which it cannot through ?:"},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n  - id: b\n    size: 1\n    if: a.to_s('EBCDIC') == ''\n", .Unsupported, 9, 9, `if: encoding "EBCDIC" is not supported`},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    process: xor(1)\n", .Unsupported, 7, 14, "a: process xor(1) is not supported; only zlib is"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    process: zlib\n", .Invalid, 7, 5, "a: process applies only to a byte array or a user type"},
@@ -582,6 +584,61 @@ types:
 t[0].b[0] = <2 bytes> 01 02
 t[0].c[0] = <1 bytes> 03
 t[0].d[0] = 4
+`)
+
+	// ?: on two sets of one type gives either instance, whose fields and
+	// value instances an expression reaches; ?: on a float and an integer
+	// gives a float
+	choice := HEAD + `seq:
+  - id: flag
+    type: u1
+  - id: here
+    type: mask
+    if: flag == 1
+  - id: hdr
+    type: hdr
+  - id: a
+    size: chosen.len
+  - id: b
+    size: chosen.doubled
+  - id: c
+    size: '(flag == 1 ? here : hdr.inner).len + 1'
+  - id: d
+    size: half.to_i
+instances:
+  chosen:
+    value: 'flag == 1 ? here : hdr.inner'
+  half:
+    value: 'flag == 1 ? 2.5 : flag'
+types:
+  hdr:
+    seq:
+      - id: inner
+        type: mask
+  mask:
+    seq:
+      - id: len
+        type: u1
+    instances:
+      doubled:
+        value: len * 2 + zero
+      zero:
+        value: 0
+`
+	expect_dump(t, "?: on sets, here", ksy_dump(t, choice, {0x01, 0x02, 0x07, 0x41, 0x41, 0x42, 0x42, 0x42, 0x42, 0x43, 0x43, 0x43, 0x44, 0x44}), `t[0].flag[0] = 1
+t[0].here[0].len[0] = 2
+t[0].hdr[0].inner[0].len[0] = 7
+t[0].a[0] = <2 bytes> 41 41
+t[0].b[0] = <4 bytes> 42 42 42 42
+t[0].c[0] = <3 bytes> 43 43 43
+t[0].d[0] = <2 bytes> 44 44
+`)
+	expect_dump(t, "?: on sets, hdr", ksy_dump(t, choice, {0x00, 0x03, 0x41, 0x41, 0x41, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x43, 0x43, 0x43, 0x43}), `t[0].flag[0] = 0
+t[0].hdr[0].inner[0].len[0] = 3
+t[0].a[0] = <3 bytes> 41 41 41
+t[0].b[0] = <6 bytes> 42 42 42 42 42 42
+t[0].c[0] = <4 bytes> 43 43 43 43
+t[0].d[0] = <0 bytes>
 `)
 
 	// integers are exact up to 2^64 - 1: vlq_base128_le.ksy's arithmetic

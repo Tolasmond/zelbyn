@@ -49,6 +49,7 @@ import "core:strings"
 //     instances: instances with pos, io (_io or the _io of a set instance)
 //     and the keys of an attribute, or without pos when they read nothing
 //   - .pos, .size and .eof of _io and of the _io of another set instance
+//   - ?: of sets of one type
 //   - integers in expressions exact from -2^63 to 2^64 - 1
 //   - float literals and float fields in expressions, with + - * / and the
 //     comparisons, also with integers
@@ -1195,6 +1196,7 @@ scope_of :: proc(c: ^Compiler, td: ^Type_Def, chain: []^mdata.Node) -> expr.Scop
 		compile_instance       = compile_instance_callback,
 		compile_parse_instance = compile_parse_instance_callback,
 		size_of                = size_of_callback,
+		same_type              = same_type_callback,
 		encoding               = encoding_named,
 		data                   = c,
 	}
@@ -1208,6 +1210,20 @@ compile_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^mdata.V
 @(private = "file")
 compile_parse_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^mdata.Node) -> bool {
 	return compile_parse_instance((^Compiler)(data), set, inst)
+}
+
+// Whether sets a and b, compiled, are of the same type (expr.Scope.same_type).
+@(private = "file")
+same_type_callback :: proc(data: rawptr, a, b: ^mdata.Node) -> bool {
+	c := (^Compiler)(data)
+	sa, sb := mdata.members(a), mdata.members(b)
+	if sa == sb do return true
+	ta, tb: ^Type_Def
+	for st in c.type_defs {
+		if st.set == sa do ta = st.td
+		if st.set == sb do tb = st.td
+	}
+	return ta != nil && ta == tb
 }
 
 // The size in bits of the attribute or parse instance name of set, or of
