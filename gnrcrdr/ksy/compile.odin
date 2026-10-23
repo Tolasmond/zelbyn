@@ -72,8 +72,9 @@ import "core:strings"
 // than an integer, an endian that is a switch-on on the top-level type or in
 // a type that contains itself, a bit-endian that is a switch-on, imports in
 // a type, and in a type that contains itself, the members of the sets
-// enclosing it, other than through the schema's _root, and an instance that
-// refers to itself through a field of its type.
+// enclosing it, other than through _root (in a value instance, only that of
+// the schema compiled), and an instance that refers to itself through a
+// field of its type.
 
 Error_Kind :: enum {
 	None,
@@ -484,7 +485,7 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 		if st.set.keeps_stream do for field in st.reused_by do field.keeps_stream = true
 		if len(st.reused_by) > 0 && st.escape != nil {
 			c.schema = st.escape_schema
-			return fail(c, .Unsupported, st.escape, "%s: type %s contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it, other than through the _root of the schema decoded, or to an imported schema's _root", st.escape_what, st.td.name)
+			return fail(c, .Unsupported, st.escape, "%s: type %s contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it, other than through the _root of the schema decoded, or in a value instance, to an imported schema's _root", st.escape_what, st.td.name)
 		}
 	}
 	return true
@@ -1111,19 +1112,21 @@ set_type :: proc(c: ^Compiler, set: ^mdata.Node) -> ^Set_Type {
 
 // Records e, the expression of n (what) compiled in scope, as the escape of
 // each set of the scope that it refers to a member of an instance
-// enclosing, through _parent, or to the _root of an imported schema, which
-// up reaches too. In a set that is reused (Node.recursive), such an
-// instance is of another set for the set's other instances, and for the
-// instances of the set that reuses it, which are inside it, that root is
-// the nearest instance of it, not the outermost. The _io of an enclosing
-// instance is found from the instance the decoder reaches, and so is right
-// in each of them.
+// enclosing, through _parent, or in a value instance, to the _root of an
+// imported schema, which up reaches there. In a set that is reused
+// (Node.recursive), such an instance is of another set for the set's other
+// instances, and for the instances of the set that reuses it, which are
+// inside it, that root is the nearest instance of it, not the outermost.
+// Elsewhere the decoder finds that root among its frames (imported_root),
+// at any depth. The _io of an enclosing instance is found from the instance
+// the decoder reaches, and so is right in each of them.
 @(private = "file")
 note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, scope: expr.Scope) {
 	if e == nil do return
 	switch x in e.variant {
 	case mdata.Instance:
 		if x.root || (x.up == 0 && !x.imported_root) do return
+		if x.imported_root && scope.instance == nil do return
 		innermost := len(scope.types) - 1
 		// the root of an imported schema is the outermost instance of it, not
 		// the up-th enclosing instance of a reused set

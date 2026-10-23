@@ -178,7 +178,8 @@ direct_field :: proc(e: ^mdata.Expr) -> (f: mdata.Direct_Field, ok: bool) {
 	if e.type != .Int do return
 	#partial switch b in ref.base.variant {
 	case mdata.Instance:
-		if b.root || b.up != 0 do return
+		// an imported schema's _root is found among the frames (reader.imported_root)
+		if b.root || b.up != 0 || b.imported_root do return
 		return {slot = ref.slot}, true
 	case mdata.Repeat_Element:
 		return {slot = ref.slot, of_element = true}, true
