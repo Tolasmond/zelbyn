@@ -191,8 +191,8 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, $SPANS: bool) -> d
 		stream := Stream{d.r, d.base}
 		err: dat.Read_Error
 		if node.io != nil do stream, err = eval_stream(d, node.io)
-		pos: int
-		if err == .None do pos, err = eval_int(d, node.pos)
+		pos := stream.r.pos
+		if err == .None && !node.at_stream_pos do pos, err = eval_int(d, node.pos)
 		if err == .None && (pos < 0 || pos > len(stream.r.data)) do err = .Offset_Out_Of_Range
 		if err != .None {
 			append(&d.path, Path_Segment{node.name, 0})
