@@ -2008,9 +2008,9 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 			seen[value] = e.key
 		} else {
 			key := compile_expr(c, e.key, "a case", scope, .Int) or_return
+			// the decoder compares a switch-on as an int
 			v, is_literal := int_literal(key)
-			if !is_literal do return fail(c, .Unsupported, e.key, "%s: a case must be an integer or an enum constant", id)
-			if v < i128(min(int)) || v > i128(max(int)) do return fail(c, .Unsupported, e.key, "%s: case %s is not supported; only cases from -2^63 to 2^63 - 1", id, e.key.text)
+			if !is_literal || v < i128(min(int)) || v > i128(max(int)) do return fail(c, .Unsupported, e.key, "%s: a case must be an integer from -2^63 to 2^63 - 1 or an enum constant", id)
 			value = int(v)
 			if prev, dup := seen[value]; dup do return fail(c, .Invalid, e.key, "%s: case %v is already given (line %v, column %v)", id, value, prev.line, prev.column)
 			seen[value] = e.key
@@ -2591,6 +2591,9 @@ compile_bound :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Typ
 // -1, or -9223372036854775808, the negation of a literal above max(int);
 // enum constants are already literals. As the parser reads -1 as the
 // negation of 1, valid bounds and switch-on cases take their integers here.
+// Not when it, or a negation within it, is outside the integers that
+// evaluating it gives, from min(int) to max(u64): evaluated, it fails with
+// Integer_Overflow, as -(-18446744073709551615) does at its inner negation.
 @(private = "file")
 int_literal :: proc(e: ^mdata.Expr) -> (v: i128, ok: bool) {
 	#partial switch x in e.variant {
@@ -2601,7 +2604,8 @@ int_literal :: proc(e: ^mdata.Expr) -> (v: i128, ok: bool) {
 	case mdata.Unary:
 		if x.op != .Neg do return
 		v = int_literal(x.operand) or_return
-		return -v, true
+		v = -v
+		return v, v >= i128(min(int)) && v <= i128(max(u64))
 	}
 	return
 }
