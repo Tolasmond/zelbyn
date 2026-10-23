@@ -147,6 +147,18 @@ SCALAR 2:4 Plain "1"
 END
 `},
 	{"comments only", "# nothing\n\n", ""},
+	{"escapes at the edges", "a: \"\\U0010FFFF\\uD7FF\\uE000\\0\\x01\\x7f\"\n", `MAP 1:1
+SCALAR 1:1 Plain "a"
+SCALAR 1:4 Double_Quoted "\U0010ffff\ud7ff\ue000\x00\x01\u007f"
+END
+`},
+	{"characters allowed raw", "\xef\xbb\xbfa: \"\t\xc2\x85\xc2\xa0\xef\xbf\xbd\xf4\x8f\xbf\xbf\"\r\n\xc3\xa9: \xef\xbb\xbf\n", `MAP 1:1
+SCALAR 1:1 Plain "a"
+SCALAR 1:4 Double_Quoted "\t\u0085\u00a0\ufffd\U0010ffff"
+SCALAR 2:1 Plain "é"
+SCALAR 2:4 Plain "\ufeff"
+END
+`},
 }
 
 @(test)
@@ -202,6 +214,29 @@ YAML_ERROR_CASES := [?]Yaml_Error_Case {
 	{"a: |x\n  b\n", .Syntax, 1, 5, "after the block scalar header"},
 	{"a: \"\\q\"\n", .Syntax, 1, 5, `unknown escape \q`},
 	{"a:\n  b: \"1\"\n   c: 2\n", .Syntax, 3, 4, "unexpected indentation"},
+
+	// escapes outside the Unicode scalar values, which wrapped when read
+	// as a rune
+	{"a: \"\\U00110000\"\n", .Syntax, 1, 5, `escape \U is not a valid character`},
+	{"a: \"\\U80000000\"\n", .Syntax, 1, 5, `escape \U is not a valid character`},
+	{"a: \"\\UFFFFFFFF\"\n", .Syntax, 1, 5, `escape \U is not a valid character`},
+	{"a: \"\\uD800\"\n", .Syntax, 1, 5, `escape \u is not a valid character`},
+	{"a: \"\\U0000DFFF\"\n", .Syntax, 1, 5, `escape \U is not a valid character`},
+
+	// characters YAML does not allow, raw, anywhere in the source
+	{"a: \"\x00\"\n", .Syntax, 1, 5, "control character U+0000 is not allowed"},
+	{"a: \"\x01\"\n", .Syntax, 1, 5, "control character U+0001 is not allowed"},
+	{"a: '\x7f'\n", .Syntax, 1, 5, "control character U+007F is not allowed"},
+	{"a: \x01\n", .Syntax, 1, 4, "control character U+0001 is not allowed"},
+	{"a: 1\n# \x1b\n", .Syntax, 2, 3, "control character U+001B is not allowed"},
+	{"a: 1\r\n\xc3\xa9: \"\x08\"\r\n", .Syntax, 2, 5, "control character U+0008 is not allowed"},
+	{"a: \xc2\x80\n", .Syntax, 1, 4, "character U+0080 is not allowed"},
+	{"a: \xef\xbf\xbe\n", .Syntax, 1, 4, "character U+FFFE is not allowed"},
+	{"a: \xff\n", .Syntax, 1, 4, "invalid UTF-8 (byte 0xff)"},
+	{"a: \xc3\n", .Syntax, 1, 4, "invalid UTF-8 (byte 0xc3)"},
+	{"a: \xc0\xaf\n", .Syntax, 1, 4, "invalid UTF-8 (byte 0xc0)"},
+	{"a: \xed\xa0\x80\n", .Syntax, 1, 4, "invalid UTF-8 (byte 0xed)"},
+	{"\xff\xfea\x00:\x00 \x001\x00", .Unsupported, 1, 1, "UTF-16 is not supported"},
 	{"a: 1\n- b\n", .Syntax, 2, 1, "expected a key"},
 }
 
