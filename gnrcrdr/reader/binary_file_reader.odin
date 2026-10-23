@@ -530,6 +530,30 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 keep_pending :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int) {
 	if d.pending == nil do d.pending = make([dynamic]Pending, d.allocator)
 	append(&d.pending, Pending{instance, node, k, clone_dynamic(d, d.frames[:]), clone_dynamic(d, d.streams[:]), clone_dynamic(d, d.path[:]), d.r, d.base})
+	if d.pending_at != nil do d.pending_at[{instance, k}] = len(d.pending) - 1
+}
+
+// Reads parse instance node of instance, in slot k, for an expression,
+// once instance is no longer decoded: as read_pending reads it, with the
+// frames, streams, path and stream it was kept with, which are then put
+// back as they were. The index of the kept instances is made the first
+// time, so that a format whose expressions read none pays nothing for it.
+@(private = "file", require_results)
+read_kept :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int, $SPANS: bool) -> dat.Read_Error {
+	if d.pending_at == nil {
+		d.pending_at = make(map[Pending_Key]int, max(len(d.pending), 16), d.allocator)
+		for p, i in d.pending do d.pending_at[{p.instance, p.k}] = i
+	}
+	i, kept := d.pending_at[{instance, k}]
+	// an instance that has been read keeps the parse instances it did not
+	// read (keep_pending)
+	assert(kept, "read_kept: the parse instance was not kept")
+	p := d.pending[i]
+	frames, streams, path, r, base := d.frames, d.streams, d.path, d.r, d.base
+	d.frames, d.streams, d.path, d.r, d.base = p.frames, p.streams, p.path, p.r, p.base
+	err := read_parse_instance(d, instance, node, k, SPANS)
+	d.frames, d.streams, d.path, d.r, d.base = frames, streams, path, r, base
+	return err
 }
 
 // The bytes of stack used since decoding started, by the frame this is
@@ -550,9 +574,9 @@ keep_stream :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance) {
 	d.kept[instance] = Stream{d.r, d.base}
 }
 
-// Reads parse instance node of instance, a set instance being decoded, into
-// slot k: at its pos in the instance's stream, as the instance's frame
-// sees it, or in the stream of its io. The stream, frames and path are then
+// Reads parse instance node of instance into slot k: at its pos in the
+// instance's stream, as the instance's frame sees it, or in the stream of
+// its io; for an instance no longer decoded, as it was kept (read_kept). The stream, frames and path are then
 // put back as they were. It is Too_Deep once decoding has used MAX_STACK.
 @(private, require_results)
 read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int, $SPANS: bool) -> dat.Read_Error {
@@ -562,8 +586,7 @@ read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.N
 	}
 	j := len(d.frames) - 1
 	for j >= 0 && d.frames[j].instance != instance do j -= 1
-	// an instance that is no longer decoded had its parse instances read
-	assert(j >= 0, "read_parse_instance: the instance is not being decoded")
+	if j < 0 do return read_kept(d, instance, node, k, SPANS)
 	frame := d.frames[j]
 
 	cells := fld.instance_cells(instance)

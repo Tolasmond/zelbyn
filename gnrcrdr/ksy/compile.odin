@@ -51,20 +51,19 @@ import "core:strings"
 //     comparisons, also with integers
 //   - casts, .as<t>, to an integer type and, of a switch-on field, to the
 //     user type of a case, and array literals, [a, b]
-//   - params of integer types, bool and bytes, in types and at the top
-//     level of an imported schema, given as t(a, b)
+//   - params of integer types, bool, bytes, str and user types, in types
+//     and at the top level of an imported schema, given as t(a, b)
 //   - enums, whose values are names or mappings of id, doc and doc-ref
 //     (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
 // Not supported yet (Unsupported): other encodings, instances without pos or
-// value, params of other types (str, user types, struct, io, any) and on the
-// top-level type of the schema compiled, % of a float, array literals of
-// arrays, valid on a float, min and max on a type other than an integer, an
-// endian that is a switch-on, imports in a type, and in a type that contains
-// itself, the members of the sets enclosing it, other than through the
-// schema's _root, and an instance that refers to itself through a field of
-// its type.
+// value, params of other types (struct, io, any) and on the top-level type
+// of the schema compiled, % of a float, array literals of arrays, valid on a
+// float, min and max on a type other than an integer, an endian that is a
+// switch-on, imports in a type, and in a type that contains itself, the
+// members of the sets enclosing it, other than through the schema's _root,
+// and an instance that refers to itself through a field of its type.
 
 Error_Kind :: enum {
 	None,
@@ -255,8 +254,9 @@ Type_Def :: struct {
 // A param of a type, checked.
 @(private = "file")
 Param_Def :: struct {
-	id:   ^yml.Node, // its id's node
-	type: dat.Data_Type, // of its value: Int64 for any integer type, Bool or Blob
+	id:        ^yml.Node, // its id's node
+	type:      dat.Data_Type, // of its value: Int64 for any integer type, Bool, Blob, String, or Set for a user type
+	type_name: string, // a Set: the user type, looked up from the type the param is of
 }
 
 // Records the first error, at n (or nowhere when n is nil); always returns
@@ -779,7 +779,9 @@ build_enums :: proc(c: ^Compiler, n: ^yml.Node) -> (enums: []expr.Enum, ok: bool
 
 // params: each a mapping of id, type, enum, doc and doc-ref. A param holds
 // an integer (of any integer type, whose value is kept as it is given), a
-// boolean (bool) or a byte array (bytes).
+// boolean (bool), a byte array (bytes), a string (str), or an instance of
+// a user type, which is checked where an argument is given for it
+// (compile_args).
 @(private = "file")
 build_params :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node) -> (params: []Param_Def, ok: bool) {
 	if n.kind != .Seq do return nil, fail(c, .Invalid, n, "params must be a sequence")
@@ -797,24 +799,32 @@ build_params :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node) -> (params: []Pa
 		if type_node == nil do return nil, fail(c, .Unsupported, item, "param %s has no type; params of any type are not supported", name)
 		type_name := expect_scalar(c, type_node, "type") or_return
 		type: dat.Data_Type
+		user := ""
 		switch type_name {
 		case "bool":
 			type = .Bool
 		case "bytes":
 			type = .Blob
+		case "str":
+			type = .String
+		case "struct", "io", "any":
+			return nil, fail(c, .Unsupported, type_node, "param %s: type %s is not supported; only integer types, bool, bytes, str and user types are", name, type_name)
 		case:
 			prim, _, is_primitive := primitive(type_name)
-			if !is_primitive || prim not_in INTEGER_TYPES {
-				return nil, fail(c, .Unsupported, type_node, "param %s: type %s is not supported; only integer types, bool and bytes are", name, type_name)
+			if is_primitive && prim in INTEGER_TYPES {
+				type = .Int64
+			} else if is_primitive || strings.contains(type_name, "::") || strings.contains(type_name, "[") {
+				return nil, fail(c, .Unsupported, type_node, "param %s: type %s is not supported; only integer types, bool, bytes, str and user types are", name, type_name)
+			} else {
+				type, user = .Set, type_name
 			}
-			type = .Int64
 		}
 
 		if e := get(item, "enum"); e != nil {
 			if type != .Int64 do return nil, fail(c, .Invalid, get_key(item, "enum"), "param %s: enum applies only to integer types", name)
 			check_enum(c, e, name, visible_enums(c, td)) or_return
 		}
-		params[i] = {id_node, type}
+		params[i] = {id_node, type, user}
 	}
 	return params, true
 }
@@ -880,7 +890,7 @@ visible_enums :: proc(c: ^Compiler, td: ^Type_Def) -> []expr.Enum {
 // to the instances enclosing it. Once that set is compiled, set gets its
 // members, so that the decoder and the dumps need not look for them.
 @(private = "file")
-compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^mdata.Node) -> bool {
+compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^mdata.Node, arg_sets: []^mdata.Node = nil) -> bool {
 	if td.compiling != nil {
 		set.recursive = td.compiling
 		st := set_type(c, td.compiling)
@@ -933,6 +943,10 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 			params[i] = new_node(c, p.id.text, p.id.text)
 			params[i].type = p.type
 			params[i].count = mdata.Fixed_Count{1}
+			params[i].is_param = true
+			// its value is the instance its argument gives, of a set of its
+			// type compiled elsewhere, whose members it has
+			if p.type == .Set do copy_members(params[i], mdata.members(arg_sets[i]))
 		}
 		set.params = params
 
@@ -1553,12 +1567,7 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 		node.bits = compile_bits(c, bits, id, node.type, ids) or_return
 	}
 
-	// the arguments after the type's fields, which they can refer to: in a
-	// repeat, through the elements read so far
-	if user != nil {
-		compile_fields(c, user, node, chain_of(c, scope.types, user, node)) or_return
-		node.args = compile_args(c, type_node, id, user, call, element_scope) or_return
-	}
+	if user != nil do compile_user(c, user, node, type_node, id, call, scope, element_scope) or_return
 	if switch_node != nil {
 		compile_switch(c, td, attr, switch_node, id, ends, node, element_scope) or_return
 	}
@@ -1717,8 +1726,7 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 			if user == nil && strings.contains(type_name, "::") do return fail(c, .Unsupported, e.value, "%s: a type of another type (%s) is not supported", id, type_name)
 			if user == nil do return fail(c, .Invalid, e.value, "%s: unknown type %s", id, type_name)
 			case_node.type = .Set
-			compile_fields(c, user, case_node, chain_of(c, scope.types, user, case_node)) or_return
-			case_node.args = compile_args(c, e.value, id, user, call, scope) or_return
+			compile_user(c, user, case_node, e.value, id, call, scope, scope) or_return
 			user_type = type_name
 		}
 
@@ -1881,35 +1889,83 @@ split_call :: proc(c: ^Compiler, n: ^yml.Node, id, text: string) -> (name: strin
 	return strings.trim_space(text[:open]), {text[open + 1:end - 1], open + 1, true}, true
 }
 
-// The arguments of call, of user, the type of id given in n, compiled in
-// scope: one for each of user's params, of its type.
+// Compiles node, of type user given in n with the arguments of call, in
+// scope, for field id, whose scope is field_scope. The arguments come
+// after the type's fields, which they can refer to: in a repeat, through
+// the elements read so far. Of a type with a param of a user type they
+// come first: the param has the members of the set of its argument
+// (compile_args).
 @(private = "file")
-compile_args :: proc(c: ^Compiler, n: ^yml.Node, id: string, user: ^Type_Def, call: Call, scope: expr.Scope) -> (args: []^mdata.Expr, ok: bool) {
-	if !call.given && len(user.params) == 0 do return nil, true
+compile_user :: proc(c: ^Compiler, user: ^Type_Def, node: ^mdata.Node, n: ^yml.Node, id: string, call: Call, field_scope, scope: expr.Scope) -> bool {
+	for p in user.params {
+		if p.type != .Set do continue
+		arg_sets: []^mdata.Node
+		node.args, arg_sets = compile_args(c, n, id, user, call, scope) or_return
+		return compile_fields(c, user, node, chain_of(c, field_scope.types, user, node), arg_sets)
+	}
+	compile_fields(c, user, node, chain_of(c, field_scope.types, user, node)) or_return
+	node.args, _ = compile_args(c, n, id, user, call, scope) or_return
+	return true
+}
+
+// The arguments of call, of user, the type of id given in n, compiled in
+// scope: one for each of user's params, of its type, and for each param of
+// a user type, the set of its argument, compiled, of that type (nil for
+// the others).
+@(private = "file")
+compile_args :: proc(c: ^Compiler, n: ^yml.Node, id: string, user: ^Type_Def, call: Call, scope: expr.Scope) -> (args: []^mdata.Expr, arg_sets: []^mdata.Node, ok: bool) {
+	if !call.given && len(user.params) == 0 do return nil, nil, true
 	err: expr.Error
 	args, err = expr.compile_list(call.args, scope, c.allocator)
-	if err.kind != .None do return nil, expr_error(c, n, "type", err, call.start)
+	if err.kind != .None do return nil, nil, expr_error(c, n, "type", err, call.start)
 	for a in args do note_escapes(c, n, "type", a, scope)
 	if len(args) != len(user.params) {
-		return nil, fail(c, .Invalid, n, "%s: type %s takes %v argument%s, not %v", id, user.name, len(user.params), len(user.params) == 1 ? "" : "s", len(args))
+		return nil, nil, fail(c, .Invalid, n, "%s: type %s takes %v argument%s, not %v", id, user.name, len(user.params), len(user.params) == 1 ? "" : "s", len(args))
 	}
 
 	for a, i in args {
+		p := user.params[i]
 		want: mdata.Expr_Type
-		#partial switch user.params[i].type {
+		#partial switch p.type {
 		case .Int64:
 			want = .Int
 		case .Bool:
 			want = .Bool
 		case .Blob:
 			want = .Bytes
+		case .String:
+			want = .String
+		case .Set:
+			want = .Struct
 		}
 		if a.type != want {
-			message := fmt.aprintf("argument %v of %s, %s, must be %s, not %s", i + 1, user.name, user.params[i].id.text, expr.type_name(want), expr.type_name(a.type))
-			return nil, expr_error(c, n, "type", {kind = .Invalid, offset = a.offset, message = message}, call.start)
+			message := fmt.aprintf("argument %v of %s, %s, must be %s, not %s", i + 1, user.name, p.id.text, expr.type_name(want), expr.type_name(a.type))
+			return nil, nil, expr_error(c, n, "type", {kind = .Invalid, offset = a.offset, message = message}, call.start)
 		}
+		if p.type != .Set do continue
+
+		if arg_sets == nil do arg_sets = make([]^mdata.Node, len(args), c.scratch)
+		param_type := find_type(user, p.type_name)
+		if param_type == nil do return nil, nil, fail(c, .Invalid, n, "%s: param %s of type %s has an unknown type %s", id, p.id.text, user.name, p.type_name)
+		set := mdata.members(expr.struct_node(a))
+		kind := expr.Error_Kind.Invalid
+		message: string
+		for st in c.type_defs {
+			if st.set != set do continue
+			if st.td != param_type {
+				message = fmt.aprintf("argument %v of %s, %s, must be a %s, not a %s", i + 1, user.name, p.id.text, param_type.name, st.td.name)
+			} else if !st.done {
+				// its members are not all made yet
+				kind = .Unsupported
+				message = fmt.aprintf("argument %v of %s, %s, is an instance of a set that encloses this field, which is not supported", i + 1, user.name, p.id.text)
+			}
+			arg_sets[i] = set
+			break
+		}
+		if arg_sets[i] == nil do message = fmt.aprintf("argument %v of %s, %s, must be a %s", i + 1, user.name, p.id.text, param_type.name)
+		if message != "" do return nil, nil, expr_error(c, n, "type", {kind = kind, offset = a.offset, message = message}, call.start)
 	}
-	return args, true
+	return args, arg_sets, true
 }
 
 // terminator, or strz's 0, with consume, include and eos-error, and

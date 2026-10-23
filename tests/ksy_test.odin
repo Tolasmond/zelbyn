@@ -239,7 +239,13 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: s(1\ntypes:\n  s:\n    params:\n      - id: p\n        type: u1\n", .Invalid, 6, 11, "a: type s(1 does not end with )"},
 	{HEAD + "seq:\n  - id: a\n    type: s(1)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u1\n    seq:\n      - id: p\n        type: u1\n", .Invalid, 13, 13, "id p is already used"},
 	{HEAD + "types:\n  s:\n    params:\n      - id: p\n", .Unsupported, 7, 9, "param p has no type; params of any type are not supported"},
-	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: str\n", .Unsupported, 8, 15, "param p: type str is not supported; only integer types, bool and bytes are"},
+	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: struct\n", .Unsupported, 8, 15, "param p: type struct is not supported; only integer types, bool, bytes, str and user types are"},
+	{HEAD + "seq:\n  - id: a\n    type: s(_root)\ntypes:\n  s:\n    params:\n      - id: p\n        type: nope\n", .Invalid, 6, 11, "a: param p of type s has an unknown type nope"},
+	{HEAD + "seq:\n  - id: a\n    type: u\n  - id: b\n    type: s(_root)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u\n  u:\n    seq:\n      - id: x\n        type: u1\n", .Invalid, 8, 13, "type: argument 1 of s, p, must be a u, not a t"},
+	{HEAD + "seq:\n  - id: a\n    type: s(1)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u\n  u:\n    seq:\n      - id: x\n        type: u1\n", .Invalid, 6, 13, "type: argument 1 of s, p, must be a set, not an integer"},
+	{HEAD + "seq:\n  - id: b\n    type: s(_root)\ntypes:\n  s:\n    params:\n      - id: p\n        type: t\n", .Unsupported, 6, 13, "type: argument 1 of s, p, is an instance of a set that encloses this field, which is not supported"},
+	{HEAD + "seq:\n  - id: h\n    type: u\n  - id: b\n    type: s(h)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u\n    seq:\n      - id: x\n        size: p.up\n  u:\n    seq:\n      - id: n\n        type: u1\n    instances:\n      up:\n        value: _parent.h.n\n", .Unsupported, 16, 17, "size: value instance up refers to the sets that enclose its instance, which it cannot through a param"},
+	{HEAD + "seq:\n  - id: h\n    type: u\n  - id: b\n    type: s(h)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u\n    instances:\n      q:\n        io: p._io\n        pos: 0\n        type: u1\n  u:\n    seq:\n      - id: n\n        type: u1\n", .Unsupported, 16, 15, "io: _io of an instance given as an argument is not supported"},
 	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: bool\n        enum: e\n", .Invalid, 9, 9, "param p: enum applies only to integer types"},
 	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: u1\n        enum: e\n", .Invalid, 9, 15, "p: no enum e"},
 	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: u1\n        size: 1\n", .Invalid, 9, 9, `param p: unknown key "size"`},
@@ -746,6 +752,12 @@ t[0].table[1] = 33
 	// it, fail with the instance's path
 	expect_dump(t, "pos out of range", ksy_dump(t, src, {9, 7, 0x10, 0x11, 0x12, 0x20, 0x21}), "error: Offset_Out_Of_Range at 4 in t[0].sub[0].parent_ofs[0]")
 	expect_dump(t, "read past the end", ksy_dump(t, src, {2, 7, 0x10, 0x11, 0x12, 0x20}), "error: Unexpected_EOF at 6 in t[0].table[1]")
+
+	// a parse instance of a set instance that has been read, first read by
+	// an expression after it, is read as it would have been once that
+	// instance was: at pos in its stream
+	late := HEAD + "seq:\n  - id: a\n    type: s\n  - id: b\n    size: a.p\ntypes:\n  s:\n    seq:\n      - id: x\n        type: u1\n    instances:\n      p:\n        pos: 0\n        type: u1\n"
+	expect_dump(t, "parse instance read late", ksy_dump(t, late, {2, 1, 0xaa, 0xbb}), "t[0].a[0].x[0] = 2\nt[0].a[0].p[0] = 2\nt[0].b[0] = <2 bytes> 01 aa\n")
 
 	// in JSON, parse instances follow the fields, also when there are none
 	both := HEAD + "seq:\n  - id: a\n    type: u1\ninstances:\n  p:\n    pos: 0\n    type: u1\n  q:\n    pos: 0\n    size: 0\n    if: a == 0\n"
@@ -2494,6 +2506,76 @@ t[0].recs[1].extra[0] = 6
 t[0].pick[0].data[0] = <1 bytes> 07
 t[0].sub[0].v[0] = 8
 t[0].first[0].data[0] = <1 bytes> aa
+`)
+
+	// a param of a user type is the instance its argument gives, whose
+	// fields, value instances and parse instances it reaches, these read
+	// as they would have been once that instance was; and a str param
+	user := HEAD + `seq:
+  - id: hdrs
+    type: hdr
+    repeat: expr
+    repeat-expr: 2
+  - id: bodies
+    type: body(hdrs[_index], 'x' + hdrs[_index].tag)
+    repeat: expr
+    repeat-expr: 2
+  - id: sw
+    type:
+      switch-on: hdrs[0].n
+      cases:
+        1: body(hdrs[1], 'y')
+types:
+  hdr:
+    seq:
+      - id: n
+        type: u1
+      - id: tag
+        type: str
+        size: 1
+        encoding: ASCII
+    instances:
+      twice:
+        value: n * 2
+      peek:
+        pos: 0
+        type: u1
+      inner:
+        pos: 0
+        type: inner
+    types:
+      inner:
+        seq:
+          - id: v
+            type: u1
+        instances:
+          up:
+            value: _parent.n + v
+  body:
+    params:
+      - id: h
+        type: hdr
+      - id: name
+        type: str
+    seq:
+      - id: data
+        size: h.twice
+      - id: more
+        size: h.peek + h.inner.up
+        if: name == 'xb'
+`
+	expect_dump(t, "params of a user type", ksy_dump(t, user, {1, 'a', 2, 'b', 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99}), `t[0].hdrs[0].n[0] = 1
+t[0].hdrs[0].tag[0] = "a"
+t[0].hdrs[0].peek[0] = 1
+t[0].hdrs[0].inner[0].v[0] = 1
+t[0].hdrs[1].n[0] = 2
+t[0].hdrs[1].tag[0] = "b"
+t[0].hdrs[1].peek[0] = 1
+t[0].hdrs[1].inner[0].v[0] = 1
+t[0].bodies[0].data[0] = <2 bytes> aa bb
+t[0].bodies[1].data[0] = <4 bytes> cc dd ee ff
+t[0].bodies[1].more[0] = <4 bytes> 11 22 33 44
+t[0].sw[0].data[0] = <4 bytes> 55 66 77 88
 `)
 
 	// the top-level type of an imported schema can have params
