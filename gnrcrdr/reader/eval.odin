@@ -9,11 +9,13 @@ import "core:math"
 import "core:slice"
 import "core:unicode/utf8"
 
-// The value of an expression, by its type: Int, Float, Bool, Bytes, String,
-// Array and Struct in that order.
+// The value of an expression, by its type: Int (an int, or a u64 for one
+// above max(int)), Float, Bool, Bytes, String, Array and Struct in that
+// order.
 @(private)
 Eval_Value :: union {
 	int,
+	u64,
 	f64,
 	bool,
 	[]byte,
@@ -44,7 +46,10 @@ eval_int :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (n: int, err: dat.
 	assert(e.type == .Int)
 	if value, ok := eval_direct(d, e.direct, nil); ok do return value, .None
 	v := eval(d, e, {index = index}) or_return
-	return v.(int), .None
+	// one above max(int) is no size, count or offset
+	i, is_int := v.(int)
+	if !is_int do return 0, .Integer_Overflow
+	return i, .None
 }
 
 // Evaluates e, a Bool expression, as eval_int does. element is _, the
@@ -80,6 +85,8 @@ tree_value :: proc(v: Eval_Value) -> fld.Value {
 	#partial switch x in v {
 	case int:
 		return i64(x)
+	case u64:
+		return x
 	case f64:
 		return x
 	case bool:
@@ -114,8 +121,8 @@ literal_item :: proc(d: ^Decoder, x: mdata.Index, ctx: Eval_Context) -> (v: Eval
 	if !is_literal do return
 	index, index_err := eval(d, x.index, ctx)
 	if index_err != .None do return nil, true, index_err
-	i := index.(int)
-	if i < 0 || i >= len(literal.items) do return nil, true, .Index_Out_Of_Range
+	i, is_int := index.(int)
+	if !is_int || i < 0 || i >= len(literal.items) do return nil, true, .Index_Out_Of_Range
 	v, err = eval(d, literal.items[i], item_ctx)
 	return v, true, err
 }
@@ -196,6 +203,8 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 	switch x in e.variant {
 	case mdata.Int_Literal:
 		return x.value, .None
+	case mdata.Big_Literal:
+		return x.value, .None
 	case mdata.Float_Literal:
 		return x.value, .None
 	case mdata.Bool_Literal:
@@ -206,7 +215,9 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		if item, found, item_err := literal_item(d, x, ctx); found do return item, item_err
 		operand := eval(d, x.operand, ctx) or_return
 		index := eval(d, x.index, ctx) or_return
-		i := index.(int)
+		// an index above max(int) is beyond any array
+		i, is_int := index.(int)
+		if !is_int do return nil, .Index_Out_Of_Range
 		#partial switch o in operand {
 		case []byte:
 			if i < 0 || i >= len(o) do return nil, .Index_Out_Of_Range
@@ -221,7 +232,8 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		return utf8.rune_count_in_string(operand.(string)), .None
 	case mdata.To_S:
 		operand := eval(d, x.operand, ctx) or_return
-		return int_to_string(d, operand.(int)), .None
+		n, _ := as_wide(operand)
+		return int_to_string(d, n), .None
 	case mdata.Decode:
 		operand := eval(d, x.operand, ctx) or_return
 		bytes := operand.([]byte)
@@ -230,7 +242,7 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		operand := eval(d, x.operand, ctx) or_return
 		from := eval(d, x.from, ctx) or_return
 		to := eval(d, x.to, ctx) or_return
-		return substring(operand.(string), from.(int), to.(int))
+		return substring(operand.(string), clamp_int(from), clamp_int(to))
 	case mdata.To_Bytes:
 		operand := eval(d, x.operand, ctx) or_return
 		return values_to_bytes(d, operand.([]fld.Value))
@@ -253,11 +265,11 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		switch x.op {
 		case .Neg:
 			if f, is_float := operand.(f64); is_float do return -f, .None
-			n := operand.(int)
-			if n == min(int) do return nil, .Integer_Overflow
-			return -n, .None
+			n, _ := as_wide(operand)
+			return from_wide(-n)
 		case .Bit_Not:
-			return ~operand.(int), .None
+			n, _ := as_wide(operand)
+			return from_wide(~n)
 		case .Not:
 			return !operand.(bool), .None
 		}
@@ -497,7 +509,7 @@ single_value :: proc(value: fld.Value) -> (Eval_Value, dat.Read_Error) {
 	case u32:
 		return int(v), .None
 	case u64:
-		if v > u64(max(int)) do return nil, .Integer_Overflow
+		if v > u64(max(int)) do return v, .None
 		return int(v), .None
 	case []byte:
 		return v, .None
@@ -540,9 +552,11 @@ array_method :: proc(operand: Eval_Value, method: mdata.Array_Method_Kind) -> (v
 			return single_value(o[len(o) - 1])
 		case .Min, .Max:
 			best := single_value(o[0]) or_return
+			b, _ := as_wide(best)
 			for value in o[1:] {
-				n := single_value(value) or_return
-				if method == .Min ? n.(int) < best.(int) : n.(int) > best.(int) do best = n
+				item := single_value(value) or_return
+				n, _ := as_wide(item)
+				if method == .Min ? n < b : n > b do best, b = item, n
 			}
 			return best, .None
 		}
@@ -551,8 +565,9 @@ array_method :: proc(operand: Eval_Value, method: mdata.Array_Method_Kind) -> (v
 }
 
 // Integer operations fail rather than wrap, and / and % round toward
-// negative infinity (as Python does, and so Kaitai's Python runtime).
-// and and or evaluate their right operand only when they need it.
+// negative infinity (as Python does, and so Kaitai's Python runtime); one
+// with an integer above max(int) is exact (eval_binary_wide). and and or
+// evaluate their right operand only when they need it.
 @(private = "file", require_results)
 eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval_Value, err: dat.Read_Error) {
 	left := eval(d, x.left, ctx) or_return
@@ -571,7 +586,12 @@ eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval
 	// integers first: they are what the decoder evaluates per element
 	a, a_is_int := left.(int)
 	b, b_is_int := right.(int)
-	if !a_is_int || !b_is_int do return eval_binary_other(d, x.op, left, right), .None
+	if !a_is_int || !b_is_int {
+		if l, is_wide := as_wide(left); is_wide {
+			if r, r_is_wide := as_wide(right); r_is_wide do return eval_binary_wide(x.op, l, r)
+		}
+		return eval_binary_other(d, x.op, left, right), .None
+	}
 	n: int
 	overflow: bool
 	switch x.op {
@@ -620,6 +640,90 @@ eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval
 
 	if overflow do return nil, .Integer_Overflow
 	return n, .None
+}
+
+// x op y for two integers of which one is above max(int), exactly, with
+// the integer rules of eval_binary: a result beyond min(int) to max(u64)
+// is Integer_Overflow.
+@(private = "file", require_results)
+eval_binary_wide :: proc(op: mdata.Binary_Op, a, b: i128) -> (v: Eval_Value, err: dat.Read_Error) {
+	n: i128
+	overflow: bool
+	switch op {
+	case .Mul:
+		n, overflow = intrinsics.overflow_mul(a, b)
+	case .Add:
+		n = a + b
+	case .Sub:
+		n = a - b
+	case .Div:
+		if b == 0 do return nil, .Division_By_Zero
+		n = a / b
+		if a % b != 0 && (a < 0) != (b < 0) do n -= 1
+	case .Mod:
+		if b == 0 do return nil, .Division_By_Zero
+		n = b == -1 ? 0 : a %% b
+	case .Shl:
+		if b < 0 || b > 63 do return nil, .Invalid_Shift
+		n = a << uint(b)
+	case .Shr:
+		if b < 0 || b > 63 do return nil, .Invalid_Shift
+		n = a >> uint(b)
+	case .And:
+		n = a & b
+	case .Xor:
+		n = a ~ b
+	case .Or:
+		n = a | b
+	case .Eq:
+		return a == b, .None
+	case .Ne:
+		return a != b, .None
+	case .Lt:
+		return a < b, .None
+	case .Le:
+		return a <= b, .None
+	case .Gt:
+		return a > b, .None
+	case .Ge:
+		return a >= b, .None
+	case .Logical_And, .Logical_Or:
+		unreachable()
+	}
+	if overflow do return nil, .Integer_Overflow
+	return from_wide(n)
+}
+
+// v, an Int, as an i128.
+@(private = "file")
+as_wide :: proc(v: Eval_Value) -> (n: i128, is_int: bool) {
+	#partial switch x in v {
+	case int:
+		return i128(x), true
+	case u64:
+		return i128(x), true
+	}
+	return
+}
+
+// n as an Int: an int, or a u64 above max(int), and Integer_Overflow
+// beyond.
+@(private = "file", require_results)
+from_wide :: proc(n: i128) -> (v: Eval_Value, err: dat.Read_Error) {
+	switch {
+	case n >= i128(min(int)) && n <= i128(max(int)):
+		return int(n), .None
+	case n > 0 && n <= i128(max(u64)):
+		return u64(n), .None
+	}
+	return nil, .Integer_Overflow
+}
+
+// v, an Int, as an int, with one above max(int) as max(int).
+@(private = "file")
+clamp_int :: proc(v: Eval_Value) -> int {
+	n, is_int := v.(int)
+	return is_int ? n : max(int)
 }
 
 // x op y for two strings, two booleans, or two numbers of which one is a
@@ -713,8 +817,8 @@ values_to_bytes :: proc(d: ^Decoder, values: []fld.Value) -> (v: Eval_Value, err
 	bytes := arn.arena_make(d.arena, byte, len(values))
 	for value, i in values {
 		item := single_value(value) or_return
-		n := item.(int)
-		if n < 0 || n > 255 do return nil, .Integer_Overflow
+		n, is_int := item.(int)
+		if !is_int || n < 0 || n > 255 do return nil, .Integer_Overflow
 		bytes[i] = byte(n)
 	}
 	return bytes, .None
@@ -725,6 +829,8 @@ values_to_bytes :: proc(d: ^Decoder, values: []fld.Value) -> (v: Eval_Value, err
 as_float :: proc(v: Eval_Value) -> (f: f64, is_number: bool) {
 	#partial switch x in v {
 	case int:
+		return f64(x), true
+	case u64:
 		return f64(x), true
 	case f64:
 		return x, true
@@ -737,18 +843,19 @@ as_float :: proc(v: Eval_Value) -> (f: f64, is_number: bool) {
 @(private = "file", require_results)
 float_to_int :: proc(f: f64) -> (v: Eval_Value, err: dat.Read_Error) {
 	t := math.trunc(f)
-	// -2^63 fits, 2^63 does not; NaN fails both
-	if !(t >= -9223372036854775808.0 && t < 9223372036854775808.0) do return nil, .Integer_Overflow
+	// -2^63 fits, and so does any below 2^64; NaN fails both
+	if !(t >= -9223372036854775808.0 && t < 18446744073709551616.0) do return nil, .Integer_Overflow
+	if t >= 9223372036854775808.0 do return u64(t), .None
 	return int(t), .None
 }
 
 // The decimal digits of n, with a - when it is negative, in the tree's
 // arena: like a string that + makes, it lasts as long as the tree.
 @(private = "file")
-int_to_string :: proc(d: ^Decoder, n: int) -> string {
-	buf: [20]byte // the digits of min(int), and its -
+int_to_string :: proc(d: ^Decoder, n: i128) -> string {
+	buf: [20]byte // the digits of min(int), and its -, or of max(u64)
 	i := len(buf)
-	u := n < 0 ? -u64(n) : u64(n)
+	u := u64(n < 0 ? -n : n)
 	for {
 		i -= 1
 		buf[i] = '0' + byte(u % 10)

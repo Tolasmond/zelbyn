@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 177 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 180 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -26,13 +26,13 @@ OK	common/riff.ksy
 OK	common/utf16_with_bom.ksy
 OK	common/utf8_string.ksy
 OK	common/vlq_base128_be.ksy
-ERR	common/vlq_base128_le.ksy	Unsupported	common/vlq_base128_le.ksy:46:11	type: integer literal 0x8000_0000_0000_0000 does not fit in a 64-bit signed integer, which expressions are
+OK	common/vlq_base128_le.ksy
 OK	database/dbf.ksy
 OK	database/gettext_mo.ksy
 OK	database/sqlite3.ksy
 OK	database/tsm.ksy
 OK	executable/android_nanoapp_header.ksy
-ERR	executable/dex.ksy	Unsupported	common/vlq_base128_le.ksy:46:11	type: integer literal 0x8000_0000_0000_0000 does not fit in a 64-bit signed integer, which expressions are
+OK	executable/dex.ksy
 OK	executable/dos_mz.ksy
 ERR	executable/elf.ksy	Unsupported	executable/elf.ksy:1150:13	instance first_aux: parent is not supported
 OK	executable/java_class.ksy
@@ -177,7 +177,7 @@ OK	security/ssh_public_key.ksy
 OK	serialization/asn1/asn1_der.ksy
 OK	serialization/bson.ksy
 OK	serialization/chrome_pak.ksy
-ERR	serialization/google_protobuf.ksy	Unsupported	common/vlq_base128_le.ksy:46:11	type: integer literal 0x8000_0000_0000_0000 does not fit in a 64-bit signed integer, which expressions are
+OK	serialization/google_protobuf.ksy
 OK	serialization/microsoft_cfb.ksy
 OK	serialization/msgpack.ksy
 OK	serialization/php_serialized_value.ksy

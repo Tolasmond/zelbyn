@@ -227,7 +227,7 @@ type_name :: proc(t: mdata.Expr_Type) -> string {
 @(private = "file")
 resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 	switch x in e.variant {
-	case mdata.Int_Literal:
+	case mdata.Int_Literal, mdata.Big_Literal:
 		e.type = .Int
 	case mdata.Float_Literal:
 		e.type = .Float
@@ -619,7 +619,7 @@ reach_of :: proc(e: ^mdata.Expr) -> int {
 		return x.stream == nil ? 0 : reach_of(x.stream)
 	case mdata.Io_Eof:
 		return x.stream == nil ? 0 : reach_of(x.stream)
-	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Root_Arg, mdata.Repeat_Index, mdata.Repeat_Element:
+	case mdata.Int_Literal, mdata.Big_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Root_Arg, mdata.Repeat_Index, mdata.Repeat_Element:
 		return 0
 	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast, mdata.Call:
 		panic("reach_of: unresolved expression")

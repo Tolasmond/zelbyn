@@ -156,7 +156,7 @@ EVAL_CASES := [?]Eval_Case {
 	{text = "9223372036854775807 + 1", err = .Integer_Overflow},
 	{text = "-9223372036854775807 - 2", err = .Integer_Overflow},
 	{text = "4294967296 * 4294967296", err = .Integer_Overflow},
-	{text = "-(-9223372036854775807 - 1)", err = .Integer_Overflow},
+	{text = "-(-9223372036854775807 - 1) == 9223372036854775808", want = "true"},
 	{text = "(-9223372036854775807 - 1) / -1", err = .Integer_Overflow},
 	{text = "a / 0", err = .Division_By_Zero},
 	{text = "a % 0", err = .Division_By_Zero},
@@ -227,11 +227,26 @@ EVAL_CASES := [?]Eval_Case {
 	{text = "2.9.to_i", want = "2"},
 	{text = "(-2.9).to_i", want = "-2"},
 	{text = "(a / 2.0).to_i * 2", want = "4"},
-	{text = "1e19.to_i", err = .Integer_Overflow},
+	{text = "1e19.to_i == 10000000000000000000", want = "true"},
+	{text = "2e19.to_i", err = .Integer_Overflow},
 	{text = "(0.0 / 0).to_i", err = .Integer_Overflow},
 	{text = "(a == 5 ? hdr.tag : [1, 2, 3]).size", want = "2"},
 	{text = "(a == 4 ? hdr.tag : [1, 2, 3]).size", want = "3"},
 	{text = "[0.5, 2][1] / 4", want = "0.5"},
+
+	// integers are exact up to 2^64 - 1, as Kaitai's u8 values are
+	{text = "9223372036854775808 + 1 == 9223372036854775809 and 9223372036854775808 - 1 == 9223372036854775807", want = "true"},
+	{text = "18446744073709551615 + 1", err = .Integer_Overflow},
+	{text = "0x8000_0000_0000_0000 * 2", err = .Integer_Overflow},
+	{text = "0x8000_0000_0000_0000 >> 62", want = "2"},
+	{text = "(0x8000_0000_0000_0000 | 1) & 3", want = "1"},
+	{text = "18446744073709551615 / 2 == 9223372036854775807 and 18446744073709551615 % 10 == 5", want = "true"},
+	{text = "-1 < 0x8000_0000_0000_0000 and 0x8000_0000_0000_0000 > 9223372036854775807", want = "true"},
+	{text = "~0x8000_0000_0000_0000", err = .Integer_Overflow},
+	{text = "-0x8000_0000_0000_0000 == -9223372036854775807 - 1", want = "true"},
+	{text = "0x8000_0000_0000_0000.to_s == '9223372036854775808'", want = "true"},
+	{text = "a.as<u8> + 0xffff_ffff_ffff_fffa == 18446744073709551615", want = "true"},
+	{text = "[0x8000_0000_0000_0000, 1][0] > 1", want = "true"},
 
 	// substring counts code points, clamped to the string; as<bytes> makes
 	// bytes of integers
