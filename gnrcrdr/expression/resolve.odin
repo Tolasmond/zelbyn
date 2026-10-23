@@ -20,9 +20,11 @@ Scope :: struct {
 	// nil, or a parse instance whose pos is nil, to compile it; on failure
 	// the callback reports its own error. set is the set the expression
 	// reaches it through, whose members it is of (mdata.members). When nil,
-	// such a reference is an error.
+	// such a reference is an error. With type_only, the reference is in the
+	// operand of _sizeof, which needs only the parse instance's type, so its
+	// pos can be left nil, as it can be the expression being compiled.
 	compile_instance:       proc(data: rawptr, set: ^mdata.Node, instance: ^mdata.Value_Instance) -> bool,
-	compile_parse_instance: proc(data: rawptr, set: ^mdata.Node, instance: ^mdata.Node) -> bool,
+	compile_parse_instance: proc(data: rawptr, set: ^mdata.Node, instance: ^mdata.Node, type_only: bool) -> bool,
 
 	// Called for _sizeof, sizeof<t> and bitsizeof<t>: the size in bits that
 	// Kaitai's compiler gives the attribute or parse instance called name
@@ -197,6 +199,7 @@ Resolver :: struct {
 	scope:     Scope,
 	allocator: mem.Allocator,
 	err:       Error,
+	type_only: bool, // resolving the operand of _sizeof, which only types are needed for (Scope.compile_parse_instance)
 }
 
 @(private = "file")
@@ -272,6 +275,13 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 			if r.scope.same_type == nil || !r.scope.same_type(r.scope.data, struct_node(x.then), struct_node(x.otherwise)) {
 				return fail(r, .Unsupported, e.offset, "?: on sets of different types is not supported")
 			}
+		case .Array:
+			// of one item type, which array_item_type finds in then
+			expect(r, x.otherwise, .Array) or_return
+			t := array_item_type(r, e, x.then) or_return
+			u := array_item_type(r, e, x.otherwise) or_return
+			if t == .Struct || t == .Array do return fail(r, .Unsupported, x.then.offset, "?: on an array of %s is not supported; only of integers, floats, booleans, strings and byte arrays", type_name(t))
+			if u != t do return fail(r, .Invalid, x.otherwise.offset, "the branches of ?: must have one type: an array of %s, not of %s", type_name(t), type_name(u))
 		case:
 			return fail(r, .Unsupported, x.then.offset, "?: on %s is not supported", type_name(x.then.type))
 		}
@@ -476,8 +486,8 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 			if p.ref_name != name do continue
 			if p.pos == nil {
 				if r.scope.compile_parse_instance == nil do return fail(r, .Invalid, e.offset, "instance %s cannot be used here", name)
-				if !r.scope.compile_parse_instance(r.scope.data, struct_node(base), p) do return fail(r, .Invalid, e.offset, "instance %s is not valid", name)
-				assert(p.pos != nil, "resolve: compile_parse_instance left the instance uncompiled")
+				if !r.scope.compile_parse_instance(r.scope.data, struct_node(base), p, r.type_only) do return fail(r, .Invalid, e.offset, "instance %s is not valid", name)
+				assert(r.type_only || p.pos != nil, "resolve: compile_parse_instance left the instance uncompiled")
 			}
 			field, slot = p, k
 			break
@@ -732,8 +742,9 @@ depth :: proc(e: ^mdata.Expr) -> int {
 }
 
 // The type of one item of array, an expression of type Array: all the
-// values of a field (a Field_Ref), an array literal, or a value instance
-// whose expression is one of those.
+// values of a field (a Field_Ref), an array literal, a value instance whose
+// expression is one of those, a ?: of those, or an item of an array of
+// arrays.
 @(private = "file")
 array_item_type :: proc(r: ^Resolver, e: ^mdata.Expr, array: ^mdata.Expr) -> (t: mdata.Expr_Type, ok: bool) {
 	#partial switch x in array.variant {
@@ -743,14 +754,39 @@ array_item_type :: proc(r: ^Resolver, e: ^mdata.Expr, array: ^mdata.Expr) -> (t:
 		return x.item_type, true
 	case mdata.Value_Ref:
 		return array_item_type(r, e, x.instance.expr)
+	case mdata.Ternary:
+		return array_item_type(r, e, x.then)
+	case mdata.Index:
+		return array_item_type(r, e, first_item(x.operand))
+	case mdata.Array_Method:
+		return array_item_type(r, e, first_item(x.operand))
 	}
 	panic("array_item_type: not an array")
+}
+
+// The first item of array, an array of arrays, which are all array
+// literals of one type: of an array literal, of a value instance whose
+// expression is one, or of an item of an array of those.
+@(private = "file")
+first_item :: proc(array: ^mdata.Expr) -> ^mdata.Expr {
+	#partial switch x in array.variant {
+	case mdata.Array_Literal:
+		return x.items[0]
+	case mdata.Value_Ref:
+		return first_item(x.instance.expr)
+	case mdata.Index:
+		return first_item(first_item(x.operand))
+	case mdata.Array_Method:
+		return first_item(first_item(x.operand))
+	}
+	panic("first_item: not an array of arrays")
 }
 
 // [a, b, ...]: integer literals from 0 to 255 make a Bytes_Literal, as in
 // Kaitai; other items make an Array of their type, which must be one of
 // Int, Float, Bool, String and Bytes, the same for all, but that among
-// floats an integer literal is made a float literal.
+// floats an integer literal is made a float literal, or array literals
+// whose items are all of one type.
 @(private = "file")
 resolve_array_literal :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Array_Literal) -> bool {
 	if len(x.items) == 0 do return fail(r, .Invalid, e.offset, "an array literal cannot be empty; its type would be unknown")
@@ -774,8 +810,14 @@ resolve_array_literal :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Array_Liter
 	}
 	#partial switch t {
 	case .Int, .Float, .Bool, .String, .Bytes:
+	case .Array:
+		inner := array_item_type(r, e, x.items[0]) or_return
+		for item in x.items {
+			if _, is_literal := item.variant.(mdata.Array_Literal); !is_literal do return fail(r, .Unsupported, item.offset, "an array literal of arrays is only supported of array literals")
+			if u := array_item_type(r, e, item) or_return; u != inner do return fail(r, .Invalid, item.offset, "the items of an array literal must have one type: an array of %s, not of %s", type_name(inner), type_name(u))
+		}
 	case:
-		return fail(r, .Unsupported, x.items[0].offset, "an array literal of %s is not supported; only of integers, floats, booleans, strings and byte arrays", type_name(t))
+		return fail(r, .Unsupported, x.items[0].offset, "an array literal of %s is not supported; only of integers, floats, booleans, strings, byte arrays and arrays", type_name(t))
 	}
 	for item in x.items {
 		if lit, is_int := item.variant.(mdata.Int_Literal); is_int && t == .Float {
@@ -838,9 +880,9 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 		return true
 	case "_io":
 		if operand.type != .Struct do return fail(r, .Invalid, e.offset, "%s has no _io; only a set has", type_name(operand.type))
-		if _, through := through_param(operand); through do return fail(r, .Unsupported, e.offset, "_io of an instance given as an argument is not supported")
 		// the decoder finds the stream of an instance being decoded in its
-		// frame, and keeps that of the instances of any other set
+		// frame, and keeps that of the instances of any other set; that of a
+		// param is its argument's, whose set the compiler marks
 		if _, is_instance := operand.variant.(mdata.Instance); !is_instance do keep_stream_of(operand)
 		e.variant = mdata.Io{operand}
 		e.type = .Stream
@@ -988,7 +1030,12 @@ resolve_member_size_of :: proc(r: ^Resolver, e: ^mdata.Expr, operand: ^mdata.Exp
 		}
 	case mdata.Member:
 		if !is_special(x.name) {
-			resolve(r, x.operand) or_return
+			// the operand is not evaluated, as the size replaces it
+			type_only := r.type_only
+			r.type_only = true
+			resolved := resolve(r, x.operand)
+			r.type_only = type_only
+			if !resolved do return false
 			if x.operand.type != .Struct do return fail(r, .Invalid, operand.offset, "%s has no field %s", type_name(x.operand.type), x.name)
 			return resolve_size_of(r, e, struct_node(x.operand), x.name, false, false)
 		}

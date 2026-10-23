@@ -146,9 +146,10 @@ Index :: struct {
 }
 
 // [a, b, ...]: an Array of the items, which resolution makes all of one
-// type, item_type, an Int, Float, Bool, String or Bytes; one of integer literals
-// from 0 to 255 is a Bytes_Literal instead, as in Kaitai. Each evaluation
-// makes the array in the tree's arena.
+// type, item_type, an Int, Float, Bool, String or Bytes, or an Array whose
+// items, array literals, are all of one type; one of integer literals from
+// 0 to 255 is a Bytes_Literal instead, as in Kaitai. Each evaluation makes
+// the array in the tree's arena.
 Array_Literal :: struct {
 	items:     []^Expr,
 	item_type: Expr_Type,
@@ -239,9 +240,12 @@ To_Bytes :: struct {
 
 // The argument given to the decoder (reader.read's args) for param index
 // of the top-level type of the schema decoded: the root's args are these,
-// as nothing in the schema gives them.
+// as nothing in the schema gives them. For a param of a user type, the
+// argument is bytes, which the decoder reads, in a stream of their own, as
+// an instance of set, before the root.
 Root_Arg :: struct {
 	index: int,
+	set:   ^Node,
 }
 
 // The set instance being decoded (up = 0), one of its enclosing instances

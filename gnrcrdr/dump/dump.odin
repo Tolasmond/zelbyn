@@ -72,7 +72,7 @@ write_value :: proc(w: io.Writer, v: fld.Value) -> io.Error {
 		if len(x) > BLOB_PREVIEW do io.write_string(w, " ...") or_return
 	case bool:
 		io.write_string(w, x ? "true" : "false") or_return
-	case ^fld.Instance:
+	case ^fld.Instance, []fld.Value:
 		return .Unsupported
 	case:
 		return .Unsupported

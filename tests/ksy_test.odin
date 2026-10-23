@@ -40,7 +40,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    size: 2\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n    process: zlib\n", .Unsupported, 11, 5, "a: process on a switch-on with a case that is not a user type is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    io: _root._io\n", .Unsupported, 7, 5, "attribute a: io is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    sizee: 1\n", .Invalid, 7, 5, `attribute a: unknown key "sizee"`},
-	{HEAD + "params:\n  - id: p\n    type: s\ntypes:\n  s: {}\n", .Unsupported, 5, 9, "param p: a param of a user type on the top-level type of the schema compiled is not supported"},
+	{HEAD + "params:\n  - id: p\n    type: s\ntypes:\n  s:\n    params:\n      - id: q\n        type: u1\n", .Unsupported, 5, 9, "param p: its type s has params, which nothing can give"},
+	{HEAD + "params:\n  - id: p\n    type: nope\n", .Invalid, 5, 9, "param p: unknown type nope"},
 	{HEAD + "sequence: []\n", .Invalid, 4, 1, `the top level: unknown key "sequence"`},
 	{"meta:\n  id: t\n  imports: a\n", .Invalid, 3, 12, "imports must be a sequence"},
 	{"meta:\n  id: t\n  imports: ['']\n", .Invalid, 3, 13, "imports: an import is empty"},
@@ -260,7 +261,6 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: s(1)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u\n  u:\n    seq:\n      - id: x\n        type: u1\n", .Invalid, 6, 13, "type: argument 1 of s, p, must be a set, not an integer"},
 	{HEAD + "seq:\n  - id: b\n    type: s(_root)\ntypes:\n  s:\n    params:\n      - id: p\n        type: t\n", .Unsupported, 6, 13, "type: argument 1 of s, p, is an instance of a set that encloses this field, which is not supported"},
 	{HEAD + "seq:\n  - id: h\n    type: u\n  - id: b\n    type: s(h)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u\n    seq:\n      - id: x\n        size: p.up\n  u:\n    seq:\n      - id: n\n        type: u1\n    instances:\n      up:\n        value: _parent.h.n\n", .Unsupported, 16, 17, "size: value instance up refers to the sets that enclose its instance, which it cannot through a param"},
-	{HEAD + "seq:\n  - id: h\n    type: u\n  - id: b\n    type: s(h)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u\n    instances:\n      q:\n        io: p._io\n        pos: 0\n        type: u1\n  u:\n    seq:\n      - id: n\n        type: u1\n", .Unsupported, 16, 15, "io: _io of an instance given as an argument is not supported"},
 	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: bool\n        enum: e\n", .Invalid, 9, 9, "param p: enum applies only to integer types"},
 	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: u1\n        enum: e\n", .Invalid, 9, 15, "p: no enum e"},
 	{HEAD + "types:\n  s:\n    params:\n      - id: p\n        type: u1\n        size: 1\n", .Invalid, 9, 9, `param p: unknown key "size"`},
@@ -2627,6 +2627,42 @@ t[0].flags[0] = <1 bytes> 53
 t[0].arr_ops[0] = <6 bytes> 46 41 41 41 41 41
 `)
 	expect_dump(t, "neither", ksy_dump(t, src, {'P', 'Z', 0}), "error: Not_Any_Of at 0 in t[0].magic[0]")
+
+	// array literals of arrays, indexed at every depth, whole (.first,
+	// .last) and through a value instance; [1, 2] in them is bytes
+	arrays := HEAD + `seq:
+  - id: k
+    type: u1
+  - id: a
+    size: (table[k][1] * 4).to_i
+  - id: b
+    size: row.first.to_i
+  - id: c
+    size: words[k].size
+  - id: d
+    size: words[0][1].length
+  - id: e
+    size: nested[1][0][1]
+  - id: f
+    size: table.last[0].to_i
+instances:
+  table:
+    value: '[[0.5, 1], [1.5, 0.75]]'
+  row:
+    value: table[k]
+  words:
+    value: "[['a', 'bb'], ['ccc']]"
+  nested:
+    value: '[[[1, 2]], [[3, 4], [5, 6]]]'
+`
+	expect_dump(t, "arrays of arrays", ksy_dump(t, arrays, transmute([]byte)string("\x01AAABCDDEEEEF")), `t[0].k[0] = 1
+t[0].a[0] = <3 bytes> 41 41 41
+t[0].b[0] = <1 bytes> 42
+t[0].c[0] = <1 bytes> 43
+t[0].d[0] = <2 bytes> 44 44
+t[0].e[0] = <4 bytes> 45 45 45 45
+t[0].f[0] = <1 bytes> 46
+`)
 }
 
 // to-string, at the top level and in a type, is parsed and otherwise
@@ -3328,6 +3364,80 @@ seq:
 			expect_dump(t, "arguments without params", dump_decoded(t, &ff, {1}, {i64(1)}), "error: Invalid_Arguments at 0 in ")
 		}
 	}
+	{
+		// a param of a user type on the top-level type is given bytes, read
+		// as an instance of it in a stream of their own, whose _io a parse
+		// instance reads; also _io of a param of a type, and ?: on arrays
+		ff: mdat.File_Format
+		defer mdat.destroy_file_format(&ff)
+		err := ksy.compile(HEAD + `params:
+  - id: hp
+    type: hdr
+seq:
+  - id: x
+    size: hp.a
+  - id: h
+    type: hdr
+  - id: u
+    type: user(h)
+  - id: k
+    type: u1
+  - id: xs
+    type: u1
+    repeat: expr
+    repeat-expr: 3
+  - id: y
+    size: '(k == 0 ? xs : ys).size'
+  - id: z
+    size: '(k == 0 ? ys : xs)[0] - 9'
+instances:
+  via_io:
+    io: hp._io
+    pos: 1
+    type: u1
+  ys:
+    value: '[10, 300]'
+types:
+  hdr:
+    seq:
+      - id: a
+        type: u1
+      - id: b
+        type: u1
+  user:
+    params:
+      - id: p
+        type: hdr
+    instances:
+      q:
+        io: p._io
+        pos: 0
+        type: u1
+`, &ff)
+		defer ksy.destroy_error(&err)
+		if testing.expectf(t, err.kind == .None, "compile: %s", err.message) {
+			input := transmute([]byte)string("XX\x05\x06\x00\x01\x02\x03YYYZ")
+			expect_dump(t, "user-type top-level param", dump_decoded(t, &ff, input, {[]byte{2, 7}}), `t[0].x[0] = <2 bytes> 58 58
+t[0].h[0].a[0] = 5
+t[0].h[0].b[0] = 6
+t[0].u[0].q[0] = 88
+t[0].k[0] = 0
+t[0].xs[0] = 1
+t[0].xs[1] = 2
+t[0].xs[2] = 3
+t[0].y[0] = <3 bytes> 59 59 59
+t[0].z[0] = <1 bytes> 5a
+t[0].via_io[0] = 7
+`)
+			expect_dump(t, "user-type top-level param, short", dump_decoded(t, &ff, input, {[]byte{2}}), "error: Unexpected_EOF at 1 in hp[0].b[0]")
+			expect_dump(t, "user-type top-level param, not bytes", dump_decoded(t, &ff, input, {i64(2)}), "error: Invalid_Arguments at 0 in ")
+		}
+	}
+
+	// _sizeof needs only the type of a parse instance, so the value
+	// instance that gives its pos can use it, as mcap.ksy does
+	sized := HEAD + "seq:\n  - id: a\n    type: u1\ninstances:\n  rec:\n    pos: ofs\n    type: r\n  ofs:\n    value: _io.size - rec.x._sizeof - 1\ntypes:\n  r:\n    seq:\n      - id: x\n        type: u2\n"
+	expect_dump(t, "_sizeof in pos", ksy_dump(t, sized, {9, 1, 2, 3}), "t[0].a[0] = 9\nt[0].rec[0].x[0] = 513\n")
 
 	// the top-level type of an imported schema can have params
 	expect_dump(t, "imported params", ksy_file_dump(t, "tests/schemas/params/main.ksy", nil, {2, 5, 6, 7}), `main[0].n[0] = 2

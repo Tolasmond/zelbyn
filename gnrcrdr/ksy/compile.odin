@@ -55,34 +55,37 @@ import "core:strings"
 //     and the keys of an attribute, or without pos when they read nothing,
 //     as a switch-on whose cases' types read nothing does
 //   - .pos, .size and .eof of _io and of the _io of another set instance
-//   - ?: of sets of one type
+//   - ?: of sets of one type, and of arrays of one item type but sets and
+//     arrays
 //   - integers in expressions exact from -2^63 to 2^64 - 1
 //   - float literals and float fields in expressions, with + - * / and the
 //     comparisons, also with integers
 //   - casts, .as<t>, to an integer type, to bytes of an array of integers,
 //     and, of a switch-on field, to the user type of a case; array
-//     literals, [a, b]; and the methods .to_s(encoding) of bytes and
+//     literals, [a, b], also of array literals; and the methods
+//     .to_s(encoding) of bytes and
 //     .substring(from, to) of a string
 //   - params of integer types, bool, bytes, str and user types, in types
-//     and at the top level of an imported schema, given as t(a, b), and
-//     but for user types, on the top-level type of the schema compiled,
-//     whose arguments the decoder is given (Root_Arg)
+//     and at the top level of an imported schema, given as t(a, b), and on
+//     the top-level type of the schema compiled, whose arguments the
+//     decoder is given (Root_Arg), for a user type as bytes it reads one
+//     from (root_arg_sets)
 //   - enums, whose values are names or mappings of id, doc and doc-ref
 //     (enum constants in expressions, a::e::v by path)
 //   - the extensions -orig-id (a list of names leaves the id), -peek,
 //     -while-peek, -until-peek and -bits
 //
 // Not supported yet (Unsupported): other encodings, instances without pos or
-// value that read bytes, params of other types (struct, io, any) and of a
-// user type on the top-level type of the schema compiled, % of a float,
-// array literals of arrays, valid on a float, min and max on a type other
-// than an integer, an endian that is a switch-on on the top-level type or in
-// a type that contains itself, a bit-endian that is a switch-on, imports in
-// a type, parent other than _parent, _parent._parent and so on, in a type
-// that contains itself, the members of the sets enclosing it, other than
-// through _root (in a value instance, only that of the schema compiled),
-// unless a parent gives its fields inside it the same ones, and an
-// instance that refers to itself through a field of its type.
+// value that read bytes, params of other types (struct, io, any), and of a
+// user type with params on the top-level type of the schema compiled, % of a
+// float, ?: of arrays of sets or arrays, valid on a float, min and max on a
+// type other than an integer, an endian that is a switch-on on the top-level
+// type or in a type that contains itself, a bit-endian that is a switch-on,
+// imports in a type, parent other than _parent, _parent._parent and so on,
+// in a type that contains itself, the members of the sets enclosing it,
+// other than through _root (in a value instance, only that of the schema
+// compiled), unless a parent gives its fields inside it the same ones, and
+// an instance that refers to itself through a field of its type.
 
 Error_Kind :: enum {
 	None,
@@ -133,6 +136,7 @@ compile :: proc(src: string, file_format: ^mdata.File_Format, path := "", import
 	c.type_defs = make([dynamic]Set_Type, c.scratch)
 	c.deferred = make([dynamic]Deferred, c.scratch)
 	c.rootless = make([dynamic]^mdata.Node, c.scratch)
+	c.param_args = make([dynamic]Param_Arg, c.scratch)
 	c.imported = make(map[string]^Type_Def, c.scratch)
 
 	c.schema = new_schema(&c, path)
@@ -157,6 +161,7 @@ Compiler :: struct {
 	deferred:        [dynamic]Deferred,                          // the instances that nothing referred to by the end of their set, compiled once every set is; in scratch
 	rootless:        [dynamic]^mdata.Node,                       // the sets of types declared in another schema than the field's, not at its top level, which have no _root (chain_of); in scratch
 	current:         ^mdata.Node,                                // the set whose fields or parse instance are being compiled, which a set compiled now is inside (Set_Type.outer)
+	param_args:      [dynamic]Param_Arg,                         // each param of a user type, with the set of its argument; in scratch
 	err:             Error,
 }
 
@@ -167,6 +172,13 @@ Deferred :: struct {
 	set:   ^mdata.Node,
 	value: ^mdata.Value_Instance,
 	parse: ^mdata.Node,
+}
+
+// A param of a user type, and the set of its argument, which keeps the
+// stream of its instances when the param's _io is used (keeps_stream).
+@(private = "file")
+Param_Arg :: struct {
+	param, set: ^mdata.Node,
 }
 
 // A set compiled, and its type. Sizes are rare, so the sets are searched
@@ -262,6 +274,7 @@ Parse_Source :: struct {
 	scope:     expr.Scope, // that of the set's fields
 	order:     Maybe(endian.Byte_Order), // Compiler.order for the set
 	compiling: bool,
+	typed:     bool, // its type is compiled (compile_field), but maybe not its io and pos
 }
 
 // A type: the top level of a schema, or an entry of types. Its attributes
@@ -448,12 +461,6 @@ identifier :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (id: string, ok:
 @(private = "file")
 compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) -> bool {
 	top := load_schema(c, root) or_return
-	// their arguments are given to the decoder (Root_Arg), which can give no
-	// instance of a type
-	for p in top.params {
-		if p.type == .Set do return fail(c, .Unsupported, p.id, "param %s: a param of a user type on the top-level type of the schema compiled is not supported, as no argument can be given for it", p.id.text)
-	}
-
 	name := display_name(c, get(root, "meta"), top.name) or_return
 	node := new_node(c, name, top.name)
 	node.type = .Set
@@ -464,7 +471,8 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 	c.root = node
 	// nothing is read before the root that its order could depend on
 	if declares_endian_switch(top) do return fail(c, .Unsupported, top.meta.endian_switch, "endian: switch-on is not supported on the top-level type of the schema compiled, except in an imported schema")
-	compile_fields(c, top, node, {node}) or_return
+	arg_sets := root_arg_sets(c, top) or_return
+	compile_fields(c, top, node, {node}, arg_sets) or_return
 	if len(node.params) > 0 {
 		args := make([]^mdata.Expr, len(node.params), c.allocator)
 		for p, k in node.params {
@@ -478,8 +486,10 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 				type = .Bytes
 			case .String:
 				type = .String
+			case .Set:
+				type = .Struct
 			}
-			args[k] = new_expr(c, type, mdata.Root_Arg{k})
+			args[k] = new_expr(c, type, mdata.Root_Arg{k, arg_sets == nil ? nil : arg_sets[k]})
 		}
 		node.args = args
 	}
@@ -493,6 +503,11 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 		if pending do compile_deferred(c, item) or_return
 	}
 
+	// _io of a param is the stream of its argument's instance
+	for pa in c.param_args {
+		if pa.param.keeps_stream do pa.set.keeps_stream = true
+	}
+
 	// a reused set's expressions are all compiled; its fields inside it
 	// are read as it is
 	for st in c.type_defs {
@@ -503,6 +518,30 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 		}
 	}
 	return true
+}
+
+// The sets that the arguments of the params of top, the top-level type of
+// the schema compiled, are read as (Root_Arg): for a param of a user type,
+// its type, compiled as the instance the caller of Kaitai's runtimes makes
+// of it from bytes would be, with no _parent, and no _root but at the top
+// level of its schema; nil for any other param, or when there is none.
+@(private = "file")
+root_arg_sets :: proc(c: ^Compiler, top: ^Type_Def) -> (arg_sets: []^mdata.Node, ok: bool) {
+	for p, k in top.params {
+		if p.type != .Set do continue
+		if arg_sets == nil do arg_sets = make([]^mdata.Node, len(top.params), c.allocator)
+		user := find_type(top, p.type_name)
+		if user == nil do return nil, fail(c, .Invalid, p.id, "param %s: unknown type %s", p.id.text, p.type_name)
+		if len(user.params) > 0 do return nil, fail(c, .Unsupported, p.id, "param %s: its type %s has params, which nothing can give on the top-level type of the schema compiled", p.id.text, p.type_name)
+		set := new_node(c, p.id.text, p.id.text)
+		set.type = .Set
+		set.count = mdata.Fixed_Count{1}
+		// a type of this schema too has no _root there (chain_of)
+		if user.parent != nil && user.schema == c.schema do append(&c.rootless, set)
+		compile_type(c, user, set, {}) or_return
+		arg_sets[k] = set
+	}
+	return arg_sets, true
 }
 
 // Checks the top level and meta of c.schema, whose document's root is root,
@@ -1072,7 +1111,10 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 			params[i].is_param = true
 			// its value is the instance its argument gives, of a set of its
 			// type compiled elsewhere, whose members it has
-			if p.type == .Set do copy_members(params[i], mdata.members(arg_sets[i]))
+			if p.type == .Set {
+				copy_members(params[i], mdata.members(arg_sets[i]))
+				append(&c.param_args, Param_Arg{params[i], mdata.members(arg_sets[i])})
+			}
 		}
 		set.params = params
 
@@ -1275,8 +1317,8 @@ compile_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^mdata.V
 }
 
 @(private = "file")
-compile_parse_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^mdata.Node) -> bool {
-	return compile_parse_instance((^Compiler)(data), set, inst)
+compile_parse_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^mdata.Node, type_only: bool) -> bool {
+	return compile_parse_instance((^Compiler)(data), set, inst, type_only)
 }
 
 // The enum called name in the type of set, a set compiled
@@ -1496,13 +1538,16 @@ constant_int :: proc(c: ^Compiler, n: ^yml.Node) -> (v: int, ok: bool) {
 }
 
 // Compiles inst, a parse instance of set (of its members), as an attribute,
-// then its io and pos. It can use the fields of set compiled so far, and its
-// instances, and once every set is, any field. pos is compiled last: until it is set, a reference to inst
-// compiles it, so that one from inst itself is found, also through a field
-// of its type inside it (set.recursive), which is another instance, but
-// whose type is not known yet.
+// then its io and pos, or with type_only, for the operand of _sizeof, only
+// as an attribute, once. It can use the fields of set compiled so far, and
+// its instances, and once every set is, any field. pos is compiled last:
+// until it is set, a reference to inst compiles it, so that one from inst
+// itself is found, also through a field of its type inside it
+// (set.recursive), which is another instance, but whose type is not known
+// yet; one for its type alone is not to itself once that is compiled, as
+// mcap.ksy's pos of footer uses footer.op._sizeof.
 @(private = "file")
-compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node) -> bool {
+compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node, type_only := false) -> bool {
 	src := c.parse_instances[inst]
 	schema := c.schema
 	defer c.schema = schema
@@ -1510,6 +1555,7 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 	current := c.current
 	defer c.current = current
 	c.current = mdata.members(set)
+	if type_only && src.typed do return true
 	if src.compiling && set.recursive != nil do return fail(c, .Unsupported, src.entry.key, "instance %s refers to itself in a field of its type; a type that contains itself cannot be compiled that way", inst.ref_name)
 	if src.compiling do return fail(c, .Invalid, src.entry.key, "instance %s refers to itself", inst.ref_name)
 	src.compiling = true
@@ -1520,15 +1566,17 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 
 	spec := src.entry.value
 	pos := get(spec, "pos")
-	if pos == nil {
-		// Kaitai reads it where its stream is when it is first used, and
-		// moves the stream past it, which is known only for one that reads
-		// nothing
-		if !reads_nothing(c, src.td, spec, inst.ref_name) {
+	if !src.typed {
+		// Kaitai reads one without pos where its stream is when it is first
+		// used, and moves the stream past it, which is known only for one
+		// that reads nothing
+		if pos == nil && !reads_nothing(c, src.td, spec, inst.ref_name) {
 			return fail(c, .Unsupported, src.entry.key, "instance %s: an instance without pos or value that reads bytes is not supported; only one whose type or size reads none is", inst.ref_name)
 		}
+		compile_field(c, src.td, spec, inst, src.scope, nil) or_return
+		src.typed = true
 	}
-	compile_field(c, src.td, spec, inst, src.scope, nil) or_return
+	if type_only do return true
 	if n := get(spec, "io"); n != nil {
 		inst.io = compile_expr(c, n, "io", src.scope, .Stream) or_return
 	}
