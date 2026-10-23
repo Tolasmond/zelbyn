@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 138 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 146 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -22,7 +22,7 @@ OK	cad/monomakh_sapr_chg.ksy
 ERR	common/bcd.ksy	Unsupported	common/bcd.ksy:37:1	params on the top-level type are not supported, except in an imported schema
 OK	common/bytes_with_io.ksy
 OK	common/dos_datetime.ksy
-ERR	common/riff.ksy	Unsupported	common/riff.ksy:71:16	value: _io in a value instance is not supported
+ERR	common/riff.ksy	Unsupported	common/riff.ksy:135:16	value: method calls are not supported
 OK	common/utf16_with_bom.ksy
 OK	common/utf8_string.ksy
 OK	common/vlq_base128_be.ksy
@@ -35,7 +35,7 @@ OK	executable/android_nanoapp_header.ksy
 ERR	executable/dex.ksy	Unsupported	common/vlq_base128_le.ksy:46:11	type: integer literal 0x8000_0000_0000_0000 does not fit in a 64-bit signed integer, which expressions are
 OK	executable/dos_mz.ksy
 ERR	executable/elf.ksy	Unsupported	executable/elf.ksy:363:9	endian: switch-on is not supported
-ERR	executable/java_class.ksy	Unsupported	executable/java_class.ksy:282:9	an attribute in type method_handle_cp_info has no id; attributes without one are not supported
+OK	executable/java_class.ksy
 ERR	executable/mach_o.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
 ERR	executable/mach_o_fat.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
 ERR	executable/microsoft_pe.ksy	Invalid	executable/microsoft_pe.ksy:24:3	instance pe refers to itself
@@ -82,7 +82,7 @@ OK	game/minecraft_nbt.ksy
 ERR	game/quake2_md2.ksy	Unsupported	game/quake2_md2.ksy:340:24	value: float literals are not supported
 OK	game/quake_mdl.ksy
 OK	game/quake_pak.ksy
-ERR	game/renderware_binary_stream.ksy	Unsupported	game/renderware_binary_stream.ksy:79:9	an attribute in type struct_atomic has no id; attributes without one are not supported
+OK	game/renderware_binary_stream.ksy
 OK	game/saints_row_2_vpp_pc.ksy
 OK	game/warcraft_2_pud.ksy
 OK	geospatial/shapefile_index.ksy
@@ -90,7 +90,7 @@ OK	geospatial/shapefile_main.ksy
 OK	hardware/dtb.ksy
 ERR	hardware/edid.ksy	Unsupported	hardware/edid.ksy:140:28	value: float literals are not supported
 ERR	hardware/mifare/mifare_classic.ksy	Unsupported	hardware/mifare/mifare_classic.ksy:221:23	param ac: type ac is not supported; only integer types, bool and bytes are
-ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:159:16	value: _io in a value instance is not supported
+ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:488:23	value: float literals are not supported
 OK	image/dicom.ksy
 ERR	image/exif.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supported
 OK	image/gif.ksy
@@ -98,7 +98,7 @@ OK	image/gimp_brush.ksy
 OK	image/icc_4.ksy
 OK	image/ico.ksy
 ERR	image/jpeg.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supported
-ERR	image/nitf.ksy	Unsupported	image/nitf.ksy:166:9	an attribute in type date_time has no id; attributes without one are not supported
+ERR	image/nitf.ksy	Unsupported	image/nitf.ksy:304:16	value: method calls are not supported
 OK	image/pcx.ksy
 OK	image/pcx_dcx.ksy
 OK	image/pif.ksy
@@ -111,21 +111,21 @@ OK	image/xwd.ksy
 OK	log/aix_utmp.ksy
 OK	log/glibc_utmp.ksy
 OK	log/hashcat_restore.ksy
-ERR	log/mcap.ksy	Unsupported	log/mcap.ksy:35:13	value: _io in a value instance is not supported
+ERR	log/mcap.ksy	Invalid	log/mcap.ksy:35:12	value instance ofs_footer refers to itself
 OK	log/sudoers_ts.ksy
 OK	log/systemd_journal.ksy
 OK	log/windows_evt_log.ksy
 OK	machine_code/code_6502.ksy
 OK	macos/compressed_resource.ksy
 ERR	macos/ds_store.ksy	Unsupported	macos/ds_store.ksy:107:7	instance directories: an instance without pos or value is not supported
-ERR	macos/mac_os_resource_snd.ksy	Unsupported	macos/mac_os_resource_snd.ksy:118:9	an attribute in type sound_header has no id; attributes without one are not supported
+ERR	macos/mac_os_resource_snd.ksy	Unsupported	macos/mac_os_resource_snd.ksy:264:45	value: float literals are not supported
 OK	macos/resource_compression/dcmp_0.ksy
 OK	macos/resource_compression/dcmp_1.ksy
 ERR	macos/resource_compression/dcmp_2.ksy	Unsupported	macos/resource_compression/dcmp_2.ksy:38:11	param header_parameters_with_io: type bytes_with_io is not supported; only integer types, bool and bytes are
 OK	macos/resource_compression/dcmp_variable_length_integer.ksy
 ERR	macos/resource_fork.ksy	Invalid	macos/resource_fork.ksy:109:3	instance resource_map refers to itself
 OK	media/android_opengl_shaders_cache.ksy
-ERR	media/au.ksy	Unsupported	media/au.ksy:50:47	value: _io in a value instance is not supported
+OK	media/au.ksy
 OK	media/avi.ksy
 OK	media/blender_blend.ksy
 ERR	media/creative_voice_file.ksy	Unsupported	media/creative_voice_file.ksy:90:16	value: float literals are not supported
@@ -135,11 +135,11 @@ OK	media/id3v2_3.ksy
 OK	media/id3v2_4.ksy
 OK	media/magicavoxel_vox.ksy
 OK	media/ogg.ksy
-ERR	media/quicktime_mov.ksy	Unsupported	media/quicktime_mov.ksy:54:31	value: _io in a value instance is not supported
+OK	media/quicktime_mov.ksy
 OK	media/standard_midi_file.ksy
 OK	media/stl.ksy
 ERR	media/tracker_modules/fasttracker_xm_module.ksy	Unsupported	media/tracker_modules/fasttracker_xm_module.ksy:278:19	param header: type sample_header is not supported; only integer types, bool and bytes are
-ERR	media/tracker_modules/s3m.ksy	Unsupported	media/tracker_modules/s3m.ksy:194:13	an attribute in type adlib has no id; attributes without one are not supported
+OK	media/tracker_modules/s3m.ksy
 OK	media/vp8_duck_ivf.ksy
 ERR	media/wav.ksy	Unsupported	media/wav.ksy:76:11	chunk: a type of another type (riff::chunk) is not supported
 OK	network/bitcoin_transaction.ksy
@@ -184,8 +184,8 @@ OK	serialization/php_serialized_value.ksy
 OK	serialization/python_pickle.ksy
 OK	serialization/ruby_marshal.ksy
 OK	windows/regf.ksy
-ERR	windows/windows_lnk_file.ksy	Unsupported	windows/windows_lnk_file.ksy:128:9	an attribute in type link_flags has no id; attributes without one are not supported
+OK	windows/windows_lnk_file.ksy
 OK	windows/windows_minidump.ksy
-ERR	windows/windows_resource_file.ksy	Unsupported	windows/windows_resource_file.ksy:147:16	value: _io in a value instance is not supported
-ERR	windows/windows_shell_items.ksy	Unsupported	windows/windows_shell_items.ksy:70:9	an attribute in type file_entry_body has no id; attributes without one are not supported
+OK	windows/windows_resource_file.ksy
+OK	windows/windows_shell_items.ksy
 OK	windows/windows_systemtime.ksy

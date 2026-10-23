@@ -30,6 +30,7 @@ Decoder :: struct {
 	frames:      [dynamic]Frame,  // the set instances being decoded, outermost first
 	streams:     [dynamic]Stream, // the streams that substreams were taken from, outermost first, as they are now
 	kept:        map[^fld.Instance]Stream, // the streams of the instances of sets with keeps_stream, in the same arena; nil until one is read
+	cache:       map[Cached]Eval_Value, // the values of the cached value instances evaluated, in the same arena; nil until one is
 	stack_start: uintptr,         // the address of a local of decode, where the stack that decoding uses starts (stack_used)
 	pending:     [dynamic]Pending, // the parse instances to read once the root is (read_pending), in the same arena
 	spans:       bool,            // the tree records spans: read_parse_instance is called with SPANS
@@ -61,6 +62,13 @@ Pending :: struct {
 	path:     [dynamic]Path_Segment,
 	r:        dat.Reader,
 	base:     int,
+}
+
+// A cached value instance (Value_Instance.cached) of a set instance.
+@(private)
+Cached :: struct {
+	instance: ^fld.Instance,
+	value:    ^mdata.Value_Instance,
 }
 
 @(private)

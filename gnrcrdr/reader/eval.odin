@@ -10,7 +10,7 @@ import "core:unicode/utf8"
 
 // The value of an expression, by its type: Int, Bool, Bytes, String, Array
 // and Struct in that order.
-@(private = "file")
+@(private)
 Eval_Value :: union {
 	int,
 	bool,
@@ -97,7 +97,7 @@ literal_item :: proc(d: ^Decoder, x: mdata.Index, ctx: Eval_Context) -> (v: Eval
 	e := x.operand
 	item_ctx := ctx
 	caller := ctx
-	if ref, is_ref := e.variant.(mdata.Value_Ref); is_ref && ref.instance.cond == nil {
+	if ref, is_ref := e.variant.(mdata.Value_Ref); is_ref && ref.instance.cond == nil && !ref.instance.cached {
 		if _, is_literal := ref.instance.expr.variant.(mdata.Array_Literal); !is_literal do return
 		base, base_err := eval(d, ref.base, ctx)
 		if base_err != .None do return nil, true, base_err
@@ -265,11 +265,11 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 			return len(o), .None
 		}
 	case mdata.Io_Pos:
-		return own_stream(d).pos, .None
+		return stream_of(d, ctx.self).pos, .None
 	case mdata.Io_Size:
-		return len(own_stream(d).data), .None
+		return len(stream_of(d, ctx.self).data), .None
 	case mdata.Io_Eof:
-		return dat.at_eof(own_stream(d)), .None
+		return dat.at_eof(stream_of(d, ctx.self)), .None
 	case mdata.Repeat_Index:
 		assert(ctx.index >= 0, "eval: _index outside a repeat")
 		return ctx.index, .None
@@ -282,6 +282,7 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		base := eval(d, x.base, ctx) or_return
 		caller := ctx
 		self := Eval_Context{index = -1, self = base.(^fld.Instance), base = x.base, caller = &caller}
+		if x.instance.cached do return eval_cached(d, x.instance, self)
 		if x.instance.cond != nil {
 			cond := eval(d, x.instance.cond, self) or_return
 			if !cond.(bool) do return nil, .Absent_Field
@@ -395,14 +396,39 @@ eval_stream :: proc(d: ^Decoder, e: ^mdata.Expr) -> (stream: Stream, err: dat.Re
 	panic("eval_stream: not a Stream expression")
 }
 
-// The stream of the set instance being decoded, that _io refers to: r,
-// unless a parse instance of it is being read from another stream.
+// The stream that _io refers to in an expression of instance, or of the
+// set instance being decoded when instance is nil: that of its frame, r
+// unless a parse instance of it is being read from another stream, or, once
+// it is no longer decoded, the stream kept for its set (keeps_stream), as
+// it was once the instance was read.
 @(private = "file")
-own_stream :: proc(d: ^Decoder) -> ^dat.Reader {
-	if len(d.frames) > 0 {
-		if f := d.frames[len(d.frames) - 1]; f.stream < len(d.streams) do return &d.streams[f.stream].r
+stream_of :: proc(d: ^Decoder, instance: ^fld.Instance) -> ^dat.Reader {
+	#reverse for f in d.frames {
+		if instance != nil && f.instance != instance do continue
+		if f.stream < len(d.streams) do return &d.streams[f.stream].r
+		return &d.r
 	}
-	return &d.r
+	if instance == nil do return &d.r
+	kept, ok := &d.kept[instance]
+	assert(ok, "stream_of: the stream of the instance was not kept")
+	return &kept.r
+}
+
+// Evaluates value instance inst, which is cached, in self, its context: the
+// value it had when first evaluated, when it had one.
+@(private = "file", require_results)
+eval_cached :: proc(d: ^Decoder, inst: ^mdata.Value_Instance, self: Eval_Context) -> (v: Eval_Value, err: dat.Read_Error) {
+	key := Cached{self.self, inst}
+	if cached, found := d.cache[key]; found do return cached, .None
+	if inst.cond != nil {
+		cond := eval(d, inst.cond, self) or_return
+		if !cond.(bool) do return nil, .Absent_Field
+	}
+	v = eval(d, inst.expr, self) or_return
+	// as in Kaitai, a value instance that has no value is evaluated again
+	if d.cache == nil do d.cache = make(map[Cached]Eval_Value, d.allocator)
+	d.cache[key] = v
+	return v, .None
 }
 
 // The value of a field read once, as its expression type.

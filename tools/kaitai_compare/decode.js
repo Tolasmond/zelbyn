@@ -13,7 +13,8 @@
 // instance when it is first accessed, so each is accessed here. Fields
 // that were not read, value instances, params and the runtime's own
 // members (_io, _parent, _root, _raw_*, _m_*) are left out; names are as
-// the generated code spells them (lowerCamelCase). A file that fails to
+// the generated code spells them (lowerCamelCase, and _unnamed and its
+// index for an attribute without an id). A file that fails to
 // decode prints {"error": "..."}.
 //
 // With --offsets, the schema is compiled in debug mode, and each line maps
@@ -58,6 +59,10 @@ function members(spec, name, out) {
 
 let MEMBERS = {};
 
+// The name the compiler gives an attribute without an id: _unnamed and its
+// index in seq.
+const UNNAMED = /^_unnamed\d+$/;
+
 function value(v) {
   if (v instanceof Uint8Array) return Buffer.from(v).toString("hex");
   if (typeof v === "object" && v !== null) return instance(v);
@@ -71,7 +76,7 @@ function value(v) {
 function offsets(obj, path, pos, root, out) {
   const m = MEMBERS[obj.constructor.name] || { parseInstances: [], withIo: new Set(), params: new Set() };
   const base = root._io.byteOffset;
-  const keys = Object.keys(obj).filter((k) => !k.startsWith("_") && !m.params.has(k));
+  const keys = Object.keys(obj).filter((k) => (!k.startsWith("_") || UNNAMED.test(k)) && !m.params.has(k));
   for (const key of keys.concat(m.parseInstances)) {
     const v = obj[key];
     if (v === undefined || v === null) continue;
@@ -107,7 +112,7 @@ function instance(obj) {
   const out = {};
   for (const key of Object.keys(obj)) {
     const v = obj[key];
-    if (key.startsWith("_") || m.params.has(key) || v === undefined || v === null) continue;
+    if ((key.startsWith("_") && !UNNAMED.test(key)) || m.params.has(key) || v === undefined || v === null) continue;
     out[key] = Array.isArray(v) ? v.map(value) : [value(v)];
   }
   for (const key of m.parseInstances) {

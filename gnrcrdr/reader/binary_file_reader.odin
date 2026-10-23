@@ -497,7 +497,6 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 
 	instance, cells := fld.make_instance(d.arena, node.slot_count, choice, SPANS)
 	push(s, 0, instance)
-	if node.keeps_stream do keep_stream(d, instance)
 	for v, k in args {
 		slot := mdata.param_slot(node, k)
 		cells[slot] = v
@@ -518,6 +517,7 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	for p, k in node.parse_instances {
 		if raw_data(instance.slots[k]) == nil do keep_pending(d, instance, p, k)
 	}
+	if node.keeps_stream do keep_stream(d, instance)
 
 	pop(&d.frames)
 	return .None
@@ -540,8 +540,9 @@ stack_used :: #force_inline proc(d: ^Decoder) -> int {
 	return int(d.stack_start - uintptr(&marker))
 }
 
-// Records the stream of instance, which is being read, for an io
-// expression that refers to it (eval_stream). Not inlined: inlining it into
+// Records the stream of instance, which has been read, for an io
+// expression or a value instance that refers to it once it is no longer
+// decoded (stream_of). Not inlined: inlining it into
 // read_set_instance costs 0.5% more decode instructions.
 @(private = "file")
 keep_stream :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance) {
