@@ -134,16 +134,17 @@ Compiler :: struct {
 	instances:       map[^mdata.Value_Instance]^Instance_Source, // in scratch
 	parse_instances: map[^mdata.Node]^Parse_Source,              // in scratch
 	type_defs:       [dynamic]Set_Type,                          // the type of each set compiled, for sizes; in scratch
-	deferred:        [dynamic]Deferred,                          // the value instances that nothing referred to by the end of their set, compiled once every set is; in scratch
+	deferred:        [dynamic]Deferred,                          // the instances that nothing referred to by the end of their set, compiled once every set is; in scratch
 	err:             Error,
 }
 
-// A value instance of set whose compile is put off until every set is
-// compiled (Compiler.deferred).
+// A value instance or a parse instance of set whose compile is put off
+// until every set is compiled (Compiler.deferred); the other is nil.
 @(private = "file")
 Deferred :: struct {
 	set:   ^mdata.Node,
 	value: ^mdata.Value_Instance,
+	parse: ^mdata.Node,
 }
 
 // A set compiled, and its type. Sizes are rare, so the sets are searched
@@ -431,12 +432,13 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 	c.root = node
 	compile_fields(c, top, node, {node}) or_return
 
-	// the value instances that nothing referred to, now that every field
-	// they can refer to is compiled, as in Kaitai, where any instance can
-	// refer to any field; compiling them can put off others
+	// the instances that nothing referred to, now that every field they
+	// can refer to is compiled, as in Kaitai, where any instance can refer
+	// to any field; compiling them can put off others
 	for i := 0; i < len(c.deferred); i += 1 {
 		item := c.deferred[i]
-		if item.value.expr == nil do compile_deferred(c, item) or_return
+		pending := item.value != nil ? item.value.expr == nil : item.parse.pos == nil
+		if pending do compile_deferred(c, item) or_return
 	}
 
 	// a reused set's expressions are all compiled; its fields inside it
@@ -909,8 +911,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 	ids := make([dynamic]^yml.Node, c.scratch) // the id nodes of the attributes, bit fields and instances
 
 	// each instance is compiled when an expression first refers to it, or
-	// after the attributes, or for a value instance, once every set is
-	// (compile_schema)
+	// else once every set is (compile_schema)
 	scope := scope_of(c, td, chain)
 	instances := make([dynamic]^mdata.Value_Instance, c.allocator)
 	parse_instances := make([dynamic]^mdata.Node, c.allocator)
@@ -990,7 +991,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 		} else {
 			p := parse_instances[next_parse]
 			next_parse += 1
-			if p.pos == nil do compile_parse_instance(c, set, p) or_return
+			if p.pos == nil do append(&c.deferred, Deferred{set = set, parse = p})
 		}
 	}
 
@@ -1014,21 +1015,23 @@ copy_members :: proc(field, set: ^mdata.Node) {
 	field.params = set.params
 }
 
-// Compiles item, a value instance put off. The types of the sets
-// enclosing it are marked as being compiled again while it is, so that a
-// parse instance or a type it compiles on demand finds that a type inside
+// Compiles item, an instance put off. The types of the sets enclosing it
+// are marked as being compiled again while it is, so that its type, or a
+// parse instance or a type it compiles on demand, finds that a type inside
 // one of them contains itself, as when it is compiled with its set.
 @(private = "file")
 compile_deferred :: proc(c: ^Compiler, item: Deferred) -> bool {
 	marked := make([dynamic]^Type_Def, c.scratch)
 	defer for td in marked do td.compiling = nil
-	for set in c.instances[item.value].scope.types {
+	types := item.value != nil ? c.instances[item.value].scope.types : c.parse_instances[item.parse].scope.types
+	for set in types {
 		st := set_type(c, set)
 		if st.td.compiling != nil do continue
 		st.td.compiling = set
 		append(&marked, st.td)
 	}
-	return compile_instance(c, item.set, item.value)
+	if item.value != nil do return compile_instance(c, item.set, item.value)
+	return compile_parse_instance(c, item.set, item.parse)
 }
 
 // The entry of c.type_defs for set, which was compiled.
@@ -1298,7 +1301,7 @@ constant_int :: proc(c: ^Compiler, n: ^yml.Node) -> (v: int, ok: bool) {
 
 // Compiles inst, a parse instance of set (of its members), as an attribute,
 // then its io and pos. It can use the fields of set compiled so far, and its
-// instances. pos is compiled last: until it is set, a reference to inst
+// instances, and once every set is, any field. pos is compiled last: until it is set, a reference to inst
 // compiles it, so that one from inst itself is found, also through a field
 // of its type inside it (set.recursive), which is another instance, but
 // whose type is not known yet.

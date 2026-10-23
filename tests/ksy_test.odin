@@ -753,6 +753,51 @@ t[0].table[1] = 33
 	expect_dump(t, "pos out of range", ksy_dump(t, src, {9, 7, 0x10, 0x11, 0x12, 0x20, 0x21}), "error: Offset_Out_Of_Range at 4 in t[0].sub[0].parent_ofs[0]")
 	expect_dump(t, "read past the end", ksy_dump(t, src, {2, 7, 0x10, 0x11, 0x12, 0x20}), "error: Unexpected_EOF at 6 in t[0].table[1]")
 
+	// a parse instance that nothing refers to is compiled once every set is,
+	// as in Kaitai, where any instance can refer to any field: so in a type
+	// inside the parse instance bg, one can use bg (_root.bg.sb), and one
+	// can use a field of _parent after its own (_parent.body.len)
+	enclosing := HEAD + `seq:
+  - id: x
+    type: u1
+  - id: hdr
+    type: hdr
+  - id: body
+    type: body
+instances:
+  bg:
+    pos: 1
+    type: bg
+types:
+  bg:
+    seq:
+      - id: sb
+        type: u1
+      - id: items
+        type: item
+    types:
+      item:
+        instances:
+          v:
+            pos: 0
+            size: _root.bg.sb
+  hdr:
+    instances:
+      peek:
+        pos: 0
+        size: _parent.body.len
+  body:
+    seq:
+      - id: len
+        type: u1
+`
+	expect_dump(t, "instances referring to later fields", ksy_dump(t, enclosing, {3, 2, 0xaa}), `t[0].x[0] = 3
+t[0].hdr[0].peek[0] = <2 bytes> 03 02
+t[0].body[0].len[0] = 2
+t[0].bg[0].sb[0] = 2
+t[0].bg[0].items[0].v[0] = <2 bytes> 03 02
+`)
+
 	// an instance without pos or value is read where its stream is, which
 	// can only be one that reads nothing: a type of no fields, or size 0
 	nopos := HEAD + `seq:
