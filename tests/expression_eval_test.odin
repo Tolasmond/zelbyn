@@ -30,7 +30,7 @@ DATA_POS :: 9 // where data starts in EXPR_INPUT
 @(private)
 plan_node :: proc(name: string, type: dat.Data_Type, a: mem.Allocator, children: ..^mdat.Node) -> ^mdat.Node {
 	n := new(mdat.Node, a)
-	n^ = {name = name, ref_name = name, type = type, count = mdat.Fixed_Count{1}}
+	n^ = {name = name, ref_name = name, type = type, count = mdat.Fixed_Count{n = 1}}
 	if len(children) > 0 do n.children = slice_clone(children, a)
 	n.slot_count = mdat.count_slots(n) // the children's bit fields must be set first
 	return n
@@ -97,7 +97,7 @@ expression_repeat_index :: proc(t: ^testing.T) {
 	a := arn.arena_allocator(&ff.arena)
 
 	s := plan_node("s", .Blob, a)
-	s.count = mdat.Fixed_Count{3}
+	s.count = mdat.Fixed_Count{n = 3}
 	ff.root = plan_node("r", .Set, a, s)
 	s.length = mdat.Rule_Length{expr = must_compile(t, &ff, "_index", ff.root, in_repeat = true)}
 
