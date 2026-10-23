@@ -48,6 +48,7 @@ import "core:strings"
 //     _io, and through _parent and _root those enclosing it, and parse
 //     instances: instances with pos, io (_io or the _io of a set instance)
 //     and the keys of an attribute, or without pos when they read nothing
+//   - .pos, .size and .eof of _io and of the _io of another set instance
 //   - float literals and float fields in expressions, with + - * / and the
 //     comparisons, also with integers
 //   - casts, .as<t>, to an integer type, to bytes of an array of integers,
@@ -1147,7 +1148,13 @@ note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, s
 		note_escapes(c, n, what, x.operand, scope)
 	case mdata.Array_Literal:
 		for item in x.items do note_escapes(c, n, what, item, scope)
-	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element:
+	case mdata.Io_Pos:
+		note_escapes(c, n, what, x.stream, scope)
+	case mdata.Io_Size:
+		note_escapes(c, n, what, x.stream, scope)
+	case mdata.Io_Eof:
+		note_escapes(c, n, what, x.stream, scope)
+	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Repeat_Index, mdata.Repeat_Element:
 	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast, mdata.Call:
 		panic("note_escapes: unresolved expression")
 	}

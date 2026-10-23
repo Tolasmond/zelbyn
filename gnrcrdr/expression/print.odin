@@ -197,11 +197,11 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 	case mdata.Io:
 		write_member(b, x.instance, "_io")
 	case mdata.Io_Pos:
-		strings.write_string(b, "_io.pos")
+		write_stream_member(b, x.stream, ".pos")
 	case mdata.Io_Size:
-		strings.write_string(b, "_io.size")
+		write_stream_member(b, x.stream, ".size")
 	case mdata.Io_Eof:
-		strings.write_string(b, "_io.eof")
+		write_stream_member(b, x.stream, ".eof")
 	case mdata.Repeat_Index:
 		strings.write_string(b, "_index")
 	case mdata.Repeat_Element:
@@ -217,6 +217,14 @@ write_member :: proc(b: ^strings.Builder, base: ^mdata.Expr, name: string) {
 		strings.write_byte(b, '.')
 	}
 	strings.write_string(b, name)
+}
+
+// stream followed by member, or _io and member when stream is nil.
+@(private = "file")
+write_stream_member :: proc(b: ^strings.Builder, stream: ^mdata.Expr, member: string) {
+	if stream == nil do strings.write_string(b, "_io")
+	else do write(b, stream)
+	strings.write_string(b, member)
 }
 
 // operand.as<type_name>.

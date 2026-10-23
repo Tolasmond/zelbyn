@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 172 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 175 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -41,7 +41,7 @@ ERR	executable/mach_o_fat.ksy	Unsupported	executable/mach_o_fat.ksy:33:15	cpu_ty
 OK	executable/microsoft_pe.ksy
 OK	executable/python_pyc_27.ksy
 OK	executable/swf.ksy
-ERR	executable/uefi_te.ksy	Unsupported	executable/uefi_te.ksy:225:82	pos: size of a stream other than _io is not supported
+OK	executable/uefi_te.ksy
 OK	filesystem/amlogic_emmc_partitions.ksy
 OK	filesystem/android_super.ksy
 OK	filesystem/apm_partition_table.ksy
@@ -61,7 +61,7 @@ OK	filesystem/vfat.ksy
 OK	filesystem/vmware_vmdk.ksy
 OK	filesystem/zx_spectrum_tap.ksy
 OK	firmware/andes_firmware.ksy
-ERR	firmware/broadcom_trx.ksy	Unsupported	firmware/broadcom_trx.ksy:130:42	value: size of a stream other than _io is not supported
+OK	firmware/broadcom_trx.ksy
 OK	firmware/ines.ksy
 OK	firmware/uf2.ksy
 OK	firmware/uimage.ksy
@@ -70,7 +70,7 @@ OK	font/pcf_font.ksy
 OK	font/ttf.ksy
 OK	game/allegro_dat.ksy
 OK	game/doom_wad.ksy
-ERR	game/dune_2_pak.ksy	Unsupported	game/dune_2_pak.ksy:39:44	value: size of a stream other than _io is not supported
+OK	game/dune_2_pak.ksy
 OK	game/fallout2_dat.ksy
 OK	game/fallout_dat.ksy
 OK	game/ftl_dat.ksy

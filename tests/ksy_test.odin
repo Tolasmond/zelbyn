@@ -584,6 +584,77 @@ t[0].c[0] = <1 bytes> 03
 t[0].d[0] = 4
 `)
 
+	// .size, .pos and .eof of the stream of another set instance: of the
+	// root, of a field's substream, of a ?: of those, and from a value
+	// instance, of _parent once it is read (up_size)
+	streams := HEAD + `seq:
+  - id: n
+    type: u1
+  - id: hdr
+    type: hdr
+    size: n
+  - id: body
+    type: body
+  - id: a
+    size: hdr._io.size - 1
+  - id: b
+    size: '(n > 2 ? hdr._io : _root._io).size - (n > 2 ? 2 : 12)'
+  - id: c
+    size: 1
+    if: hdr._io.eof
+  - id: d
+    size: body.left
+  - id: f
+    size: body.inner.up_size - _root._io.size
+instances:
+  tail:
+    pos: _io.size - 1
+    size: 1
+types:
+  hdr:
+    seq:
+      - id: x
+        type: u1
+  body:
+    seq:
+      - id: y
+        type: u1
+      - id: inner
+        type: inner
+    instances:
+      left:
+        value: _root._io.size - _root._io.pos
+    types:
+      inner:
+        seq:
+          - id: z
+            type: u1
+        instances:
+          up_size:
+            value: _parent._io.size
+`
+	expect_dump(t, "streams, 1", ksy_dump(t, streams, {0x03, 0x09, 0x08, 0x07, 0x05, 0x06, 0xa1, 0xa2, 0xb1, 0xc1, 0xd1, 0xd2, 0xd3, 0xd4}), `t[0].n[0] = 3
+t[0].hdr[0].x[0] = 9
+t[0].body[0].y[0] = 5
+t[0].body[0].inner[0].z[0] = 6
+t[0].a[0] = <2 bytes> a1 a2
+t[0].b[0] = <1 bytes> b1
+t[0].d[0] = <5 bytes> c1 d1 d2 d3 d4
+t[0].f[0] = <0 bytes>
+t[0].tail[0] = <1 bytes> d4
+`)
+	expect_dump(t, "streams, 2", ksy_dump(t, streams, {0x01, 0x09, 0x05, 0x06, 0xb1, 0xb2, 0xc1, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7}), `t[0].n[0] = 1
+t[0].hdr[0].x[0] = 9
+t[0].body[0].y[0] = 5
+t[0].body[0].inner[0].z[0] = 6
+t[0].a[0] = <0 bytes>
+t[0].b[0] = <2 bytes> b1 b2
+t[0].c[0] = <1 bytes> c1
+t[0].d[0] = <7 bytes> d1 d2 d3 d4 d5 d6 d7
+t[0].f[0] = <0 bytes>
+t[0].tail[0] = <1 bytes> d7
+`)
+
 	// methods: .to_s(encoding) of bytes, in a switch-on (RIFF, LIST) and
 	// in UTF-16LE (wide), .substring of a string, and .as<bytes> of an
 	// array of integers
@@ -710,6 +781,11 @@ t[0].f[0] = <8 bytes> 75 6e 63 68 6f 73 65 6e
 `)
 	zlib_input[1] = 0
 	expect_dump(t, "process: zlib, not zlib", ksy_dump(t, zlib_src, zlib_input), "error: Decompression_Failed at 1 in t[0].a[0]")
+
+	// in repeat-until, _index counts the elements read, as in Kaitai's
+	// JavaScript, C++ and Java runtimes
+	until := HEAD + "seq:\n  - id: items\n    type: u1\n    repeat: until\n    repeat-until: _index >= 2\n  - id: rest\n    size-eos: true\n"
+	expect_dump(t, "_index in repeat-until", ksy_dump(t, until, {1, 2, 3}), "t[0].items[0] = 1\nt[0].items[1] = 2\nt[0].rest[0] = <1 bytes> 03\n")
 
 	// float fields in expressions, with integers; .to_i rounds toward zero
 	floats := HEAD + `seq:
