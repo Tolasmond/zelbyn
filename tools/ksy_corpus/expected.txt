@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 166 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 169 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -14,7 +14,7 @@ OK	archive/phar_without_stub.ksy
 OK	archive/rar.ksy
 OK	archive/respack.ksy
 OK	archive/rpm.ksy
-ERR	archive/xar.ksy	Unsupported	archive/xar.ksy:35:5	attribute toc: process is not supported
+OK	archive/xar.ksy
 OK	archive/zchunk.ksy
 OK	archive/zip.ksy
 OK	archive/zisofs.ksy
@@ -40,7 +40,7 @@ OK	executable/mach_o.ksy
 ERR	executable/mach_o_fat.ksy	Unsupported	executable/mach_o_fat.ksy:33:15	cpu_type: an enum of another type (mach_o::cpu_type) is not supported
 OK	executable/microsoft_pe.ksy
 OK	executable/python_pyc_27.ksy
-ERR	executable/swf.ksy	Unsupported	executable/swf.ksy:56:5	attribute zlib_body: process is not supported
+OK	executable/swf.ksy
 ERR	executable/uefi_te.ksy	Unsupported	executable/uefi_te.ksy:225:82	pos: size of a stream other than _io is not supported
 OK	filesystem/amlogic_emmc_partitions.ksy
 OK	filesystem/android_super.ksy
@@ -71,7 +71,7 @@ OK	font/ttf.ksy
 OK	game/allegro_dat.ksy
 OK	game/doom_wad.ksy
 ERR	game/dune_2_pak.ksy	Unsupported	game/dune_2_pak.ksy:39:44	value: size of a stream other than _io is not supported
-ERR	game/fallout2_dat.ksy	Unsupported	game/fallout2_dat.ksy:55:9	instance contents_zlib: process is not supported
+OK	game/fallout2_dat.ksy
 OK	game/fallout_dat.ksy
 OK	game/ftl_dat.ksy
 OK	game/gran_turismo_vol.ksy
@@ -102,7 +102,7 @@ ERR	image/nitf.ksy	Unsupported	image/nitf.ksy:304:16	value: method calls are not
 OK	image/pcx.ksy
 OK	image/pcx_dcx.ksy
 OK	image/pif.ksy
-ERR	image/png.ksy	Unsupported	image/png.ksy:410:9	attribute profile: process is not supported
+ERR	image/png.ksy	Unsupported	image/png.ksy:199:16	value: method calls are not supported
 OK	image/psx_tim.ksy
 OK	image/tga.ksy
 OK	image/webp.ksy

@@ -44,6 +44,36 @@ decode_uses_only_arena :: proc(t: ^testing.T) {
 	}
 }
 
+// zlib decompresses process: zlib into the tree's arena, with what it
+// allocates while it does.
+@(test)
+decode_zlib_uses_only_arena :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	err := ksy.compile("meta:\n  id: z\nseq:\n  - id: n\n    type: u1\n  - id: z\n    size: n\n    process: zlib\n", &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "compile: %s", err.message) do return
+
+	// "hello world", compressed
+	input := []byte{19, 0x78, 0x9c, 0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x57, 0x28, 0xcf, 0x2f, 0xca, 0x49, 0x01, 0x00, 0x1a, 0x0b, 0x04, 0x5d}
+	d: Decoded
+	defer destroy_decoded(&d)
+
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	{
+		context.allocator = mem.tracking_allocator(&track)
+		context.temp_allocator = mem.tracking_allocator(&track)
+		context.logger = log.nil_logger()
+		decode_bytes(&ff, input, &d)
+	}
+
+	testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path)
+	testing.expect_value(t, track.total_allocation_count, 0)
+}
+
 // read puts the file in the tree's arena, so it allocates nothing else.
 @(test)
 read_uses_only_arena :: proc(t: ^testing.T) {

@@ -30,11 +30,11 @@ import "core:strings"
 //     endian can be a switch-on, chosen as each instance is read
 //   - imported schemas, whose top-level types are used by their meta id,
 //     each with its own meta
-//   - attributes: id (without one, named _unnamed and their index in seq,
-//     as in Kaitai), type, size, size-eos, terminator with consume, include
-//     and eos-error, pad-right, contents, if, enum, valid (eq, min, max,
-//     any-of, in-enum, expr), repeat (expr, eos, until) with repeat-expr
-//     and repeat-until, encoding, doc, doc-ref
+//   - attributes: id (without one, named _unnamed and their index in seq, as
+//     in Kaitai), type, size, size-eos, terminator with consume, include and
+//     eos-error, pad-right, process (zlib), contents, if, enum, valid (eq,
+//     min, max, any-of, in-enum, expr), repeat (expr, eos, until) with
+//     repeat-expr and repeat-until, encoding, doc, doc-ref
 //   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), b1-b64
 //     (le/be suffixes or meta bit-endian), str and byte arrays (no type)
 //     with size, size-eos or terminator, strz (in ENCODINGS), user types
@@ -371,10 +371,10 @@ TYPE_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "d
 TOP_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "doc-ref", "params", "to-string"}
 
 @(private = "file")
-ATTR_ALLOWED :: []string{"id", "type", "size", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right"}
+ATTR_ALLOWED :: []string{"id", "type", "size", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "process"}
 
 @(private = "file")
-ATTR_UNSUPPORTED :: []string{"process", "io", "pos", "value", "parent"}
+ATTR_UNSUPPORTED :: []string{"io", "pos", "value", "parent"}
 
 // The keys of an attribute that say where the bytes of each element end.
 @(private = "file")
@@ -390,8 +390,8 @@ VALUE_INSTANCE_KEYS :: Keys {
 
 @(private = "file")
 PARSE_INSTANCE_KEYS :: Keys {
-	allowed     = {"pos", "io", "type", "size", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"},
-	unsupported = {"process", "parent"},
+	allowed     = {"pos", "io", "type", "size", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right", "process", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref"},
+	unsupported = {"parent"},
 	extensions  = {"-orig-id"},
 }
 
@@ -1586,6 +1586,15 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 		node.encoding = meta
 	}
 
+	if n := get(attr, "process"); n != nil {
+		text := expect_scalar(c, n, "process") or_return
+		key := get_key(attr, "process")
+		if node.type != .Blob && node.type != .Set do return fail(c, .Invalid, key, "%s: process applies only to a byte array or a user type", id)
+		if contents != nil || !ends do return fail(c, .Invalid, key, "%s: process needs size, size-eos or terminator", id)
+		if strings.trim_space(text) != "zlib" do return fail(c, .Unsupported, n, "%s: process %s is not supported; only zlib is", id, text)
+		node.process = .Zlib
+	}
+
 	if n := get(attr, "enum"); n != nil {
 		if node.type not_in INTEGER_TYPES && node.type != .Bits do return fail(c, .Invalid, get_key(attr, "enum"), "%s: enum applies only to integer types", id)
 		// the field keeps its integer, which the enum's constants are
@@ -1618,6 +1627,14 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	if user != nil do compile_user(c, user, node, type_node, id, call, scope, element_scope) or_return
 	if switch_node != nil {
 		compile_switch(c, td, attr, switch_node, id, ends, node, element_scope) or_return
+		if node.process != .None {
+			for sc in node.switch_on.cases {
+				if sc.node.type != .Set do return fail(c, .Unsupported, get_key(attr, "process"), "%s: process on a switch-on with a case that is not a user type is not supported", id)
+			}
+			if def := node.switch_on.default; def != nil && def.type != .Set {
+				return fail(c, .Unsupported, get_key(attr, "process"), "%s: process on a switch-on with a case that is not a user type is not supported", id)
+			}
+		}
 	}
 	// after the type's fields, which an expr can refer to through _
 	if valid != nil {

@@ -4,6 +4,8 @@ import arn "../arena"
 import dat "../data"
 import fld "../field"
 import mdata "../metadata"
+import bts "core:bytes"
+import "core:compress/zlib"
 import "core:os"
 import "core:slice"
 
@@ -431,6 +433,7 @@ read_unchosen :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) -> d
 	bytes: []byte
 	bytes, err = dat.read_bytes(&d.r, n)
 	if err != .None do return fail(d, err, start)
+	if node.process != .None do bytes = process_bytes(d, bytes, start) or_return
 	push(s, 0, bytes)
 	return .None
 }
@@ -715,6 +718,7 @@ element_bytes :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) 
 		t := node.terminator.?
 		bytes, err = dat.read_bytes_term(&d.r, t.value, t.include, t.consume, t.eos_error)
 		if err != .None do return nil, fail(d, err, start)
+		if node.process != .None do return process_bytes(d, bytes, start)
 		return
 	}
 
@@ -724,7 +728,26 @@ element_bytes :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) 
 	bytes, err = dat.read_bytes(&d.r, n)
 	if err != .None do return nil, fail(d, err, start)
 	if node.pad_right != nil || node.terminator != nil do bytes = trim_bytes(node, bytes)
+	if node.process != .None do return process_bytes(d, bytes, start)
 	return
+}
+
+// The bytes of an element with process: zlib, read at start, decompressed
+// into the tree's arena, which also holds what decompressing allocates.
+// Not inlined: only fields with process call it.
+@(private = "file", require_results)
+process_bytes :: #force_no_inline proc(d: ^Decoder, raw: []byte, start: int) -> (processed: []byte, err: dat.Read_Error) {
+	buf: bts.Buffer
+	bts.buffer_init_allocator(&buf, 0, max(4 * len(raw), 64), d.allocator)
+	inflated: bool
+	{
+		context.allocator = d.allocator
+		context.temp_allocator = d.allocator
+		inflated = zlib.inflate(raw, &buf) == nil
+	}
+	// the error's path is in the context's allocator
+	if !inflated do return nil, fail(d, .Decompression_Failed, start)
+	return bts.buffer_to_bytes(&buf), .None
 }
 
 // bytes without node's pad_right at their end, and cut at its terminator.

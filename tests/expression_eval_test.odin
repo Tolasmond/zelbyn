@@ -228,6 +228,8 @@ EVAL_CASES := [?]Eval_Case {
 	{text = "(a / 2.0).to_i * 2", want = "4"},
 	{text = "1e19.to_i", err = .Integer_Overflow},
 	{text = "(0.0 / 0).to_i", err = .Integer_Overflow},
+	{text = "(a == 5 ? hdr.tag : [1, 2, 3]).size", want = "2"},
+	{text = "(a == 4 ? hdr.tag : [1, 2, 3]).size", want = "3"},
 	{text = "[0.5, 2][1] / 4", want = "0.5"},
 	{text = "[0.5, 2.5][a - 4]", want = "2.5"},
 }

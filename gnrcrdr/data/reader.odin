@@ -27,6 +27,7 @@ Read_Error :: enum {
 	Too_Deep,              // set instances are nested more deeply than the decoder allows, which only a recursive type can do
 	Wrong_Type,            // an expression casts a value to a user type it was not read as (.as<t> of a switch-on field)
 	Undecided_Endianness,  // the endian switch-on of a type matches none of its cases (Kaitai's UndecidedEndiannessError)
+	Decompression_Failed,  // the bytes of a field with process: zlib are not a valid zlib stream
 }
 
 // Bounds-checked cursor over a byte slice. Every read either succeeds and

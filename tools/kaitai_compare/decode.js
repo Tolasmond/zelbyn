@@ -22,8 +22,9 @@
 // dump writes it (root[0].field[i]...), to the offset in the file that
 // the runtime's debug record gives it: where the read of the value
 // started. The runtime copies the bytes of a substream whose pad-right it
-// removes or that it cuts at a terminator, and a debug record in a copy
-// gives offsets from its start, which is where its field starts.
+// removes or that it cuts at a terminator, and decompresses those of one
+// with process: zlib; a debug record in such a stream gives offsets from
+// its start, which is taken to be where its field starts, as gnrcrdr does.
 
 "use strict";
 
@@ -69,8 +70,15 @@ function value(v) {
   return v;
 }
 
-// The offsets of the values of obj, read in debug mode, added to out by
-// their paths below path; base is the offset of the root's stream.
+// Whether io is a substream of the input that root is read from: a view of
+// its bytes. Node takes small buffers, such as the bytes that zlib
+// decompresses, from a shared pool, so one can share the input's
+// ArrayBuffer without being part of it.
+function inInput(io, root) {
+  const base = root._io.byteOffset;
+  return io._buffer === root._io._buffer && io.byteOffset >= base && io.byteOffset <= base + root._io.size;
+}
+
 // Adds the offset of every value of obj, whose stream starts at offset pos
 // in the file, to out, by its path. root is the root of the tree.
 function offsets(obj, path, pos, root, out) {
@@ -100,7 +108,8 @@ function offsets(obj, path, pos, root, out) {
       } else if (x._io === obj._io) {
         offsets(x, p, pos, root, out);
       } else {
-        offsets(x, p, x._io._buffer === root._io._buffer ? x._io.byteOffset - base : start, root, out);
+        // a copy, or bytes that process made, starts where its field does
+        offsets(x, p, inInput(x._io, root) ? x._io.byteOffset - base : start, root, out);
       }
     });
   }

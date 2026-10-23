@@ -245,7 +245,7 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		resolve(r, x.then) or_return
 		resolve(r, x.otherwise) or_return
 		expect(r, x.cond, .Bool) or_return
-		if x.then.type != .Int && x.then.type != .Float && x.then.type != .Bool && x.then.type != .String && x.then.type != .Stream do return fail(r, .Unsupported, x.then.offset, "?: on %s is not supported", type_name(x.then.type))
+		if x.then.type != .Int && x.then.type != .Float && x.then.type != .Bool && x.then.type != .String && x.then.type != .Bytes && x.then.type != .Stream do return fail(r, .Unsupported, x.then.offset, "?: on %s is not supported", type_name(x.then.type))
 		expect(r, x.otherwise, x.then.type) or_return
 		e.type = x.then.type
 	case mdata.Index:
