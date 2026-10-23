@@ -30,7 +30,7 @@ destroy_error :: proc(err: ^Error) {
 // right-associative and a comparison cannot be an operand of another
 // comparison. Integer literals are decimal, 0x hex, 0b binary or 0o octal,
 // with _ allowed between digits; string literals are as String_Literal
-// describes. Float and array literals, method calls and casts are rejected
+// describes. Float and array literals and method calls are rejected
 // as Unsupported.
 @(require_results)
 parse :: proc(text: string, allocator: mem.Allocator) -> (e: ^mdata.Expr, err: Error) {
@@ -361,7 +361,8 @@ lex_int :: proc(p: ^Parser) -> bool {
 		if d >= base do return fail(p, .Syntax, start, "invalid integer literal %s", text)
 
 		if value > (u64(max(int)) - u64(d)) / u64(base) {
-			return fail(p, .Syntax, start, "integer literal %s is too large", text)
+			// valid Kaitai, whose expressions are wider
+			return fail(p, .Unsupported, start, "integer literal %s does not fit in a 64-bit signed integer, which expressions are", text)
 		}
 		value = value * u64(base) + u64(d)
 		n += 1
@@ -524,7 +525,11 @@ parse_primary :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 			if p.tok.kind != .Ident do return nil, fail(p, .Syntax, p.tok.offset, "expected a name after ., found %s", describe(p.tok))
 			name := p.tok
 			next(p) or_return
-			if name.text == "as" && p.tok.kind == .Lt do return nil, fail(p, .Unsupported, name.offset, "casts are not supported")
+			if name.text == "as" && p.tok.kind == .Lt {
+				type_name := parse_type_name(p, ".as") or_return
+				e = new_expr(p, name.offset, mdata.Cast{e, type_name})
+				continue
+			}
 			e = new_expr(p, name.offset, mdata.Member{e, strings.clone(name.text, p.allocator)})
 		case .L_Paren:
 			return nil, fail(p, .Unsupported, p.tok.offset, "method calls are not supported")
@@ -590,21 +595,28 @@ parse_atom :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 	return nil, fail(p, .Syntax, t.offset, "unexpected %s", describe(t))
 }
 
-// The rest of sizeof<t> or bitsizeof<t>, after keyword: <, a type name,
-// which can be a path (a::b), and >.
+// The rest of sizeof<t> or bitsizeof<t>, after keyword.
 @(private = "file")
 parse_size_of :: proc(p: ^Parser, keyword: Token) -> (e: ^mdata.Expr, ok: bool) {
+	type_name := parse_type_name(p, keyword.text) or_return
+	return new_expr(p, keyword.offset, mdata.Size_Of{type_name, keyword.text == "bitsizeof"}), true
+}
+
+// <, a type name, which can be a path (a::b), and >, after what (sizeof,
+// .as).
+@(private = "file")
+parse_type_name :: proc(p: ^Parser, what: string) -> (type_name: string, ok: bool) {
 	next(p) or_return
 	b := strings.builder_make(p.allocator)
 	for {
-		if p.tok.kind != .Ident do return nil, fail(p, .Syntax, p.tok.offset, "expected a type name in %s<>, found %s", keyword.text, describe(p.tok))
+		if p.tok.kind != .Ident do return "", fail(p, .Syntax, p.tok.offset, "expected a type name in %s<>, found %s", what, describe(p.tok))
 		strings.write_string(&b, p.tok.text)
 		next(p) or_return
 		if p.tok.kind != .Colon_Colon do break
 		strings.write_string(&b, "::")
 		next(p) or_return
 	}
-	if p.tok.kind != .Gt do return nil, fail(p, .Syntax, p.tok.offset, "expected > after the type name, found %s", describe(p.tok))
+	if p.tok.kind != .Gt do return "", fail(p, .Syntax, p.tok.offset, "expected > after the type name, found %s", describe(p.tok))
 	next(p) or_return
-	return new_expr(p, keyword.offset, mdata.Size_Of{strings.to_string(b), keyword.text == "bitsizeof"}), true
+	return strings.to_string(b), true
 }

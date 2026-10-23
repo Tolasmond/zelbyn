@@ -3,6 +3,7 @@ package reader
 import arn "../arena"
 import dat "../data"
 import fld "../field"
+import mdata "../metadata"
 import "core:mem"
 import "core:os"
 import "core:strings"
@@ -30,6 +31,7 @@ Decoder :: struct {
 	streams:     [dynamic]Stream, // the streams that substreams were taken from, outermost first, as they are now
 	kept:        map[^fld.Instance]Stream, // the streams of the instances of sets with keeps_stream, in the same arena; nil until one is read
 	stack_start: uintptr,         // the address of a local of decode, where the stack that decoding uses starts (stack_used)
+	pending:     [dynamic]Pending, // the parse instances to read once the root is (read_pending), in the same arena
 	spans:       bool,            // the tree records spans: read_parse_instance is called with SPANS
 	err:         Parse_Error,
 }
@@ -43,6 +45,22 @@ Frame :: struct {
 	instance: ^fld.Instance,
 	stream:   int,
 	path:     int,
+}
+
+// A parse instance that no expression had read when the fields of its set
+// instance were, read once the whole input is, as Kaitai's runtimes read
+// an instance when it is first used: with the frames, streams and path of
+// that instance, and its stream, as they were then.
+@(private)
+Pending :: struct {
+	instance: ^fld.Instance,
+	node:     ^mdata.Node,
+	k:        int,
+	frames:   [dynamic]Frame,
+	streams:  [dynamic]Stream,
+	path:     [dynamic]Path_Segment,
+	r:        dat.Reader,
+	base:     int,
 }
 
 @(private)

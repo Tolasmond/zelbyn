@@ -35,16 +35,19 @@ import "core:strings"
 //     and repeat-until, encoding, doc, doc-ref
 //   - types u1-u8, s1-s8, f4, f8 (le/be suffixes or meta endian), b1-b64
 //     (le/be suffixes or meta bit-endian), str and byte arrays (no type)
-//     with size, size-eos or terminator, strz (in ENCODINGS), user types (with size,
-//     size-eos or terminator, read from a substream; also inside
-//     themselves, and the schema's top-level type, by its meta id), and
-//     switch-on over an integer, a boolean or a string, also with size,
+//     with size, size-eos or terminator, strz (in ENCODINGS), user types
+//     (with size, size-eos or terminator, read from a substream; also
+//     inside themselves, and the schema's top-level type, by its meta id),
+//     and switch-on over an integer, a boolean or a string, also with size,
 //     size-eos or terminator, whose cases are user types or any of those
 //     types
-//   - value instances, with if and enum, over their type and through
+//   - value instances, with if and enum, of integers, booleans, strings,
+//     byte arrays, set instances and arrays, over their type and through
 //     _parent and _root those enclosing it, and parse instances: instances
 //     with pos, io (_io or the _io of a set instance) and the keys of an
 //     attribute
+//   - casts, .as<t>, to an integer type and, of a switch-on field, to the
+//     user type of a case
 //   - params of integer types, bool and bytes, in types and at the top
 //     level of an imported schema, given as t(a, b)
 //   - enums, whose values are names or mappings of id, doc and doc-ref
@@ -106,6 +109,7 @@ compile :: proc(src: string, file_format: ^mdata.File_Format, path := "", import
 	c.instances = make(map[^mdata.Value_Instance]^Instance_Source, c.scratch)
 	c.parse_instances = make(map[^mdata.Node]^Parse_Source, c.scratch)
 	c.type_defs = make([dynamic]Set_Type, c.scratch)
+	c.deferred = make([dynamic]Deferred, c.scratch)
 	c.imported = make(map[string]^Type_Def, c.scratch)
 
 	c.schema = new_schema(&c, path)
@@ -126,7 +130,16 @@ Compiler :: struct {
 	instances:       map[^mdata.Value_Instance]^Instance_Source, // in scratch
 	parse_instances: map[^mdata.Node]^Parse_Source,              // in scratch
 	type_defs:       [dynamic]Set_Type,                          // the type of each set compiled, for sizes; in scratch
+	deferred:        [dynamic]Deferred,                          // the value instances that nothing referred to by the end of their set, compiled once every set is; in scratch
 	err:             Error,
+}
+
+// A value instance of set whose compile is put off until every set is
+// compiled (Compiler.deferred).
+@(private = "file")
+Deferred :: struct {
+	set:   ^mdata.Node,
+	value: ^mdata.Value_Instance,
 }
 
 // A set compiled, and its type. Sizes are rare, so the sets are searched
@@ -137,11 +150,13 @@ Compiler :: struct {
 // enclosing it (note_escapes), with what it is.
 @(private = "file")
 Set_Type :: struct {
-	set:         ^mdata.Node,
-	td:          ^Type_Def,
-	reused_by:   [dynamic]^mdata.Node, // in scratch; nil until one
-	escape:      ^yml.Node,
-	escape_what: string,
+	set:           ^mdata.Node,
+	td:            ^Type_Def,
+	done:          bool,                 // its attributes and instances are compiled, but for value instances put off
+	reused_by:     [dynamic]^mdata.Node, // in scratch; nil until one
+	escape:        ^yml.Node,
+	escape_what:   string,
+	escape_schema: ^Schema, // the schema escape is in
 }
 
 // A .ksy file: the schema being compiled, or one it imports.
@@ -412,7 +427,24 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 	ff.name = node.name
 	ff.root = node
 	c.root = node
-	return compile_fields(c, top, node, {node})
+	compile_fields(c, top, node, {node}) or_return
+
+	// the value instances that nothing referred to, now that every field
+	// they can refer to is compiled, as in Kaitai, where any instance can
+	// refer to any field; compiling them can put off others
+	for i := 0; i < len(c.deferred); i += 1 {
+		item := c.deferred[i]
+		if item.value.expr == nil do compile_deferred(c, item) or_return
+	}
+
+	// a reused set's expressions are all compiled
+	for st in c.type_defs {
+		if len(st.reused_by) > 0 && st.escape != nil {
+			c.schema = st.escape_schema
+			return fail(c, .Unsupported, st.escape, "%s: type %s contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it, other than through the _root of the schema decoded, or to an imported schema's _root", st.escape_what, st.td.name)
+		}
+	}
+	return true
 }
 
 // Checks the top level and meta of c.schema, whose document's root is root,
@@ -836,6 +868,8 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 		st := set_type(c, td.compiling)
 		if st.reused_by == nil do st.reused_by = make([dynamic]^mdata.Node, c.scratch)
 		append(&st.reused_by, set)
+		// reused from a value instance compiled after the set (compile_deferred)
+		if st.done do copy_members(set, td.compiling)
 		return true
 	}
 	schema := c.schema
@@ -849,7 +883,8 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 	ids := make([dynamic]^yml.Node, c.scratch) // the id nodes of the attributes, bit fields and instances
 
 	// each instance is compiled when an expression first refers to it, or
-	// after the attributes
+	// after the attributes, or for a value instance, once every set is
+	// (compile_schema)
 	scope := scope_of(c, td, chain)
 	instances := make([dynamic]^mdata.Value_Instance, c.allocator)
 	parse_instances := make([dynamic]^mdata.Node, c.allocator)
@@ -921,7 +956,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 		if get(e.value, "value") != nil {
 			inst := instances[next_value]
 			next_value += 1
-			if inst.expr == nil do compile_instance(c, set, inst) or_return
+			if inst.expr == nil do append(&c.deferred, Deferred{set = set, value = inst})
 		} else {
 			p := parse_instances[next_parse]
 			next_parse += 1
@@ -929,20 +964,41 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 		}
 	}
 
-	// every expression in set and in the sets inside it is compiled
-	st := c.type_defs[set_index]
-	if len(st.reused_by) == 0 do return true
-	if st.escape != nil {
-		return fail(c, .Unsupported, st.escape, "%s: type %s contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it, other than through the _root of the schema decoded, or to an imported schema's _root", st.escape_what, td.name)
-	}
-	for field in st.reused_by {
-		field.children = set.children
-		field.slot_count = set.slot_count
-		field.instances = set.instances
-		field.parse_instances = set.parse_instances
-		field.params = set.params
-	}
+	// the fields of td inside set are given its members, which are now
+	// all made; their escapes are checked once every expression is compiled
+	// (compile_schema)
+	st := &c.type_defs[set_index]
+	st.done = true
+	for field in st.reused_by do copy_members(field, set)
 	return true
+}
+
+// Gives field, a field of a type inside a set of that type (Node.recursive),
+// the members of set.
+@(private = "file")
+copy_members :: proc(field, set: ^mdata.Node) {
+	field.children = set.children
+	field.slot_count = set.slot_count
+	field.instances = set.instances
+	field.parse_instances = set.parse_instances
+	field.params = set.params
+}
+
+// Compiles item, a value instance put off. The types of the sets
+// enclosing it are marked as being compiled again while it is, so that a
+// parse instance or a type it compiles on demand finds that a type inside
+// one of them contains itself, as when it is compiled with its set.
+@(private = "file")
+compile_deferred :: proc(c: ^Compiler, item: Deferred) -> bool {
+	marked := make([dynamic]^Type_Def, c.scratch)
+	defer for td in marked do td.compiling = nil
+	for set in c.instances[item.value].scope.types {
+		st := set_type(c, set)
+		if st.td.compiling != nil do continue
+		st.td.compiling = set
+		append(&marked, st.td)
+	}
+	return compile_instance(c, item.set, item.value)
 }
 
 // The entry of c.type_defs for set, which was compiled.
@@ -975,7 +1031,7 @@ note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, s
 		target := x.imported_root ? -1 : innermost - x.up
 		for set in scope.types[target + 1:] {
 			if st := set_type(c, set); st.escape == nil {
-				st.escape, st.escape_what = n, what
+				st.escape, st.escape_what, st.escape_schema = n, what, c.schema
 			}
 		}
 	case mdata.Unary:
@@ -1007,8 +1063,10 @@ note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, s
 		note_escapes(c, n, what, x.instance, scope)
 	case mdata.Value_Ref:
 		note_escapes(c, n, what, x.base, scope)
+	case mdata.Switch_Cast:
+		note_escapes(c, n, what, x.operand, scope)
 	case mdata.Int_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element:
-	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of:
+	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast:
 		panic("note_escapes: unresolved expression")
 	}
 }
@@ -1259,8 +1317,10 @@ compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Inst
 		inst.cond = compile_expr(c, n, "if", scope, .Bool) or_return
 	}
 	e := compile_expr(c, value, "value", scope, .Unresolved) or_return
-	if e.type != .Int && e.type != .Bool && e.type != .String {
-		return fail(c, .Unsupported, value, "value instance %s: only integer, boolean and string values are supported", inst.name)
+	#partial switch e.type {
+	case .Int, .Bool, .String, .Bytes, .Struct, .Array:
+	case:
+		return fail(c, .Unsupported, value, "value instance %s: only integer, boolean, string, byte array, set and array values are supported, not %s", inst.name, expr.type_name(e.type))
 	}
 	if n := get(src.spec, "enum"); n != nil {
 		if e.type != .Int do return fail(c, .Invalid, get_key(src.spec, "enum"), "value instance %s: enum applies only to integer values", inst.name)
@@ -1560,6 +1620,9 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 	expect_map(c, cases, "cases") or_return
 
 	sw := new(mdata.Switch, c.allocator)
+	// the cases are known as they are compiled, so that an expression can
+	// cast the field to one of them (Switch_Cast)
+	node.switch_on = sw
 	sw.on = compile_expr(c, on, "switch-on", scope, .Unresolved) or_return
 	by_text := sw.on.type == .String
 	if !by_text && sw.on.type != .Int && sw.on.type != .Bool {
@@ -1604,6 +1667,7 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 		type_name, call = split_call(c, e.value, id, type_name) or_return
 		case_node := new_node(c, node.name, node.ref_name)
 		case_node.count = mdata.Fixed_Count{1}
+		user_type := "" // for casts
 
 		// a type with arguments is a user type
 		builtin, strz := false, false
@@ -1625,16 +1689,16 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 			case_node.type = .Set
 			compile_fields(c, user, case_node, chain_of(c, scope.types, user, case_node)) or_return
 			case_node.args = compile_args(c, e.value, id, user, call, scope) or_return
+			user_type = type_name
 		}
 
 		if is_default {
-			sw.default = case_node
+			sw.default, sw.default_type = case_node, user_type
 		} else {
-			append(&list, mdata.Switch_Case{value, text, case_node})
+			append(&list, mdata.Switch_Case{value, text, case_node, user_type})
+			sw.cases = list[:]
 		}
 	}
-	sw.cases = list[:]
-	node.switch_on = sw
 	return true
 }
 

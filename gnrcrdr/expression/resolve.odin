@@ -251,8 +251,7 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		case .Bytes:
 			e.type = .Int
 		case .Array:
-			// an Array is only ever all the values of a field
-			field := x.operand.variant.(mdata.Field_Ref).node
+			field := array_field(x.operand)
 			e.type = value_type(r, e, field, field.ref_name) or_return
 		case:
 			return fail(r, .Invalid, e.offset, "%s cannot be indexed; only an array and a byte array can", type_name(x.operand.type))
@@ -265,7 +264,9 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		return resolve_enum_constant(r, e, x)
 	case mdata.Size_Of:
 		return resolve_size_of(r, e, r.scope.types[len(r.scope.types) - 1], x.type_name, true, x.bits)
-	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.String_Length, mdata.To_S, mdata.To_I, mdata.Array_Method, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref:
+	case mdata.Cast:
+		return resolve_cast(r, e, x)
+	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.String_Length, mdata.To_S, mdata.To_I, mdata.Array_Method, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref, mdata.Switch_Cast:
 		assert(e.type != .Unresolved, "resolve: a resolved variant without a type")
 	case:
 		panic("resolve: empty expression")
@@ -365,17 +366,26 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 		e.type = value_type(r, e, r.scope.element, "_") or_return
 		e.variant = mdata.Repeat_Element{r.scope.element}
 	case:
-		base := new(mdata.Expr, r.allocator)
-		base^ = {type = .Struct, offset = e.offset, variant = mdata.Instance{node = types[len(types) - 1]}}
-		return resolve_field(r, e, base, name)
+		return resolve_field(r, e, current_instance(r, e.offset), name)
 	}
 	return true
 }
 
-// Makes e a reference to the field, parse instance, param or value
-// instance called name in the set instance base.
+// The set instance being decoded, as an expression at offset.
 @(private = "file")
-resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: string) -> bool {
+current_instance :: proc(r: ^Resolver, offset: int) -> ^mdata.Expr {
+	types := r.scope.types
+	base := new(mdata.Expr, r.allocator)
+	base^ = {type = .Struct, offset = offset, variant = mdata.Instance{node = types[len(types) - 1]}}
+	return base
+}
+
+// Makes e a reference to the field, parse instance, param or value
+// instance called name in the set instance base. With any_switch, a
+// switch-on field is a Struct, or an Array, whatever its cases, for a
+// cast to find the case it names (resolve_cast).
+@(private = "file")
+resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: string, any_switch := false) -> bool {
 	set := mdata.members(struct_node(base))
 	field: ^mdata.Node
 	slot: int
@@ -415,11 +425,14 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 	// evaluated before it has any value
 	if field.count == nil do return fail(r, .Invalid, e.offset, "%s cannot be used in its own if or repeat-expr; it has no value there", name)
 
-	if !mdata.is_single(field) {
+	switch {
+	case any_switch && field.switch_on != nil:
+		e.type = mdata.is_single(field) ? .Struct : .Array
+	case !mdata.is_single(field):
 		// the type of its values is checked as an Array's is used
 		if field.switch_on != nil do value_type(r, e, field, name) or_return
 		e.type = .Array
-	} else {
+	case:
 		e.type = value_type(r, e, field, name) or_return
 	}
 
@@ -480,6 +493,20 @@ resolve_value_ref :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, set: 
 	return true
 }
 
+// The field whose values e, an expression of type Array, is: an Array is
+// only ever all the values of a field, given by a Field_Ref or by a value
+// instance whose expression is one.
+@(private = "file")
+array_field :: proc(e: ^mdata.Expr) -> ^mdata.Node {
+	#partial switch x in e.variant {
+	case mdata.Field_Ref:
+		return x.node
+	case mdata.Value_Ref:
+		return array_field(x.instance.expr)
+	}
+	panic("array_field: not an array")
+}
+
 // The set of an expression of type Struct.
 @(private = "file")
 struct_node :: proc(e: ^mdata.Expr) -> ^mdata.Node {
@@ -494,6 +521,10 @@ struct_node :: proc(e: ^mdata.Expr) -> ^mdata.Node {
 		return struct_node(x.operand)
 	case mdata.Array_Method:
 		return struct_node(x.operand)
+	case mdata.Value_Ref:
+		return struct_node(x.instance.expr)
+	case mdata.Switch_Cast:
+		return x.node
 	}
 	panic("struct_node: not a set")
 }
@@ -611,8 +642,7 @@ resolve_array_method :: proc(r: ^Resolver, e: ^mdata.Expr, operand: ^mdata.Expr,
 	}
 	t := mdata.Expr_Type.Int
 	if operand.type == .Array {
-		// an Array is only ever all the values of a field
-		field := operand.variant.(mdata.Field_Ref).node
+		field := array_field(operand)
 		t = value_type(r, e, field, field.ref_name) or_return
 	}
 	if (method == .Min || method == .Max) && t != .Int do return fail(r, .Unsupported, e.offset, ".%s of an array is only supported when its values are integers, not %s", name, type_name(t))
@@ -675,4 +705,73 @@ resolve_size_of :: proc(r: ^Resolver, e: ^mdata.Expr, set: ^mdata.Node, name: st
 	e.variant = mdata.Int_Literal{bits ? n : (n + 7) / 8}
 	e.type = .Int
 	return true
+}
+
+// operand.as<type_name>. To an integer type, it is the operand, an Int, as
+// it is: as in Kaitai's JavaScript and Python runtimes, a cast changes the
+// type the compiler gives a value, not the value, and every integer is an
+// Int. To a user type, the operand must be a switch-on field read once,
+// which the cast gives as the instance of its cases of that type
+// (Switch_Cast); the field is found whatever the types of its cases.
+@(private = "file")
+resolve_cast :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Cast) -> bool {
+	if is_integer_type(x.type_name) {
+		resolve(r, x.operand) or_return
+		expect(r, x.operand, .Int) or_return
+		e.variant = x.operand.variant
+		e.type = .Int
+		return true
+	}
+
+	#partial switch op in x.operand.variant {
+	case mdata.Name:
+		if !is_special(op.name) {
+			resolve_field(r, x.operand, current_instance(r, x.operand.offset), op.name, any_switch = true) or_return
+		} else {
+			resolve(r, x.operand) or_return
+		}
+	case mdata.Member:
+		if !is_special(op.name) && op.name != "_sizeof" {
+			resolve(r, op.operand) or_return
+			if op.operand.type != .Struct do return fail(r, .Invalid, x.operand.offset, "%s has no field %s", type_name(op.operand.type), op.name)
+			resolve_field(r, x.operand, op.operand, op.name, any_switch = true) or_return
+		} else {
+			resolve(r, x.operand) or_return
+		}
+	case:
+		resolve(r, x.operand) or_return
+	}
+
+	ref, is_ref := x.operand.variant.(mdata.Field_Ref)
+	if !is_ref || ref.node.switch_on == nil || !mdata.is_single(ref.node) {
+		return fail(r, .Unsupported, e.offset, "a cast to a user type (%s) is only supported of a switch-on field read once", x.type_name)
+	}
+	sw := ref.node.switch_on
+	choices := make([dynamic]int, r.allocator)
+	node: ^mdata.Node
+	for c, i in sw.cases {
+		if c.type != x.type_name do continue
+		append(&choices, i)
+		if node == nil do node = c.node
+	}
+	if sw.default_type == x.type_name && sw.default_type != "" {
+		append(&choices, mdata.DEFAULT_CASE)
+		if node == nil do node = sw.default
+	}
+	if node == nil do return fail(r, .Invalid, e.offset, "%s has no case of type %s", ref.node.ref_name, x.type_name)
+	e.variant = mdata.Switch_Cast{x.operand, x.type_name, node, choices[:]}
+	e.type = .Struct
+	return true
+}
+
+// Whether name is an integer type, u1-u8 or s1-s8, with le or be or not.
+@(private = "file")
+is_integer_type :: proc(name: string) -> bool {
+	base := name
+	if len(base) == 4 && (base[2:] == "le" || base[2:] == "be") do base = base[:2]
+	switch base {
+	case "u1", "u2", "u4", "u8", "s1", "s2", "s4", "s8":
+		return true
+	}
+	return false
 }
