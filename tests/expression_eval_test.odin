@@ -231,6 +231,16 @@ EVAL_CASES := [?]Eval_Case {
 	{text = "(a == 5 ? hdr.tag : [1, 2, 3]).size", want = "2"},
 	{text = "(a == 4 ? hdr.tag : [1, 2, 3]).size", want = "3"},
 	{text = "[0.5, 2][1] / 4", want = "0.5"},
+
+	// substring counts code points, clamped to the string; as<bytes> makes
+	// bytes of integers
+	{text = "'abcd'.substring(1, 3) == 'bc'", want = "true"},
+	{text = `"\303\251xy".substring(1, 3) == "xy"`, want = "true"},
+	{text = "'abc'.substring(1, 10) == 'bc' and 'abc'.substring(2, 1) == '' and 'abc'.substring(5, 9) == ''", want = "true"},
+	{text = "'abc'.substring(-1, 2).length", err = .Index_Out_Of_Range},
+	{text = "[a + 60, 66].as<bytes>[0] + [a + 60, 66].as<bytes>.size", want = "67"},
+	{text = "[1, 2].as<bytes>.size", want = "2"},
+	{text = "[a + 251].as<bytes>.size", err = .Integer_Overflow},
 	{text = "[0.5, 2.5][a - 4]", want = "2.5"},
 }
 

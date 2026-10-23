@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 169 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 172 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -22,7 +22,7 @@ OK	cad/monomakh_sapr_chg.ksy
 ERR	common/bcd.ksy	Unsupported	common/bcd.ksy:37:1	params on the top-level type are not supported, except in an imported schema
 OK	common/bytes_with_io.ksy
 OK	common/dos_datetime.ksy
-ERR	common/riff.ksy	Unsupported	common/riff.ksy:135:16	value: method calls are not supported
+OK	common/riff.ksy
 OK	common/utf16_with_bom.ksy
 OK	common/utf8_string.ksy
 OK	common/vlq_base128_be.ksy
@@ -88,7 +88,7 @@ OK	game/warcraft_2_pud.ksy
 OK	geospatial/shapefile_index.ksy
 OK	geospatial/shapefile_main.ksy
 OK	hardware/dtb.ksy
-ERR	hardware/edid.ksy	Unsupported	hardware/edid.ksy:268:12	value: method calls are not supported
+OK	hardware/edid.ksy
 OK	hardware/mifare/mifare_classic.ksy
 ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:169:16	value: ?: on a set is not supported
 OK	image/dicom.ksy
@@ -98,11 +98,11 @@ OK	image/gimp_brush.ksy
 OK	image/icc_4.ksy
 OK	image/ico.ksy
 ERR	image/jpeg.ksy	Unsupported	image/exif.ksy:138:17	io: type ifd contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it, other than through the _root of the schema decoded, or to an imported schema's _root
-ERR	image/nitf.ksy	Unsupported	image/nitf.ksy:304:16	value: method calls are not supported
+OK	image/nitf.ksy
 OK	image/pcx.ksy
 OK	image/pcx_dcx.ksy
 OK	image/pif.ksy
-ERR	image/png.ksy	Unsupported	image/png.ksy:199:16	value: method calls are not supported
+ERR	image/png.ksy	Unsupported	image/png.ksy:908:42	value: ?: on a set is not supported
 OK	image/psx_tim.ksy
 OK	image/tga.ksy
 OK	image/webp.ksy

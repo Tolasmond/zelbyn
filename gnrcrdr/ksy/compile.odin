@@ -50,8 +50,10 @@ import "core:strings"
 //     and the keys of an attribute, or without pos when they read nothing
 //   - float literals and float fields in expressions, with + - * / and the
 //     comparisons, also with integers
-//   - casts, .as<t>, to an integer type and, of a switch-on field, to the
-//     user type of a case, and array literals, [a, b]
+//   - casts, .as<t>, to an integer type, to bytes of an array of integers,
+//     and, of a switch-on field, to the user type of a case; array
+//     literals, [a, b]; and the methods .to_s(encoding) of bytes and
+//     .substring(from, to) of a string
 //   - params of integer types, bool, bytes, str and user types, in types
 //     and at the top level of an imported schema, given as t(a, b)
 //   - enums, whose values are names or mappings of id, doc and doc-ref
@@ -623,12 +625,20 @@ ENCODINGS :: [?]Encoding_Name {
 @(private = "file")
 encoding :: proc(c: ^Compiler, n: ^yml.Node) -> (e: mdata.Encoding, ok: bool) {
 	name := expect_scalar(c, n, "encoding") or_return
+	if e, ok = encoding_named(name); ok do return
+	return .None, fail(c, .Unsupported, n, "encoding %q is not supported; only ASCII, UTF-8, UTF-16LE, UTF-16BE, UTF-32LE, UTF-32BE, ISO-8859-1, windows-1251, windows-1252 and IBM437 are", name)
+}
+
+// The encoding called name or one of its aliases, in any case
+// (expr.Scope.encoding); ok is false for one the decoder does not support.
+@(private = "file")
+encoding_named :: proc(name: string) -> (e: mdata.Encoding, ok: bool) {
 	for known in ENCODINGS {
 		for alias in known.names {
 			if strings.equal_fold(alias, name) do return known.encoding, true
 		}
 	}
-	return .None, fail(c, .Unsupported, n, "encoding %q is not supported; only ASCII, UTF-8, UTF-16LE, UTF-16BE, UTF-32LE, UTF-32BE, ISO-8859-1, windows-1251, windows-1252 and IBM437 are", name)
+	return
 }
 
 // The Kaitai Struct version gnrcrdr follows: that of the official compiler
@@ -1118,6 +1128,14 @@ note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, s
 		note_escapes(c, n, what, x.operand, scope)
 	case mdata.To_I:
 		note_escapes(c, n, what, x.operand, scope)
+	case mdata.Decode:
+		note_escapes(c, n, what, x.operand, scope)
+	case mdata.To_Bytes:
+		note_escapes(c, n, what, x.operand, scope)
+	case mdata.Substring:
+		note_escapes(c, n, what, x.operand, scope)
+		note_escapes(c, n, what, x.from, scope)
+		note_escapes(c, n, what, x.to, scope)
 	case mdata.Array_Method:
 		note_escapes(c, n, what, x.operand, scope)
 	case mdata.Io:
@@ -1130,7 +1148,7 @@ note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, s
 	case mdata.Array_Literal:
 		for item in x.items do note_escapes(c, n, what, item, scope)
 	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element:
-	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast:
+	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast, mdata.Call:
 		panic("note_escapes: unresolved expression")
 	}
 }
@@ -1145,6 +1163,7 @@ scope_of :: proc(c: ^Compiler, td: ^Type_Def, chain: []^mdata.Node) -> expr.Scop
 		compile_instance       = compile_instance_callback,
 		compile_parse_instance = compile_parse_instance_callback,
 		size_of                = size_of_callback,
+		encoding               = encoding_named,
 		data                   = c,
 	}
 }

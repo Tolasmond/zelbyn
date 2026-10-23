@@ -31,6 +31,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 
 	// keys: Kaitai keys outside the subset, unknown keys, misplaced extensions
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    pos: 1\n", .Unsupported, 7, 5, "attribute a: pos is not supported"},
+	{HEAD + "seq:\n  - id: a\n    size: 1\n  - id: b\n    size: 1\n    if: a.to_s('EBCDIC') == ''\n", .Unsupported, 9, 9, `if: encoding "EBCDIC" is not supported`},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    process: xor(1)\n", .Unsupported, 7, 14, "a: process xor(1) is not supported; only zlib is"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    process: zlib\n", .Invalid, 7, 5, "a: process applies only to a byte array or a user type"},
 	{HEAD + "seq:\n  - id: a\n    type: s\n    process: zlib\ntypes:\n  s: {}\n", .Invalid, 7, 5, "a: process needs size, size-eos or terminator"},
@@ -581,6 +582,67 @@ types:
 t[0].b[0] = <2 bytes> 01 02
 t[0].c[0] = <1 bytes> 03
 t[0].d[0] = 4
+`)
+
+	// methods: .to_s(encoding) of bytes, in a switch-on (RIFF, LIST) and
+	// in UTF-16LE (wide), .substring of a string, and .as<bytes> of an
+	// array of integers
+	methods := HEAD + `seq:
+  - id: tag
+    size: 4
+  - id: name
+    size: 4
+    type: str
+    encoding: UTF-8
+  - id: body
+    type:
+      switch-on: tag.to_s('ASCII')
+      cases:
+        '"RIFF"': riff_body
+        '"LIST"': list_body
+  - id: w
+    size: 4
+  - id: wide
+    size: 2
+    if: w.to_s('UTF-16LE') == "AB"
+  - id: sub_ok
+    size: 1
+    if: name.substring(1, 3) == "bc"
+  - id: ids
+    type: u1
+    repeat: expr
+    repeat-expr: 3
+  - id: mfg
+    size: 1
+    if: '[ids[0] + 0x40, ids[1] + 0x40, ids[2] + 0x40].as<bytes>.to_s("ASCII") == "ABC"'
+types:
+  riff_body:
+    seq:
+      - id: x
+        type: u1
+  list_body:
+    seq:
+      - id: y
+        type: u2
+`
+	expect_dump(t, "methods, 1", ksy_dump(t, methods, {0x52, 0x49, 0x46, 0x46, 0x61, 0x62, 0x63, 0x64, 0x07, 0x41, 0x00, 0x42, 0x00, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x09}), `t[0].tag[0] = <4 bytes> 52 49 46 46
+t[0].name[0] = "abcd"
+t[0].body[0].x[0] = 7
+t[0].w[0] = <4 bytes> 41 00 42 00
+t[0].wide[0] = <2 bytes> 01 02
+t[0].sub_ok[0] = <1 bytes> 03
+t[0].ids[0] = 1
+t[0].ids[1] = 2
+t[0].ids[2] = 3
+t[0].mfg[0] = <1 bytes> 09
+`)
+	expect_dump(t, "methods, 2", ksy_dump(t, methods, {0x4c, 0x49, 0x53, 0x54, 0x78, 0x79, 0x7a, 0x77, 0x07, 0x08, 0x41, 0x41, 0x41, 0x41, 0x01, 0x01, 0x01, 0x09}), `t[0].tag[0] = <4 bytes> 4c 49 53 54
+t[0].name[0] = "xyzw"
+t[0].body[0].y[0] = 2055
+t[0].w[0] = <4 bytes> 41 41 41 41
+t[0].ids[0] = 1
+t[0].ids[1] = 1
+t[0].ids[2] = 1
 `)
 
 	// process: zlib decompresses the bytes of a byte array, once pad-right

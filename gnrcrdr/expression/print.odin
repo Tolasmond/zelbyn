@@ -140,6 +140,30 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 		strings.write_byte(b, ']')
 	case mdata.Cast:
 		write_cast(b, x.operand, x.type_name)
+	case mdata.Call:
+		write(b, x.operand)
+		strings.write_byte(b, '.')
+		strings.write_string(b, x.name)
+		strings.write_byte(b, '(')
+		for a, i in x.args {
+			if i > 0 do strings.write_string(b, ", ")
+			write(b, a)
+		}
+		strings.write_byte(b, ')')
+	case mdata.Decode:
+		write(b, x.operand)
+		strings.write_string(b, ".to_s(\"")
+		strings.write_string(b, x.name)
+		strings.write_string(b, "\")")
+	case mdata.Substring:
+		write(b, x.operand)
+		strings.write_string(b, ".substring(")
+		write(b, x.from)
+		strings.write_string(b, ", ")
+		write(b, x.to)
+		strings.write_byte(b, ')')
+	case mdata.To_Bytes:
+		write_cast(b, x.operand, "bytes")
 	case mdata.Switch_Cast:
 		write_cast(b, x.operand, x.type_name)
 	case mdata.Instance:

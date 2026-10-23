@@ -572,7 +572,10 @@ parse_primary :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 			}
 			e = new_expr(p, name.offset, mdata.Member{e, strings.clone(name.text, p.allocator)})
 		case .L_Paren:
-			return nil, fail(p, .Unsupported, p.tok.offset, "method calls are not supported")
+			m, is_member := e.variant.(mdata.Member)
+			if !is_member do return nil, fail(p, .Syntax, p.tok.offset, "only a method, .name(...), can be called")
+			args := parse_args(p) or_return
+			e.variant = mdata.Call{m.operand, m.name, args}
 		case .L_Bracket:
 			offset := p.tok.offset
 			next(p) or_return
@@ -584,6 +587,22 @@ parse_primary :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 			return e, true
 		}
 	}
+}
+
+// The arguments of a call, at its (: expressions separated by commas, up to
+// the ).
+@(private = "file")
+parse_args :: proc(p: ^Parser) -> (args: []^mdata.Expr, ok: bool) {
+	next(p) or_return
+	list := make([dynamic]^mdata.Expr, p.allocator)
+	for p.tok.kind != .R_Paren {
+		append(&list, parse_expr(p, 0) or_return)
+		if p.tok.kind == .R_Paren do break
+		if p.tok.kind != .Comma do return nil, fail(p, .Syntax, p.tok.offset, "expected , or ), found %s", describe(p.tok))
+		next(p) or_return
+	}
+	next(p) or_return
+	return list[:], true
 }
 
 @(private = "file")
