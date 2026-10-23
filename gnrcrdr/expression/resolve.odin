@@ -30,7 +30,12 @@ Scope :: struct {
 	// called name, as set's type names it. On failure it returns the error,
 	// whose offset the resolver sets. When nil, these are an error.
 	size_of: proc(data: rawptr, set: ^mdata.Node, name: string, of_type: bool) -> (bits: int, err: Error),
-	data:    rawptr,
+
+	// The encoding that name, an encoding of .to_s(encoding), is; ok is
+	// false for one that is not supported. When nil, .to_s(encoding) is an
+	// error.
+	encoding: proc(name: string) -> (e: mdata.Encoding, ok: bool),
+	data:     rawptr,
 }
 
 // A schema's enum: its values, by name. An enum constant (name::value) is
@@ -270,9 +275,11 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		return resolve_size_of(r, e, r.scope.types[len(r.scope.types) - 1], x.type_name, true, x.bits)
 	case mdata.Cast:
 		return resolve_cast(r, e, x)
+	case mdata.Call:
+		return resolve_call(r, e, x)
 	case mdata.Array_Literal:
 		return resolve_array_literal(r, e, x)
-	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.String_Length, mdata.To_S, mdata.To_I, mdata.Array_Method, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref, mdata.Switch_Cast, mdata.Bytes_Literal:
+	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.String_Length, mdata.Decode, mdata.Substring, mdata.To_Bytes, mdata.To_S, mdata.To_I, mdata.Array_Method, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref, mdata.Switch_Cast, mdata.Bytes_Literal:
 		assert(e.type != .Unresolved, "resolve: a resolved variant without a type")
 	case:
 		panic("resolve: empty expression")
@@ -594,6 +601,12 @@ reach_of :: proc(e: ^mdata.Expr) -> int {
 		return reach_of(x.operand)
 	case mdata.To_I:
 		return reach_of(x.operand)
+	case mdata.Decode:
+		return reach_of(x.operand)
+	case mdata.To_Bytes:
+		return reach_of(x.operand)
+	case mdata.Substring:
+		return max(reach_of(x.operand), reach_of(x.from), reach_of(x.to))
 	case mdata.Array_Method:
 		return reach_of(x.operand)
 	case mdata.Io:
@@ -602,7 +615,7 @@ reach_of :: proc(e: ^mdata.Expr) -> int {
 		return reach_of(x.operand)
 	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element:
 		return 0
-	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast:
+	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast, mdata.Call:
 		panic("reach_of: unresolved expression")
 	}
 	return 0
@@ -905,6 +918,21 @@ resolve_size_of :: proc(r: ^Resolver, e: ^mdata.Expr, set: ^mdata.Node, name: st
 // (Switch_Cast); the field is found whatever the types of its cases.
 @(private = "file")
 resolve_cast :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Cast) -> bool {
+	if x.type_name == "bytes" {
+		resolve(r, x.operand) or_return
+		#partial switch x.operand.type {
+		case .Bytes:
+			e.variant = x.operand.variant
+		case .Array:
+			t := array_item_type(r, e, x.operand) or_return
+			if t != .Int do return fail(r, .Invalid, e.offset, "an array of %s cannot be cast to bytes; only one of integers can", type_name(t))
+			e.variant = mdata.To_Bytes{x.operand}
+		case:
+			return fail(r, .Invalid, e.offset, "%s cannot be cast to bytes; only an array of integers or a byte array can", type_name(x.operand.type))
+		}
+		e.type = .Bytes
+		return true
+	}
 	if is_integer_type(x.type_name) {
 		resolve(r, x.operand) or_return
 		expect(r, x.operand, .Int) or_return
@@ -951,6 +979,33 @@ resolve_cast :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Cast) -> bool {
 	if node == nil do return fail(r, .Invalid, e.offset, "%s has no case of type %s", ref.node.ref_name, x.type_name)
 	e.variant = mdata.Switch_Cast{x.operand, x.type_name, node, choices[:]}
 	e.type = .Struct
+	return true
+}
+
+// operand.name(args): .to_s(encoding) of a byte array, with a string
+// literal, or .substring(from, to) of a string.
+@(private = "file")
+resolve_call :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Call) -> bool {
+	resolve(r, x.operand) or_return
+	for a in x.args do resolve(r, a) or_return
+	switch {
+	case x.name == "to_s" && x.operand.type == .Bytes:
+		if len(x.args) != 1 do return fail(r, .Invalid, e.offset, ".to_s of a byte array takes 1 argument, its encoding, not %v", len(x.args))
+		lit, is_literal := x.args[0].variant.(mdata.String_Literal)
+		if !is_literal do return fail(r, .Unsupported, x.args[0].offset, "the encoding of .to_s must be a string literal")
+		if r.scope.encoding == nil do return fail(r, .Invalid, e.offset, "encodings cannot be used here")
+		enc, known := r.scope.encoding(lit.value)
+		if !known do return fail(r, .Unsupported, x.args[0].offset, "encoding %q is not supported", lit.value)
+		e.variant = mdata.Decode{x.operand, enc, lit.value}
+		e.type = .String
+	case x.name == "substring" && x.operand.type == .String:
+		if len(x.args) != 2 do return fail(r, .Invalid, e.offset, ".substring takes 2 arguments, not %v", len(x.args))
+		for a in x.args do expect(r, a, .Int) or_return
+		e.variant = mdata.Substring{x.operand, x.args[0], x.args[1]}
+		e.type = .String
+	case:
+		return fail(r, .Unsupported, e.offset, "%s has no method %s(...); only .to_s(encoding) of a byte array and .substring(from, to) of a string are supported", type_name(x.operand.type), x.name)
+	}
 	return true
 }
 

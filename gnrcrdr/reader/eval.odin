@@ -222,6 +222,18 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 	case mdata.To_S:
 		operand := eval(d, x.operand, ctx) or_return
 		return int_to_string(d, operand.(int)), .None
+	case mdata.Decode:
+		operand := eval(d, x.operand, ctx) or_return
+		bytes := operand.([]byte)
+		return x.encoding == .None ? string(bytes) : decode_text(d, bytes, x.encoding), .None
+	case mdata.Substring:
+		operand := eval(d, x.operand, ctx) or_return
+		from := eval(d, x.from, ctx) or_return
+		to := eval(d, x.to, ctx) or_return
+		return substring(operand.(string), from.(int), to.(int))
+	case mdata.To_Bytes:
+		operand := eval(d, x.operand, ctx) or_return
+		return values_to_bytes(d, operand.([]fld.Value))
 	case mdata.To_I:
 		operand := eval(d, x.operand, ctx) or_return
 		#partial switch o in operand {
@@ -321,7 +333,7 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		return instance, .None
 	case mdata.Io:
 		panic("eval: a Stream expression (eval_stream)")
-	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast:
+	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast, mdata.Call:
 		panic("eval: unresolved expression")
 	}
 	panic("eval: invalid expression")
@@ -653,6 +665,38 @@ eval_binary_other :: proc(d: ^Decoder, op: mdata.Binary_Op, x, y: Eval_Value) ->
 		return l >= r
 	}
 	panic("eval: invalid operator on strings")
+}
+
+// The code points of s from from up to to (mdata.Substring), a view of s.
+@(private = "file", require_results)
+substring :: proc(s: string, from, to: int) -> (v: Eval_Value, err: dat.Read_Error) {
+	if from < 0 || to < 0 do return nil, .Index_Out_Of_Range
+	if to <= from do return "", .None
+	start, end := len(s), len(s)
+	n := 0
+	for _, i in s {
+		if n == from do start = i
+		if n == to {
+			end = i
+			break
+		}
+		n += 1
+	}
+	return s[start:end], .None
+}
+
+// values, Int values of an array, as bytes in the tree's arena
+// (mdata.To_Bytes).
+@(private = "file", require_results)
+values_to_bytes :: proc(d: ^Decoder, values: []fld.Value) -> (v: Eval_Value, err: dat.Read_Error) {
+	bytes := arn.arena_make(d.arena, byte, len(values))
+	for value, i in values {
+		item := single_value(value) or_return
+		n := item.(int)
+		if n < 0 || n > 255 do return nil, .Integer_Overflow
+		bytes[i] = byte(n)
+	}
+	return bytes, .None
 }
 
 // v as a float, when it is a number.

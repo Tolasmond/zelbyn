@@ -41,6 +41,7 @@ Expr_Variant :: union {
 	Enum_Constant,
 	Size_Of,
 	Cast,
+	Call,
 
 	// resolved only
 	Instance,
@@ -59,6 +60,9 @@ Expr_Variant :: union {
 	Value_Ref,
 	Switch_Cast,
 	Bytes_Literal,
+	Decode,
+	Substring,
+	To_Bytes,
 }
 
 Int_Literal :: struct {
@@ -192,6 +196,36 @@ Switch_Cast :: struct {
 	type_name: string,
 	node:      ^Node,
 	choices:   []int,
+}
+
+// operand.name(args): a method call, which resolving makes a Decode or a
+// Substring.
+Call :: struct {
+	operand: ^Expr,
+	name:    string,
+	args:    []^Expr,
+}
+
+// .to_s(encoding) of Bytes: the String its bytes are in encoding,
+// decoded as a str field's are (ASCII and UTF-8 kept as they are). name
+// is the encoding as the schema gives it.
+Decode :: struct {
+	operand:  ^Expr,
+	encoding: Encoding,
+	name:     string,
+}
+
+// .substring(from, to) of a String: its code points from from up to to,
+// both Int expressions, clamped to its length; empty when to is not after
+// from, and Index_Out_Of_Range when either is negative.
+Substring :: struct {
+	operand, from, to: ^Expr,
+}
+
+// .as<bytes> of an Array of Ints: Bytes of its values, each of which must
+// fit in a byte, else Integer_Overflow.
+To_Bytes :: struct {
+	operand: ^Expr,
 }
 
 // The set instance being decoded (up = 0), one of its enclosing instances
