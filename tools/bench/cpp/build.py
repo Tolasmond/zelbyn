@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the Kaitai Struct C++ reference for tools/bench/bench.py
-(decision record §10.2).
+"""Builds the Kaitai Struct C++ reference for tools/bench/bench.py.
 
     python3 tools/bench/cpp/build.py <runtime_dir> [--schema formats/gif.ksy]
 

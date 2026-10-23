@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Measures gnrcrdr cold, one fresh process per measurement (decision record
-§10.2).
+"""Measures gnrcrdr cold, one fresh process per measurement.
 
     python3 tools/bench/bench.py [--runs N] [--schema S] [--spans] [--cpp BIN] [file ...]
 

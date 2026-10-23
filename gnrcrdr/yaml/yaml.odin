@@ -5,12 +5,12 @@ import "core:fmt"
 import "core:mem"
 import "core:strings"
 
-// The subset of YAML that .ksy files use (decision record §7.1): block
-// mappings and sequences, flow sequences and mappings, plain, single- and
-// double-quoted scalars, literal (|) and folded (>) block scalars, and
-// comments. Rejected as .Unsupported: anchors, aliases, tags, merge keys
-// (<<), complex keys (? and collections as keys), directives and
-// multi-document streams. Duplicate keys are rejected as .Duplicate_Key.
+// The subset of YAML that .ksy files use: block mappings and sequences, flow
+// sequences and mappings, plain, single- and double-quoted scalars, literal
+// (|) and folded (>) block scalars, and comments. Rejected as .Unsupported:
+// anchors, aliases, tags, merge keys (<<), complex keys (? and collections
+// as keys), directives and multi-document streams. Duplicate keys are
+// rejected as .Duplicate_Key.
 //
 // Scalars are not interpreted: 0x21, yes and ~ all reach the caller as
 // text, with the style they were written in.

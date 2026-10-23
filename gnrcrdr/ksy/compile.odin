@@ -15,10 +15,10 @@ import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 
-// The .ksy front end (decision record §5, §6): a subset of Kaitai Struct,
-// compiled into the plan. Anything outside the subset is an error naming
-// its key and location; keys starting with - that gnrcrdr does not know are
-// ignored, as the official tools ignore them.
+// The .ksy front end: a subset of Kaitai Struct, compiled into the plan.
+// Anything outside the subset is an error naming its key and location; keys
+// starting with - that gnrcrdr does not know are ignored, as the official
+// tools ignore them.
 //
 // Supported:
 //   - meta: id, endian, bit-endian, encoding, ks-version (checked against
