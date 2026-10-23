@@ -29,7 +29,8 @@ import "core:strings"
 //     bit-endian and encoding apply in it and the types declared in it
 //   - imported schemas, whose top-level types are used by their meta id,
 //     each with its own meta
-//   - attributes: id, type, size, size-eos, terminator with consume, include
+//   - attributes: id (without one, named _unnamed and their index in seq,
+//     as in Kaitai), type, size, size-eos, terminator with consume, include
 //     and eos-error, pad-right, contents, if, enum, valid (eq, min, max,
 //     any-of, in-enum, expr), repeat (expr, eos, until) with repeat-expr
 //     and repeat-until, encoding, doc, doc-ref
@@ -42,10 +43,10 @@ import "core:strings"
 //     size-eos or terminator, whose cases are user types or any of those
 //     types
 //   - value instances, with if and enum, of integers, booleans, strings,
-//     byte arrays, set instances and arrays, over their type and through
-//     _parent and _root those enclosing it, and parse instances: instances
-//     with pos, io (_io or the _io of a set instance) and the keys of an
-//     attribute
+//     byte arrays, set instances and arrays, over their type, its _io, and
+//     through _parent and _root those enclosing it, and parse instances:
+//     instances with pos, io (_io or the _io of a set instance) and the keys
+//     of an attribute
 //   - casts, .as<t>, to an integer type and, of a switch-on field, to the
 //     user type of a case, and array literals, [a, b]
 //   - params of integer types, bool and bytes, in types and at the top
@@ -54,13 +55,13 @@ import "core:strings"
 //     (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
-// Not supported yet (Unsupported): other encodings, instances without pos
-// or value, params of other types (str, user types, struct, io, any) and on
-// the top-level type of the schema compiled, _io in a value instance, valid
-// on a float, min and max on a type other than an integer, an endian that
-// is a switch-on, imports in a type, and in a type that contains itself,
-// the members of the sets enclosing it, other than through the schema's
-// _root, and an instance that refers to itself through a field of its type.
+// Not supported yet (Unsupported): other encodings, instances without pos or
+// value, params of other types (str, user types, struct, io, any) and on the
+// top-level type of the schema compiled, valid on a float, min and max on a
+// type other than an integer, an endian that is a switch-on, imports in a
+// type, and in a type that contains itself, the members of the sets
+// enclosing it, other than through the schema's _root, and an instance that
+// refers to itself through a field of its type.
 
 Error_Kind :: enum {
 	None,
@@ -434,8 +435,10 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 		if item.value.expr == nil do compile_deferred(c, item) or_return
 	}
 
-	// a reused set's expressions are all compiled
+	// a reused set's expressions are all compiled; its fields inside it
+	// are read as it is
 	for st in c.type_defs {
+		if st.set.keeps_stream do for field in st.reused_by do field.keeps_stream = true
 		if len(st.reused_by) > 0 && st.escape != nil {
 			c.schema = st.escape_schema
 			return fail(c, .Unsupported, st.escape, "%s: type %s contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it, other than through the _root of the schema decoded, or to an imported schema's _root", st.escape_what, st.td.name)
@@ -945,8 +948,8 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 	if seq != nil {
 		children := make([dynamic]^mdata.Node, c.allocator)
 		after_bits := false
-		for attr in seq.items {
-			child := new_attr(c, td, attr, &ids) or_return
+		for attr, i in seq.items {
+			child := new_attr(c, td, attr, i, &ids) or_return
 			// a field's own expressions can refer to it, as in Kaitai: in a
 			// repeat, to the elements read so far
 			append(&children, child)
@@ -1189,10 +1192,9 @@ type_bits :: proc(c: ^Compiler, td: ^Type_Def) -> (bits: int, unsized: string) {
 
 	seq := get(td.spec, "seq")
 	if seq == nil do return 0, ""
-	for attr in seq.items {
+	for attr, i in seq.items {
 		id := get(attr, "id")
-		if id == nil do return 0, "an attribute without an id"
-		n, why := attr_bits(c, td, attr, id.text)
+		n, why := attr_bits(c, td, attr, id == nil ? unnamed(c, i) : id.text)
 		if why != "" do return 0, why
 		overflow: bool
 		bits, overflow = intrinsics.overflow_add(bits, n)
@@ -1325,7 +1327,7 @@ compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Inst
 	defer src.compiling = false
 
 	scope := src.scope
-	scope.instance = true
+	scope.instance = inst
 
 	if n := get(src.spec, "if"); n != nil {
 		inst.cond = compile_expr(c, n, "if", scope, .Bool) or_return
@@ -1428,17 +1430,28 @@ bit_type :: proc(name: string) -> (width: int, order: Maybe(endian.Byte_Order), 
 	return width, order, width <= 64
 }
 
-// The node of a seq attribute, with its id and name, for compile_field to
-// compile the rest into.
+// The node of seq attribute index, with its id and name, for compile_field
+// to compile the rest into. One without an id is named as in Kaitai
+// (unnamed).
 @(private = "file")
-new_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, ids: ^[dynamic]^yml.Node) -> (node: ^mdata.Node, ok: bool) {
+new_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, index: int, ids: ^[dynamic]^yml.Node) -> (node: ^mdata.Node, ok: bool) {
 	id_node := get(attr, "id")
-	if id_node == nil do return nil, fail(c, .Unsupported, attr, "an attribute in type %s has no id; attributes without one are not supported", td.name)
+	if id_node == nil {
+		id := unnamed(c, index)
+		return new_node(c, display_name(c, attr, id) or_return, id), true
+	}
 	id := identifier(c, id_node, "id") or_return
 	claim_id(c, ids, id, id_node) or_return
 
 	name := display_name(c, attr, id) or_return
 	return new_node(c, name, id), true
+}
+
+// The name Kaitai gives attribute index of a type, which has no id:
+// _unnamed and its index in seq. No expression can refer to it.
+@(private = "file")
+unnamed :: proc(c: ^Compiler, index: int) -> string {
+	return fmt.aprintf("_unnamed%d", index, allocator = c.allocator)
 }
 
 // Compiles the keys of attr, an attribute or a parse instance, other than

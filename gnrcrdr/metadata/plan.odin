@@ -31,7 +31,7 @@ Node :: struct {
 	args:            []^Expr,           // a Set with params: an Int, Bool or Bytes expression for each, evaluated where each instance is read, after the bytes of its substream
 	pos:             ^Expr,             // a parse instance only: an Int expression, the offset it is read at (see below); nil for every other field
 	io:              ^Expr,             // a parse instance only: a Stream expression, the stream it is read from (Kaitai's io); nil for that of the set instance it belongs to
-	keeps_stream:    bool,              // Set only: an io expression refers to the stream of its instances, which the decoder then keeps while it decodes (Io)
+	keeps_stream:    bool,              // Set only: an io expression, or _io in a value instance of the set, refers to the stream of its instances, which the decoder then keeps, as it is once each is read (Io, Io_Pos)
 	bits:            []Bit_Field,       // integer types only: packed subfields, decoded from each element
 	valid:           Valid,             // checked on every element; nil when there is no check
 }
@@ -317,7 +317,11 @@ slot_of :: proc(set: ^Node, index: int) -> int {
 Value_Instance :: struct {
 	name: string, // the .ksy id
 	cond: ^Expr,  // a Bool expression over the same fields, evaluated first; nil when it always has a value (Kaitai's if)
-	expr: ^Expr,  // Int or Bool; nil only while the schema is being compiled
+	expr: ^Expr,  // nil only while the schema is being compiled
+	// the expression or cond uses _io.pos or _io.eof, which change as the
+	// stream is read: the decoder evaluates it once for each set instance,
+	// when it is first used, as Kaitai evaluates every value instance
+	cached: bool,
 }
 
 // Bits low through high (inclusive; 0 is the least significant) of an

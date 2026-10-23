@@ -86,7 +86,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\nseq:\n  - id: a\n    type: u\ntypes:\n  u:\n    meta:\n      encoding: ASCII\n    seq:\n      - id: b\n        type: w\n  w:\n    seq:\n      - id: s\n        type: strz\n", .Invalid, 16, 15, "s: str needs an encoding, or meta encoding"},
 
 	// attributes
-	{HEAD + "seq:\n  - type: u1\n", .Unsupported, 5, 5, "an attribute in type t has no id"},
+	{HEAD + "seq:\n  - type: u1\n  - id: a\n    size: _unnamed0\n", .Invalid, 7, 11, "size: t has no field _unnamed0"},
 	{HEAD + "seq:\n  - id: A\n    type: u1\n", .Invalid, 5, 9, `id "A" is not an identifier`},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n  - id: a\n    type: u1\n", .Invalid, 7, 9, "id a is already used (line 5, column 9)"},
 	{HEAD + "seq:\n  - id: a\n", .Invalid, 5, 5, "a needs a type, size, size-eos, terminator or contents"},
@@ -168,7 +168,6 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "instances:\n  x:\n    value: 1\n    pos: 0\n", .Invalid, 7, 5, `instance x: unknown key "pos"`},
 	{HEAD + "instances:\n  x:\n    value: 1\n    if: 1\n", .Invalid, 7, 9, "if: expected a boolean, found an integer"},
 	{HEAD + "instances:\n  x:\n    value: 1\n    if: x == 1\n", .Invalid, 6, 12, "value instance x refers to itself"},
-	{HEAD + "instances:\n  x:\n    value: 1\n    if: _io.eof\n", .Unsupported, 7, 9, "_io in a value instance is not supported"},
 	{HEAD + "instances:\n  x:\n    value: 1\n    enum: e\n", .Invalid, 7, 11, "x: no enum e"},
 	{HEAD + "instances:\n  x:\n    value: 1 == 1\n    enum: e\nenums:\n  e:\n    1: one\n", .Invalid, 7, 5, "value instance x: enum applies only to integer values"},
 	{HEAD + "instances:\n  x:\n    pos: 0\n    type: u1\n    -bits:\n      - {id: b, low: 0, high: 0}\n", .Invalid, 8, 5, "the extension -bits does not apply here"},
@@ -183,7 +182,6 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: b\n    size: 1\ninstances:\n  x:\n    value: b.as<u4>\n", .Invalid, 9, 12, "expected an integer, found a byte array"},
 	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    instances:\n      x:\n        value: _parent.y\n", .Invalid, 11, 24, "value: t has no field y"},
 	{HEAD + "instances:\n  x:\n    value: _parent.y\n", .Invalid, 6, 12, "value: _parent: t has no enclosing set here"},
-	{HEAD + "instances:\n  x:\n    value: _io.pos\n", .Unsupported, 6, 12, "_io in a value instance is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: x\n  - id: n\n    type: u1\ninstances:\n  x:\n    value: n\n", .Invalid, 11, 12, "value: t has no field n"},
 	{HEAD + "seq:\n  - id: a\n    type: s\n    -peek: [1]\n    -until-peek: [0]\ntypes:\n  s: {}\n", .Invalid, 8, 5, "-until-peek cannot be combined with -peek"},
 	{HEAD + "seq:\n  - id: a\n    type: s\n    repeat: expr\n    repeat-expr: 2\n    -while-peek: [1]\ntypes:\n  s: {}\n", .Invalid, 9, 5, "-while-peek cannot be combined with repeat"},
@@ -482,6 +480,94 @@ t[0].z[0] = -2
 	// -orig-id on a type documents its original name, as in
 	// kaitai_struct_formats; nothing shows it
 	expect_dump(t, "-orig-id on a type", ksy_dump(t, HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    -orig-id: S\n    seq:\n      - id: b\n        type: u1\n", {7}), "t[0].a[0].b[0] = 7\n")
+
+	// an attribute without an id is named _unnamed and its index in seq, as
+	// in Kaitai, also among bit fields
+	expect_dump(t, "unnamed", ksy_dump(t, HEAD + "seq:\n  - id: a\n    type: u1\n  - size: 2\n  - type: b4\n  - id: b\n    type: b4\n", {7, 1, 2, 0x35}), "t[0].a[0] = 7\nt[0]._unnamed1[0] = <2 bytes> 01 02\nt[0]._unnamed2[0] = 3\nt[0].b[0] = 5\n")
+
+	// _io in a value instance is the stream of its set instance, as it is
+	// when the value is first used, which is kept from then on: start and
+	// end are saved as the items are read, for raw, which is read once the
+	// root is
+	positions := HEAD + `seq:
+  - id: items
+    type: item
+    repeat: expr
+    repeat-expr: 2
+  - id: tail
+    size: len_file - 5
+    if: not at_end
+instances:
+  len_file:
+    value: _io.size
+  at_end:
+    value: _io.eof
+types:
+  item:
+    seq:
+      - id: mark
+        size: 0
+        if: start >= 0
+      - id: n
+        type: u1
+      - id: data
+        size: n
+      - id: mark2
+        size: 0
+        if: end >= 0
+    instances:
+      start:
+        value: _io.pos
+      end:
+        value: _io.pos
+      raw:
+        pos: start
+        size: end - start
+`
+	expect_dump(t, "_io.pos saved", ksy_dump(t, positions, {1, 0xaa, 2, 0xbb, 0xcc, 0xdd}), `t[0].items[0].mark[0] = <0 bytes>
+t[0].items[0].n[0] = 1
+t[0].items[0].data[0] = <1 bytes> aa
+t[0].items[0].mark2[0] = <0 bytes>
+t[0].items[0].raw[0] = <2 bytes> 01 aa
+t[0].items[1].mark[0] = <0 bytes>
+t[0].items[1].n[0] = 2
+t[0].items[1].data[0] = <2 bytes> bb cc
+t[0].items[1].mark2[0] = <0 bytes>
+t[0].items[1].raw[0] = <3 bytes> 02 bb cc
+t[0].tail[0] = <1 bytes> dd
+`)
+
+	// once a's instance is read, its stream is as it was then: its size, at
+	// 1 of 2 bytes
+	kept := HEAD + `seq:
+  - id: a
+    type: sub
+    size: 2
+  - id: b
+    size: a.left
+  - id: c
+    size: a.pos_now
+  - id: d
+    type: u1
+    if: not a.done
+types:
+  sub:
+    seq:
+      - id: x
+        type: u1
+    instances:
+      left:
+        value: _io.size
+      pos_now:
+        value: _io.pos
+      done:
+        value: _io.eof
+`
+	expect_dump(t, "_io kept", ksy_dump(t, kept, {9, 8, 1, 2, 3, 4}), `t[0].a[0].x[0] = 9
+t[0].b[0] = <2 bytes> 01 02
+t[0].c[0] = <1 bytes> 03
+t[0].d[0] = 4
+`)
 }
 
 // As ksy_dump, but the JSON dump.

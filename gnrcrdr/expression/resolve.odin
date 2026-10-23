@@ -14,7 +14,7 @@ Scope :: struct {
 	in_repeat: bool,        // the expression is evaluated for each element of a repeated field, so _index is defined
 	element:   ^mdata.Node, // repeat-until and valid: the field whose element _ is; nil elsewhere
 	enums:     []Enum,      // the enums enum constants may name; the first with a name is used
-	instance:  bool,        // a value instance's expression, which cannot use _io
+	instance:  ^mdata.Value_Instance, // in a value instance's expression, the instance, marked cached when it uses _io.pos or _io.eof
 
 	// Called when an expression refers to a value instance whose expr is
 	// nil, or a parse instance whose pos is nil, to compile it; on failure
@@ -335,10 +335,6 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 	types := r.scope.types
 	assert(len(types) > 0, "resolve: empty scope")
 
-	// a value instance is evaluated for instances that may no longer be
-	// decoded, whose streams are not kept
-	if r.scope.instance && name == "_io" do return fail(r, .Unsupported, e.offset, "_io in a value instance is not supported")
-
 	switch name {
 	case "_root":
 		if r.scope.own_root {
@@ -388,6 +384,9 @@ current_instance :: proc(r: ^Resolver, offset: int) -> ^mdata.Expr {
 @(private = "file")
 resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: string, any_switch := false) -> bool {
 	set := mdata.members(struct_node(base))
+	// an attribute without an id, _unnamed and its index, has no name that
+	// expressions can use, as in Kaitai
+	if len(name) > 0 && name[0] == '_' do return fail(r, .Invalid, e.offset, "%s has no field %s", set.ref_name, name)
 	field: ^mdata.Node
 	slot: int
 	for child, i in set.children {
@@ -568,7 +567,15 @@ struct_node :: proc(e: ^mdata.Expr) -> ^mdata.Node {
 
 @(private = "file")
 resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
-	if name, is_name := m.operand.variant.(mdata.Name); is_name && name.name == "_io" && !r.scope.instance {
+	if name, is_name := m.operand.variant.(mdata.Name); is_name && name.name == "_io" {
+		if r.scope.instance != nil {
+			// a value instance is evaluated also once its set instance is
+			// decoded, in the stream the decoder then keeps; the position
+			// changes as the stream is read, so a value that depends on it
+			// is the one it had when first used, as in Kaitai
+			r.scope.types[len(r.scope.types) - 1].keeps_stream = true
+			if m.name == "pos" || m.name == "eof" do r.scope.instance.cached = true
+		}
 		switch m.name {
 		case "pos":
 			e.variant = mdata.Io_Pos{}

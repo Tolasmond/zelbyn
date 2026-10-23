@@ -45,7 +45,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def camel(name):
-    """A .ksy id as the JavaScript compiler names it: lower_camel_case."""
+    """A .ksy id as the JavaScript compiler names it: lower_camel_case. The
+    name of an attribute without an id, _unnamed and its index, is kept."""
+    if name.startswith('_unnamed'):
+        return name
     first, *rest = name.split('_')
     return first + ''.join(p[:1].upper() + p[1:] for p in rest)
 
