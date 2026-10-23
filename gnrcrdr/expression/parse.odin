@@ -648,12 +648,20 @@ parse_atom :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 		}
 		if p.tok.kind != .Colon_Colon do return new_expr(p, t.offset, mdata.Name{strings.clone(t.text, p.allocator)}), true
 
-		next(p) or_return
-		if p.tok.kind != .Ident do return nil, fail(p, .Syntax, p.tok.offset, "expected an enum value after ::, found %s", describe(p.tok))
-		value := p.tok
-		next(p) or_return
-		if p.tok.kind == .Colon_Colon do return nil, fail(p, .Unsupported, t.offset, "enums of other types (a::b::c) are not supported")
-		return new_expr(p, t.offset, mdata.Enum_Constant{strings.clone(t.text, p.allocator), strings.clone(value.text, p.allocator)}), true
+		// the enum can be a path of types, a::b::e, before the value
+		path := strings.builder_make(p.allocator)
+		strings.write_string(&path, t.text)
+		for {
+			next(p) or_return
+			if p.tok.kind != .Ident do return nil, fail(p, .Syntax, p.tok.offset, "expected an enum value after ::, found %s", describe(p.tok))
+			value := p.tok
+			next(p) or_return
+			if p.tok.kind != .Colon_Colon {
+				return new_expr(p, t.offset, mdata.Enum_Constant{strings.to_string(path), strings.clone(value.text, p.allocator)}), true
+			}
+			strings.write_string(&path, "::")
+			strings.write_string(&path, value.text)
+		}
 	}
 
 	return nil, fail(p, .Syntax, t.offset, "unexpected %s", describe(t))

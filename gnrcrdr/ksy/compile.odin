@@ -30,6 +30,9 @@ import "core:strings"
 //     endian can be a switch-on, chosen as each instance is read
 //   - imported schemas, whose top-level types are used by their meta id,
 //     each with its own meta
+//   - types and enums by path (a::b, a::e), also of an imported schema; a
+//     type of another schema has no _parent there, and but at its top
+//     level, it and the types inside it have no _root, as in Kaitai
 //   - attributes: id (without one, named _unnamed and their index in seq, as
 //     in Kaitai), type, size, size-eos, terminator with consume, include and
 //     eos-error, pad-right, process (zlib), contents, if, enum, valid (eq,
@@ -62,7 +65,7 @@ import "core:strings"
 //     but for user types, on the top-level type of the schema compiled,
 //     whose arguments the decoder is given (Root_Arg)
 //   - enums, whose values are names or mappings of id, doc and doc-ref
-//     (enum constants in expressions)
+//     (enum constants in expressions, a::e::v by path)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
 // Not supported yet (Unsupported): other encodings, instances without pos or
@@ -124,6 +127,7 @@ compile :: proc(src: string, file_format: ^mdata.File_Format, path := "", import
 	c.parse_instances = make(map[^mdata.Node]^Parse_Source, c.scratch)
 	c.type_defs = make([dynamic]Set_Type, c.scratch)
 	c.deferred = make([dynamic]Deferred, c.scratch)
+	c.rootless = make([dynamic]^mdata.Node, c.scratch)
 	c.imported = make(map[string]^Type_Def, c.scratch)
 
 	c.schema = new_schema(&c, path)
@@ -146,6 +150,7 @@ Compiler :: struct {
 	type_defs:       [dynamic]Set_Type,                          // the type of each set compiled, for sizes; in scratch
 	order:           Maybe(endian.Byte_Order),                   // the byte order of the set of a type whose endian is a switch-on being compiled (compile_type), which the types declared in it take
 	deferred:        [dynamic]Deferred,                          // the instances that nothing referred to by the end of their set, compiled once every set is; in scratch
+	rootless:        [dynamic]^mdata.Node,                       // the sets of types declared in another schema than the field's, not at its top level, which have no _root (chain_of); in scratch
 	err:             Error,
 }
 
@@ -880,7 +885,7 @@ build_params :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node) -> (params: []Pa
 			prim, _, is_primitive := primitive(type_name)
 			if is_primitive && prim in INTEGER_TYPES {
 				type = .Int64
-			} else if is_primitive || strings.contains(type_name, "::") || strings.contains(type_name, "[") {
+			} else if is_primitive || strings.contains(type_name, "[") {
 				return nil, fail(c, .Unsupported, type_node, "param %s: type %s is not supported; only integer types, bool, bytes, str and user types are", name, type_name)
 			} else {
 				type, user = .Set, type_name
@@ -889,7 +894,7 @@ build_params :: proc(c: ^Compiler, td: ^Type_Def, n: ^yml.Node) -> (params: []Pa
 
 		if e := get(item, "enum"); e != nil {
 			if type != .Int64 do return nil, fail(c, .Invalid, get_key(item, "enum"), "param %s: enum applies only to integer types", name)
-			check_enum(c, e, name, visible_enums(c, td)) or_return
+			check_enum(c, e, name, td) or_return
 		}
 		params[i] = {id_node, type, user}
 	}
@@ -907,45 +912,85 @@ enum_value_name :: proc(c: ^Compiler, name: string, n: ^yml.Node) -> (value_name
 	return identifier(c, id, "enum value name")
 }
 
-// The value of an enum key, of id, which must name one of enums.
+// The enum of an enum key, n, of id in td, which must name one.
 @(private = "file")
-check_enum :: proc(c: ^Compiler, n: ^yml.Node, id: string, enums: []expr.Enum) -> bool {
+check_enum :: proc(c: ^Compiler, n: ^yml.Node, id: string, td: ^Type_Def) -> (en: ^expr.Enum, ok: bool) {
 	enum_name := expect_scalar(c, n, "enum") or_return
-	if strings.contains(enum_name, "::") do return fail(c, .Unsupported, n, "%s: an enum of another type (%s) is not supported", id, enum_name)
-	for e in enums {
-		if e.name == enum_name do return true
-	}
-	return fail(c, .Invalid, n, "%s: no enum %s", id, enum_name)
+	en = find_enum(td, enum_name)
+	if en == nil do return nil, fail(c, .Invalid, n, "%s: no enum %s", id, enum_name)
+	return en, true
 }
 
 // The type called name, looked up from td outward, then as the top-level
 // type of td's schema, by its meta id, and among the schemas that td's
-// schema imports.
+// schema imports. A path, a::b, is the type b declared in the type a.
 @(private = "file")
 find_type :: proc(td: ^Type_Def, name: string) -> ^Type_Def {
+	rest := name
+	first := next_name(&rest)
 	t := td
 	for {
-		for sub in t.types {
-			if sub.name == name do return sub
+		if sub := nested_type(t, first); sub != nil {
+			t = sub
+			break
 		}
-		if t.parent == nil do break
+		if t.parent == nil {
+			t = t.name == first ? t : imported_type(td.schema, first)
+			break
+		}
 		t = t.parent
 	}
-	if t.name == name do return t
-	for top in td.schema.imports {
+	for t != nil && rest != "" do t = nested_type(t, next_name(&rest))
+	return t
+}
+
+// The type called name declared in td.
+@(private = "file")
+nested_type :: proc(td: ^Type_Def, name: string) -> ^Type_Def {
+	for sub in td.types {
+		if sub.name == name do return sub
+	}
+	return nil
+}
+
+// The top-level type called name of a schema that schema imports.
+@(private = "file")
+imported_type :: proc(schema: ^Schema, name: string) -> ^Type_Def {
+	for top in schema.imports {
 		if top.name == name do return top
 	}
 	return nil
 }
 
-// The enums visible in td, innermost first.
+// The first name of the path rest (a::b), which it is then the rest of.
 @(private = "file")
-visible_enums :: proc(c: ^Compiler, td: ^Type_Def) -> []expr.Enum {
-	list := make([dynamic]expr.Enum, c.scratch)
-	for t := td; t != nil; t = t.parent {
-		append(&list, ..t.enums)
+next_name :: proc(rest: ^string) -> string {
+	name, _, after := strings.partition(rest^, "::")
+	rest^ = after
+	return name
+}
+
+// The enum called name in td: one declared in it or a type it is declared
+// in, innermost first, or with a path (a::b::e), one declared in the type
+// that find_type finds (a::b).
+@(private = "file")
+find_enum :: proc(td: ^Type_Def, name: string) -> ^expr.Enum {
+	t, enum_name := td, name
+	if i := strings.last_index(name, "::"); i >= 0 {
+		t = find_type(td, name[:i])
+		if t == nil do return nil
+		enum_name = name[i + 2:]
+		for &e in t.enums {
+			if e.name == enum_name do return &e
+		}
+		return nil
 	}
-	return list[:]
+	for ; t != nil; t = t.parent {
+		for &e in t.enums {
+			if e.name == name do return &e
+		}
+	}
+	return nil
 }
 
 // Compiles the attributes and instances of td as those of set, an instance
@@ -979,7 +1024,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 
 	// each instance is compiled when an expression first refers to it, or
 	// else once every set is (compile_schema)
-	scope := scope_of(c, td, chain)
+	scope := scope_of(c, chain)
 	instances := make([dynamic]^mdata.Value_Instance, c.allocator)
 	parse_instances := make([dynamic]^mdata.Node, c.allocator)
 	for e in td.instances {
@@ -1189,13 +1234,15 @@ note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, s
 	}
 }
 
-// The scope of expressions in td, whose instance is the last of chain.
+// The scope of expressions in the set that is the last of chain.
 @(private = "file")
-scope_of :: proc(c: ^Compiler, td: ^Type_Def, chain: []^mdata.Node) -> expr.Scope {
+scope_of :: proc(c: ^Compiler, chain: []^mdata.Node) -> expr.Scope {
+	no_root := slice.contains(c.rootless[:], chain[0])
 	return {
 		types                  = chain,
-		own_root               = chain[0] != c.root,
-		enums                  = visible_enums(c, td),
+		own_root               = chain[0] != c.root && !no_root,
+		no_root                = no_root,
+		find_enum              = find_enum_callback,
 		compile_instance       = compile_instance_callback,
 		compile_parse_instance = compile_parse_instance_callback,
 		size_of                = size_of_callback,
@@ -1213,6 +1260,13 @@ compile_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^mdata.V
 @(private = "file")
 compile_parse_instance_callback :: proc(data: rawptr, set: ^mdata.Node, inst: ^mdata.Node) -> bool {
 	return compile_parse_instance((^Compiler)(data), set, inst)
+}
+
+// The enum called name in the type of set, a set compiled
+// (expr.Scope.find_enum).
+@(private = "file")
+find_enum_callback :: proc(data: rawptr, set: ^mdata.Node, name: string) -> ^expr.Enum {
+	return find_enum(set_type((^Compiler)(data), set).td, name)
 }
 
 // Whether sets a and b, compiled, are of the same type (expr.Scope.same_type).
@@ -1252,7 +1306,6 @@ size_of_callback :: proc(data: rawptr, set: ^mdata.Node, name: string, of_type: 
 		}
 		if width, _, is_bits := bit_type(name); is_bits do return width, {}
 		if name == "str" || name == "strz" do return 0, size_error(.Invalid, "%s has no fixed size", name)
-		if strings.contains(name, "::") do return 0, size_error(.Unsupported, "a type of another type (%s) is not supported", name)
 		user := find_type(td, name)
 		if user == nil do return 0, size_error(.Invalid, "unknown type %s", name)
 		bits, unsized = type_bits(c, user)
@@ -1475,7 +1528,7 @@ compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Inst
 	}
 	if n := get(src.spec, "enum"); n != nil {
 		if e.type != .Int do return fail(c, .Invalid, get_key(src.spec, "enum"), "value instance %s: enum applies only to integer values", inst.name)
-		check_enum(c, n, inst.name, scope.enums) or_return
+		check_enum(c, n, inst.name, src.td) or_return
 	}
 	inst.expr = e
 	return true
@@ -1641,7 +1694,6 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 			if node.type != .String && bytes_key != nil do return fail(c, .Invalid, bytes_key, "%s: %s does not apply to %s", id, bytes_key.text, type_name)
 		} else {
 			user = find_type(td, type_name)
-			if user == nil && strings.contains(type_name, "::") do return fail(c, .Unsupported, type_node, "%s: a type of another type (%s) is not supported", id, type_name)
 			if user == nil do return fail(c, .Invalid, type_node, "%s: unknown type %s", id, type_name)
 			node.type = .Set
 		}
@@ -1665,10 +1717,11 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 		node.process = .Zlib
 	}
 
+	en: ^expr.Enum
 	if n := get(attr, "enum"); n != nil {
 		if node.type not_in INTEGER_TYPES && node.type != .Bits do return fail(c, .Invalid, get_key(attr, "enum"), "%s: enum applies only to integer types", id)
 		// the field keeps its integer, which the enum's constants are
-		check_enum(c, n, id, scope.enums) or_return
+		en = check_enum(c, n, id, td) or_return
 	}
 
 	if n := get(attr, "if"); n != nil {
@@ -1708,7 +1761,7 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	}
 	// after the type's fields, which an expr can refer to through _
 	if valid != nil {
-		node.valid = compile_valid(c, attr, valid, id, node, scope) or_return
+		node.valid = compile_valid(c, valid, id, node, en, scope) or_return
 	}
 
 	// repeat-until refers to the element just read, so it is compiled after
@@ -1762,12 +1815,16 @@ builtin_type :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id, type_n
 }
 
 // The chain of node, a field of type user in a type whose chain is types:
-// types followed by node, or node alone when user is the top level of an
-// imported schema. As in Kaitai, that is the root of its own types (its
-// _root), and has no _parent.
+// types followed by node, or node alone when user is declared in another
+// schema than the field's (c.schema). As in Kaitai, node then has no
+// _parent, and at the top level of its schema, is the root of its own
+// types (their _root); elsewhere, it and the types in it have no _root
+// (c.rootless).
 @(private = "file")
 chain_of :: proc(c: ^Compiler, types: []^mdata.Node, user: ^Type_Def, node: ^mdata.Node) -> []^mdata.Node {
-	return chain_with(c, user.parent == nil ? nil : types, node)
+	if user.schema == c.schema do return chain_with(c, types, node)
+	if user.parent != nil do append(&c.rootless, node)
+	return chain_with(c, nil, node)
 }
 
 // types followed by node.
@@ -1865,7 +1922,6 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 			}
 		} else {
 			user := find_type(td, type_name)
-			if user == nil && strings.contains(type_name, "::") do return fail(c, .Unsupported, e.value, "%s: a type of another type (%s) is not supported", id, type_name)
 			if user == nil do return fail(c, .Invalid, e.value, "%s: unknown type %s", id, type_name)
 			case_node.type = .Set
 			compile_user(c, user, case_node, e.value, id, call, scope, scope) or_return
@@ -2079,7 +2135,7 @@ compile_type :: proc(c: ^Compiler, user: ^Type_Def, node: ^mdata.Node, field_sco
 	schema := c.schema
 	defer c.schema = schema
 	c.schema = user.schema
-	scope := scope_of(c, user, chain)
+	scope := scope_of(c, chain)
 	on := compile_expr(c, get(sw_node, "switch-on"), "switch-on", scope, .Unresolved) or_return
 	#partial switch on.type {
 	case .Int, .Bool, .String, .Bytes:
@@ -2264,7 +2320,8 @@ byte_list :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (bytes: []byte, o
 	return b[:], true
 }
 
-// valid on node, an attribute or a parse instance attr, in scope: a
+// valid on node, an attribute or a parse instance with the enum en (nil
+// when it has none), in scope: a
 // constant (eq), or a mapping of eq, min and max, any-of, expr or in-enum.
 // A constant is a literal of the value's type (an integer or an enum
 // constant, a string literal, or a list of bytes, [0x50, 0x4b], for a
@@ -2272,7 +2329,7 @@ byte_list :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (bytes: []byte, o
 // value. The check keeps Scalars when every constant is a literal, as
 // most are, and is a Valid_Expr otherwise.
 @(private = "file")
-compile_valid :: proc(c: ^Compiler, attr, n: ^yml.Node, id: string, node: ^mdata.Node, scope: expr.Scope) -> (valid: mdata.Valid, ok: bool) {
+compile_valid :: proc(c: ^Compiler, n: ^yml.Node, id: string, node: ^mdata.Node, en: ^expr.Enum, scope: expr.Scope) -> (valid: mdata.Valid, ok: bool) {
 	// the constants of a bit type have the type of its values
 	type := node.type == .Bits ? mdata.bits_type(int(node.width)) : node.type
 	scope := scope
@@ -2299,7 +2356,7 @@ compile_valid :: proc(c: ^Compiler, attr, n: ^yml.Node, id: string, node: ^mdata
 		checks[0] = {cond, .Expr_False}
 		return mdata.Valid_Expr{checks}, true
 	case in_enum != nil:
-		return compile_in_enum(c, attr, in_enum, id, scope.enums)
+		return compile_in_enum(c, in_enum, id, en)
 	}
 	if type == .Set do return nil, fail(c, .Invalid, n, "%s: valid on a user type must be an expr", id)
 	if type != .Bool && type != .String && type != .Blob && type not_in INTEGER_TYPES {
@@ -2441,22 +2498,16 @@ byte_literal :: proc(c: ^Compiler, text: string) -> (bytes: []byte, ok: bool) {
 	return b[:], true
 }
 
-// valid: in-enum: true, on attr, whose enum is among enums: its value is
-// one of the enum's. in-enum: false checks nothing.
+// valid: in-enum: true, of id, whose enum is en (nil when it has none): its
+// value is one of the enum's. in-enum: false checks nothing.
 @(private = "file")
-compile_in_enum :: proc(c: ^Compiler, attr, n: ^yml.Node, id: string, enums: []expr.Enum) -> (valid: mdata.Valid, ok: bool) {
+compile_in_enum :: proc(c: ^Compiler, n: ^yml.Node, id: string, en: ^expr.Enum) -> (valid: mdata.Valid, ok: bool) {
 	if !(boolean(c, n, "in-enum") or_return) do return nil, true
-	enum_node := get(attr, "enum")
-	if enum_node == nil do return nil, fail(c, .Invalid, n, "%s: in-enum needs an enum", id)
-	// the enum key is checked first, so the enum is found
-	for e in enums {
-		if e.name != enum_node.text do continue
-		values := make([]int, len(e.values), c.allocator)
-		for v, i in e.values do values[i] = v.value
-		slice.sort(values)
-		return mdata.Valid_In_Enum{values}, true
-	}
-	panic("compile_in_enum: no enum")
+	if en == nil do return nil, fail(c, .Invalid, n, "%s: in-enum needs an enum", id)
+	values := make([]int, len(en.values), c.allocator)
+	for v, i in en.values do values[i] = v.value
+	slice.sort(values)
+	return mdata.Valid_In_Enum{values}, true
 }
 
 // A resolved expression made by the compiler, with no text.
