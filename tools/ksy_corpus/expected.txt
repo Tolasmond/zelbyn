@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 157 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 163 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -13,7 +13,7 @@ OK	archive/mozilla_mar.ksy
 OK	archive/phar_without_stub.ksy
 OK	archive/rar.ksy
 OK	archive/respack.ksy
-ERR	archive/rpm.ksy	Invalid	archive/rpm.ksy:316:21	io: signature has no field storage_section
+OK	archive/rpm.ksy
 ERR	archive/xar.ksy	Unsupported	archive/xar.ksy:35:5	attribute toc: process is not supported
 OK	archive/zchunk.ksy
 OK	archive/zip.ksy
@@ -38,7 +38,7 @@ ERR	executable/elf.ksy	Unsupported	executable/elf.ksy:363:9	endian: switch-on is
 OK	executable/java_class.ksy
 OK	executable/mach_o.ksy
 ERR	executable/mach_o_fat.ksy	Unsupported	executable/mach_o_fat.ksy:33:15	cpu_type: an enum of another type (mach_o::cpu_type) is not supported
-ERR	executable/microsoft_pe.ksy	Invalid	executable/microsoft_pe.ksy:24:3	instance pe refers to itself
+OK	executable/microsoft_pe.ksy
 OK	executable/python_pyc_27.ksy
 ERR	executable/swf.ksy	Unsupported	executable/swf.ksy:56:5	attribute zlib_body: process is not supported
 ERR	executable/uefi_te.ksy	Unsupported	executable/uefi_te.ksy:225:82	pos: size of a stream other than _io is not supported
@@ -48,7 +48,7 @@ OK	filesystem/apm_partition_table.ksy
 OK	filesystem/apple_single_double.ksy
 OK	filesystem/btrfs_stream.ksy
 OK	filesystem/cramfs.ksy
-ERR	filesystem/ext2.ksy	Invalid	filesystem/ext2.ksy:15:3	instance bg1 refers to itself
+OK	filesystem/ext2.ksy
 OK	filesystem/gpt_partition_table.ksy
 OK	filesystem/iso9660.ksy
 OK	filesystem/luks.ksy
@@ -66,7 +66,7 @@ OK	firmware/ines.ksy
 OK	firmware/uf2.ksy
 OK	firmware/uimage.ksy
 ERR	font/grub2_font.ksy	Invalid	font/grub2_font.ksy:20:5	magic: contents cannot have size
-ERR	font/pcf_font.ksy	Invalid	font/pcf_font.ksy:130:29	io: body has no field strings
+OK	font/pcf_font.ksy
 OK	font/ttf.ksy
 OK	game/allegro_dat.ksy
 OK	game/doom_wad.ksy
@@ -117,13 +117,13 @@ OK	log/systemd_journal.ksy
 OK	log/windows_evt_log.ksy
 OK	machine_code/code_6502.ksy
 OK	macos/compressed_resource.ksy
-ERR	macos/ds_store.ksy	Invalid	macos/ds_store.ksy:25:3	instance buddy_allocator_body refers to itself
+OK	macos/ds_store.ksy
 OK	macos/mac_os_resource_snd.ksy
 OK	macos/resource_compression/dcmp_0.ksy
 OK	macos/resource_compression/dcmp_1.ksy
 ERR	macos/resource_compression/dcmp_2.ksy	Unsupported	macos/resource_compression/dcmp_2.ksy:31:1	params on the top-level type are not supported, except in an imported schema
 OK	macos/resource_compression/dcmp_variable_length_integer.ksy
-ERR	macos/resource_fork.ksy	Invalid	macos/resource_fork.ksy:109:3	instance resource_map refers to itself
+OK	macos/resource_fork.ksy
 OK	media/android_opengl_shaders_cache.ksy
 OK	media/au.ksy
 OK	media/avi.ksy
