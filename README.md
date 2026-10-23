@@ -9,12 +9,12 @@ The official Kaitai Struct compiler generates a parser for each format, in many 
 With Odin `dev-2026-10` or newer:
 
 ```
-odin build .
-./gnrcrdr.bin formats/gif.ksy data/855.gif
-./gnrcrdr.bin formats/gif.ksy data/855.gif --dump json
+odin build . -out:build/gnrcrdr
+build/gnrcrdr formats/gif.ksy data/855.gif
+build/gnrcrdr formats/gif.ksy data/855.gif --dump json
 ```
 
-The build is `gnrcrdr.exe` on Windows. It has no other dependencies.
+On Windows the build is `build\gnrcrdr.exe`. It has no other dependencies.
 
 ## What a schema can use
 
