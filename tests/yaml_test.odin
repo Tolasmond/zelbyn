@@ -147,6 +147,31 @@ SCALAR 2:4 Plain "1"
 END
 `},
 	{"comments only", "# nothing\n\n", ""},
+	{"comments right after flow punctuation", "a: [x,# c\n y, url#frag, z# no]\nb: {# c\n k: 1,# c\n \"q\":# c\n 2}# c\nc: |# c\n  t\n", `MAP 1:1
+SCALAR 1:1 Plain "a"
+SEQ 1:4
+SCALAR 1:5 Plain "x"
+SCALAR 2:2 Plain "y"
+SCALAR 2:5 Plain "url#frag"
+SCALAR 2:15 Plain "z# no"
+END
+SCALAR 3:1 Plain "b"
+MAP 3:4
+SCALAR 4:2 Plain "k"
+SCALAR 4:5 Plain "1"
+SCALAR 5:2 Double_Quoted "q"
+SCALAR 6:2 Plain "2"
+END
+SCALAR 7:1 Plain "c"
+SCALAR 7:4 Literal "t\n"
+END
+`},
+	{"a comment right after [", "- [# c\n  x]# c\n", `SEQ 1:1
+SEQ 1:3
+SCALAR 2:3 Plain "x"
+END
+END
+`},
 	{"escapes at the edges", "a: \"\\U0010FFFF\\uD7FF\\uE000\\0\\x01\\x7f\"\n", `MAP 1:1
 SCALAR 1:1 Plain "a"
 SCALAR 1:4 Double_Quoted "\U0010ffff\ud7ff\ue000\x00\x01\u007f"

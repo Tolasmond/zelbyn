@@ -846,8 +846,9 @@ parse_block_scalar :: proc(p: ^Parser, indent: int) -> ^Node {
 		}
 	}
 
+	// as in libyaml, a comment can follow the indicators with no blank (|#)
 	for is_blank(peek(p)) do advance(p)
-	if peek(p) == '#' && is_blank(p.src[p.pos - 1]) {
+	if peek(p) == '#' {
 		for p.pos < len(p.src) && !is_break(peek(p)) do advance(p)
 	}
 	if p.pos < len(p.src) && !is_break(peek(p)) {
@@ -1001,11 +1002,16 @@ fail_at_node_nil :: proc(p: ^Parser, kind: Error_Kind, n: ^Node, format: string,
 	return nil
 }
 
+// Skips blanks, line breaks and comments between the tokens of a flow
+// collection. A # here starts a comment even right after a token, as in
+// libyaml ([x,# c): it is only called between tokens, and a # inside a
+// plain scalar (url#frag) is already part of the scalar, which ends only
+// before a blank and a #.
 @(private = "file")
 skip_flow_space :: proc(p: ^Parser) -> bool {
 	for p.pos < len(p.src) {
 		c := peek(p)
-		if c == '#' && (p.pos == p.line_start || is_blank(p.src[p.pos - 1]) || is_break(p.src[p.pos - 1])) {
+		if c == '#' {
 			for p.pos < len(p.src) && !is_break(peek(p)) do advance(p)
 		} else if is_blank(c) || is_break(c) {
 			advance(p)
