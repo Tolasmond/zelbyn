@@ -124,7 +124,9 @@ direct_form :: proc(e: ^mdata.Expr) -> mdata.Direct {
 
 // The value of e, a parsed or resolved expression, when it is made of
 // integer literals and the integer operators; ok is false for any other,
-// and when the decoder would fail on it (overflow, division by zero).
+// when the decoder would fail on it (division by zero, an invalid shift),
+// and when its value or a step towards it does not fit an int, which the
+// decoder evaluates exactly up to max(u64).
 constant :: proc(e: ^mdata.Expr) -> (v: int, ok: bool) {
 	#partial switch x in e.variant {
 	case mdata.Int_Literal:
