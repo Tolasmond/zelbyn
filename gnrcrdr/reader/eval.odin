@@ -396,6 +396,9 @@ enclosing :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context, up: int) -> (i
 			e = x.operand
 		case mdata.Switch_Cast:
 			e = x.operand
+		case mdata.Ternary:
+			cond := eval(d, x.cond, ctx) or_return
+			e = cond.(bool) ? x.then : x.otherwise
 		case mdata.Value_Ref:
 			// the instance a value instance gives is reached through its
 			// expression, evaluated for the instance of its base

@@ -31,6 +31,10 @@ Scope :: struct {
 	// whose offset the resolver sets. When nil, these are an error.
 	size_of: proc(data: rawptr, set: ^mdata.Node, name: string, of_type: bool) -> (bits: int, err: Error),
 
+	// Whether sets a and b are of the same type, for ?: on sets. When nil,
+	// they are not.
+	same_type: proc(data: rawptr, a, b: ^mdata.Node) -> bool,
+
 	// The encoding that name, an encoding of .to_s(encoding), is; ok is
 	// false for one that is not supported. When nil, .to_s(encoding) is an
 	// error.
@@ -250,7 +254,21 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		resolve(r, x.then) or_return
 		resolve(r, x.otherwise) or_return
 		expect(r, x.cond, .Bool) or_return
-		if x.then.type != .Int && x.then.type != .Float && x.then.type != .Bool && x.then.type != .String && x.then.type != .Bytes && x.then.type != .Stream do return fail(r, .Unsupported, x.then.offset, "?: on %s is not supported", type_name(x.then.type))
+		// a float and an integer give a float, as in Kaitai
+		if x.then.type == .Float && x.otherwise.type == .Int do as_float(r, x.otherwise)
+		if x.then.type == .Int && x.otherwise.type == .Float do as_float(r, x.then)
+		#partial switch x.then.type {
+		case .Int, .Float, .Bool, .String, .Bytes, .Stream:
+		case .Struct:
+			// as in Kaitai, of one type, whose members expressions find in the
+			// set of then (struct_node), with the same slots in both
+			expect(r, x.otherwise, .Struct) or_return
+			if r.scope.same_type == nil || !r.scope.same_type(r.scope.data, struct_node(x.then), struct_node(x.otherwise)) {
+				return fail(r, .Unsupported, e.offset, "?: on sets of different types is not supported")
+			}
+		case:
+			return fail(r, .Unsupported, x.then.offset, "?: on %s is not supported", type_name(x.then.type))
+		}
 		expect(r, x.otherwise, x.then.type) or_return
 		e.type = x.then.type
 	case mdata.Index:
@@ -353,6 +371,22 @@ binary_type :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Binary) -> (t: mdata.
 		return .Bool, true
 	}
 	return .Unresolved, false
+}
+
+// Makes e, an Int expression, a Float: a literal its float, else e + 0.0,
+// which the decoder evaluates as a float.
+@(private = "file")
+as_float :: proc(r: ^Resolver, e: ^mdata.Expr) {
+	if lit, is_literal := e.variant.(mdata.Int_Literal); is_literal {
+		e.variant = mdata.Float_Literal{f64(lit.value)}
+	} else {
+		operand := new(mdata.Expr, r.allocator)
+		operand^ = e^
+		zero := new(mdata.Expr, r.allocator)
+		zero^ = {type = .Float, offset = e.offset, variant = mdata.Float_Literal{0}}
+		e.variant = mdata.Binary{.Add, operand, zero}
+	}
+	e.type = .Float
 }
 
 // True when x, an arithmetic operation or a comparison, is on a Float and
@@ -528,8 +562,10 @@ resolve_value_ref :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, set: 
 	}
 	// the instances enclosing an argument's are not those that hold the
 	// param, which is all the decoder can reach them through
-	if levels, through := through_param(base); through && reach(inst) > levels {
-		return fail(r, .Unsupported, e.offset, "value instance %s refers to the sets that enclose its instance, which it cannot through a param", inst.name)
+	// nor through ?: on sets, as it is compiled for the set of the then
+	// branch, whose enclosing sets need not be the other branch's
+	if levels, via := through_indirect(base); via != "" && reach(inst) > levels {
+		return fail(r, .Unsupported, e.offset, "value instance %s refers to the sets that enclose its instance, which it cannot through %s", inst.name, via)
 	}
 	e.variant = mdata.Value_Ref{base = base, instance = inst}
 	e.type = inst.expr.type
@@ -556,8 +592,43 @@ through_param :: proc(e: ^mdata.Expr) -> (levels: int, through: bool) {
 		case mdata.Value_Ref:
 			l, found := through_param(x.instance.expr)
 			return levels + l, found
+		case mdata.Ternary:
+			// the fewer levels of the branches that are through one
+			l, found := through_param(x.then)
+			if m, other := through_param(x.otherwise); other && (!found || m < l) do l, found = m, true
+			return levels + l, found
 		case:
 			return 0, false
+		}
+	}
+}
+
+// What e, a Struct expression, gives an instance through, the nearest of a
+// param of a user type ("a param") and a ?: of sets ("?:"), or "" for
+// neither, and levels, the fields between that and the instance.
+@(private = "file")
+through_indirect :: proc(e: ^mdata.Expr) -> (levels: int, via: string) {
+	e := e
+	for {
+		#partial switch x in e.variant {
+		case mdata.Ternary:
+			return levels, "?:"
+		case mdata.Field_Ref:
+			if x.node.is_param && x.node.type == .Set do return levels, "a param"
+			levels += 1
+			e = x.base
+		case mdata.Index:
+			e = x.operand
+		case mdata.Array_Method:
+			e = x.operand
+		case mdata.Switch_Cast:
+			e = x.operand
+		case mdata.Value_Ref:
+			l: int
+			l, via = through_indirect(x.instance.expr)
+			return levels + l, via
+		case:
+			return 0, ""
 		}
 	}
 }
@@ -647,6 +718,9 @@ depth :: proc(e: ^mdata.Expr) -> int {
 		return 1
 	case mdata.Value_Ref:
 		return depth(x.base) + depth(x.instance.expr)
+	case mdata.Ternary:
+		// the shallower branch, which reaches further out
+		return min(depth(x.then), depth(x.otherwise))
 	}
 	panic("depth: not a set instance")
 }
@@ -728,6 +802,8 @@ struct_node :: proc(e: ^mdata.Expr) -> ^mdata.Node {
 		return struct_node(x.instance.expr)
 	case mdata.Switch_Cast:
 		return x.node
+	case mdata.Ternary:
+		return struct_node(x.then)
 	}
 	panic("struct_node: not a set")
 }
@@ -759,7 +835,7 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 		if _, through := through_param(operand); through do return fail(r, .Unsupported, e.offset, "_io of an instance given as an argument is not supported")
 		// the decoder finds the stream of an instance being decoded in its
 		// frame, and keeps that of the instances of any other set
-		if _, is_instance := operand.variant.(mdata.Instance); !is_instance do struct_node(operand).keeps_stream = true
+		if _, is_instance := operand.variant.(mdata.Instance); !is_instance do keep_stream_of(operand)
 		e.variant = mdata.Io{operand}
 		e.type = .Stream
 		return true
@@ -841,6 +917,18 @@ resolve_stream_member :: proc(r: ^Resolver, e: ^mdata.Expr, stream: ^mdata.Expr,
 	}
 	e.type = .Int
 	return true
+}
+
+// Marks the set of e, a Struct expression that is not an Instance,
+// keeps_stream, or both sets of a ?:.
+@(private = "file")
+keep_stream_of :: proc(e: ^mdata.Expr) {
+	if x, is_ternary := e.variant.(mdata.Ternary); is_ternary {
+		keep_stream_of(x.then)
+		keep_stream_of(x.otherwise)
+		return
+	}
+	struct_node(e).keeps_stream = true
 }
 
 // Marks the sets whose streams stream, a Stream expression in a value

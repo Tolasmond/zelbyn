@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 180 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 181 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -90,7 +90,7 @@ OK	geospatial/shapefile_main.ksy
 OK	hardware/dtb.ksy
 OK	hardware/edid.ksy
 OK	hardware/mifare/mifare_classic.ksy
-ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:169:16	value: ?: on a set is not supported
+OK	image/bmp.ksy
 OK	image/dicom.ksy
 OK	image/exif.ksy
 OK	image/gif.ksy
@@ -102,7 +102,7 @@ OK	image/nitf.ksy
 OK	image/pcx.ksy
 OK	image/pcx_dcx.ksy
 OK	image/pif.ksy
-ERR	image/png.ksy	Unsupported	image/png.ksy:908:42	value: ?: on a set is not supported
+ERR	image/png.ksy	Unsupported	image/exif.ksy:138:17	io: type ifd contains itself, so neither it nor the types in it can refer to the members of the sets enclosing it, other than through the _root of the schema decoded, or to an imported schema's _root
 OK	image/psx_tim.ksy
 OK	image/tga.ksy
 OK	image/webp.ksy
