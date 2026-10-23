@@ -26,6 +26,7 @@ Node :: struct {
 	slot_count:      int,               // Set only: the slots in each instance (count_slots), recorded when children is set
 	switch_on:       ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
 	order_switch:    ^Order_Switch,     // Set only: of a type whose endian is a switch-on, compiled little-endian; it chooses, as each instance is read, this set or the one compiled big-endian; nil otherwise
+	parent_up:       int,               // Set only: Kaitai's parent: the _parent of its instances is the instance this many levels out from the one each is read in, rather than that one (0)
 	recursive:       ^Node,             // Set only: for a field of a type inside the same type (a recursive type), the set of that type that encloses it, whose children, instances, parse instances, params and slot count it is given, once that set is compiled (members); nil otherwise
 	instances:       []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
 	parse_instances: []^Node,           // Set only: Kaitai's instances with pos, each read at an offset (see pos)

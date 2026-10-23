@@ -41,7 +41,9 @@ Decoder :: struct {
 
 // A set instance being decoded, and where: its stream is streams[stream],
 // or r when stream is len(streams); path[:path] is its path; set is the set
-// it is read as, whose parse instances are read into it. Only while a parse
+// it is read as, whose parse instances are read into it; parent is the
+// index of the frame of its _parent, the frame before it unless its field
+// has a parent (Node.parent_up), and -1 for the root. Only while a parse
 // instance of it is read from another stream (Node.io) is the stream of the
 // innermost frame not r.
 @(private)
@@ -50,6 +52,7 @@ Frame :: struct {
 	stream:   int,
 	path:     int,
 	set:      ^mdata.Node,
+	parent:   int,
 }
 
 // A parse instance that no expression had read when the fields of its set

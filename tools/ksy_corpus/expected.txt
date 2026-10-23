@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 185 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 187 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -34,7 +34,7 @@ OK	database/tsm.ksy
 OK	executable/android_nanoapp_header.ksy
 OK	executable/dex.ksy
 OK	executable/dos_mz.ksy
-ERR	executable/elf.ksy	Unsupported	executable/elf.ksy:1150:13	instance first_aux: parent is not supported
+OK	executable/elf.ksy
 OK	executable/java_class.ksy
 OK	executable/mach_o.ksy
 OK	executable/mach_o_fat.ksy
@@ -65,7 +65,7 @@ OK	firmware/broadcom_trx.ksy
 OK	firmware/ines.ksy
 OK	firmware/uf2.ksy
 OK	firmware/uimage.ksy
-ERR	font/grub2_font.ksy	Invalid	font/grub2_font.ksy:20:5	magic: contents cannot have size
+OK	font/grub2_font.ksy
 OK	font/pcf_font.ksy
 OK	font/ttf.ksy
 OK	game/allegro_dat.ksy

@@ -551,7 +551,9 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	}
 
 	// on error the frame is left pushed, like the path segment
-	append(&d.frames, Frame{instance, len(d.streams), len(d.path), node})
+	parent := len(d.frames) - 1
+	for _ in 0 ..< node.parent_up do parent = d.frames[parent].parent
+	append(&d.frames, Frame{instance, len(d.streams), len(d.path), node, parent})
 	if node.order_switch != nil do node = choose_order(d, node) or_return
 
 	slot := len(node.parse_instances)

@@ -358,15 +358,20 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 }
 
 // The instance up levels above that of ctx (_parent is 1), from the
-// frames, or in a value instance, through base: the instances enclosing
-// self are the values of the expressions base is made of, innermost first,
-// then those enclosing the instance it starts from, in caller. A set of a
-// type that contains itself has several places in the tree, but its
-// expressions reach only the levels between them (members).
+// frames, each of which has its _parent's, or in a value instance, through
+// base: the instances enclosing self are the values of the expressions
+// base is made of, innermost first, then those enclosing the instance it
+// starts from, in caller. A set of a type that contains itself has several
+// places in the tree, but its expressions reach only the levels between
+// them (members), unless those have the same _parent (parent).
 @(private = "file", require_results)
 ancestor :: proc(d: ^Decoder, ctx: Eval_Context, up: int) -> (instance: ^fld.Instance, err: dat.Read_Error) {
 	if ctx.self == nil {
-		i := len(d.frames) - 1 - up
+		i := len(d.frames) - 1
+		for _ in 0 ..< up {
+			if i < 0 do break
+			i = d.frames[i].parent
+		}
 		if i < 0 do return nil, .Absent_Field
 		return d.frames[i].instance, .None
 	}
@@ -396,8 +401,9 @@ enclosing :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context, up: int) -> (i
 	for {
 		#partial switch x in e.variant {
 		case mdata.Field_Ref:
-			// a field's instance is in the instance of its base
-			up -= 1
+			// a field's instance is in the instance of its base, which is its
+			// _parent, or with a parent, is parent_up levels inside it
+			up += x.node.parent_up - 1
 			if up == 0 {
 				v := eval(d, x.base, ctx) or_return
 				return v.(^fld.Instance), .None
