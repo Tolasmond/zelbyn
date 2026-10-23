@@ -1,22 +1,22 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 112 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 124 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
-ERR	archive/android_bootldr_qcom.ksy	Unsupported	archive/android_bootldr_qcom.ksy:181:16	value instance img_header: only integer, boolean and string values are supported
+OK	archive/android_bootldr_qcom.ksy
 OK	archive/android_dto.ksy
 OK	archive/android_img.ksy
-ERR	archive/android_sparse.ksy	Unsupported	archive/android_sparse.ksy:78:16	value instance version: only integer, boolean and string values are supported
+OK	archive/android_sparse.ksy
 ERR	archive/cpio_old_le.ksy	Unsupported	archive/cpio_old_le.ksy:36:26	if: array literals are not supported
 OK	archive/gzip.ksy
 OK	archive/lzh.ksy
 OK	archive/mozilla_mar.ksy
-ERR	archive/phar_without_stub.ksy	Unsupported	serialization/php_serialized_value.ksy:219:16	value instance value: only integer, boolean and string values are supported
+OK	archive/phar_without_stub.ksy
 OK	archive/rar.ksy
 OK	archive/respack.ksy
 ERR	archive/rpm.ksy	Invalid	archive/rpm.ksy:316:21	io: signature has no field storage_section
 ERR	archive/xar.ksy	Unsupported	archive/xar.ksy:35:5	attribute toc: process is not supported
-ERR	archive/zchunk.ksy	Unsupported	archive/zchunk.ksy:330:49	valid: casts are not supported
-ERR	archive/zip.ksy	Invalid	archive/zip.ksy:133:17	if: header has no field compression_method
+OK	archive/zchunk.ksy
+OK	archive/zip.ksy
 ERR	archive/zisofs.ksy	Unsupported	archive/zisofs.ksy:36:3	instance blocks: an instance without pos or value is not supported
 OK	cad/monomakh_sapr_chg.ksy
 ERR	common/bcd.ksy	Unsupported	common/bcd.ksy:37:1	params on the top-level type are not supported, except in an imported schema
@@ -25,17 +25,17 @@ OK	common/dos_datetime.ksy
 ERR	common/riff.ksy	Unsupported	common/riff.ksy:71:16	value: _io in a value instance is not supported
 ERR	common/utf16_with_bom.ksy	Unsupported	common/utf16_with_bom.ksy:50:19	value: array literals are not supported
 OK	common/utf8_string.ksy
-ERR	common/vlq_base128_be.ksy	Unsupported	common/vlq_base128_be.ksy:47:12	value: casts are not supported
-ERR	common/vlq_base128_le.ksy	Unsupported	common/vlq_base128_le.ksy:85:45	valid: casts are not supported
+OK	common/vlq_base128_be.ksy
+ERR	common/vlq_base128_le.ksy	Unsupported	common/vlq_base128_le.ksy:46:11	type: integer literal 0x8000_0000_0000_0000 does not fit in a 64-bit signed integer, which expressions are
 OK	database/dbf.ksy
 ERR	database/gettext_mo.ksy	Unsupported	database/gettext_mo.ksy:67:15	param current: type hash_lookup_iteration is not supported; only integer types, bool and bytes are
 ERR	database/sqlite3.ksy	Unsupported	database/sqlite3.ksy:211:15	param serial_type: type serial is not supported; only integer types, bool and bytes are
 OK	database/tsm.ksy
 OK	executable/android_nanoapp_header.ksy
-ERR	executable/dex.ksy	Unsupported	common/vlq_base128_le.ksy:85:45	valid: casts are not supported
+ERR	executable/dex.ksy	Unsupported	common/vlq_base128_le.ksy:46:11	type: integer literal 0x8000_0000_0000_0000 does not fit in a 64-bit signed integer, which expressions are
 OK	executable/dos_mz.ksy
 ERR	executable/elf.ksy	Unsupported	executable/elf.ksy:363:9	endian: switch-on is not supported
-ERR	executable/java_class.ksy	Unsupported	executable/java_class.ksy:179:60	value: casts are not supported
+ERR	executable/java_class.ksy	Unsupported	executable/java_class.ksy:282:9	an attribute in type method_handle_cp_info has no id; attributes without one are not supported
 ERR	executable/mach_o.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
 ERR	executable/mach_o_fat.ksy	Unsupported	executable/mach_o.ksy:230:7	instance flags_obj: an instance without pos or value is not supported
 ERR	executable/microsoft_pe.ksy	Invalid	executable/microsoft_pe.ksy:24:3	instance pe refers to itself
@@ -56,7 +56,7 @@ OK	filesystem/lvm2.ksy
 OK	filesystem/mbr_partition_table.ksy
 OK	filesystem/tr_dos_image.ksy
 OK	filesystem/ubifs.ksy
-ERR	filesystem/vdi.ksy	Unsupported	filesystem/vdi.ksy:217:20	value instance block: only integer, boolean and string values are supported
+OK	filesystem/vdi.ksy
 OK	filesystem/vfat.ksy
 OK	filesystem/vmware_vmdk.ksy
 OK	filesystem/zx_spectrum_tap.ksy
@@ -90,7 +90,7 @@ OK	geospatial/shapefile_main.ksy
 OK	hardware/dtb.ksy
 ERR	hardware/edid.ksy	Unsupported	hardware/edid.ksy:140:28	value: float literals are not supported
 ERR	hardware/mifare/mifare_classic.ksy	Unsupported	hardware/mifare/mifare_classic.ksy:221:23	param ac: type ac is not supported; only integer types, bool and bytes are
-ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:488:23	value: float literals are not supported
+ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:159:16	value: _io in a value instance is not supported
 ERR	image/dicom.ksy	Unsupported	image/dicom.ksy:150:25	value: array literals are not supported
 ERR	image/exif.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supported
 OK	image/gif.ksy
@@ -116,18 +116,18 @@ OK	log/sudoers_ts.ksy
 OK	log/systemd_journal.ksy
 OK	log/windows_evt_log.ksy
 OK	machine_code/code_6502.ksy
-ERR	macos/compressed_resource.ksy	Unsupported	macos/compressed_resource.ksy:68:16	value instance type_specific_part_raw: only integer, boolean and string values are supported
+OK	macos/compressed_resource.ksy
 ERR	macos/ds_store.ksy	Unsupported	macos/ds_store.ksy:107:7	instance directories: an instance without pos or value is not supported
 ERR	macos/mac_os_resource_snd.ksy	Unsupported	macos/mac_os_resource_snd.ksy:118:9	an attribute in type sound_header has no id; attributes without one are not supported
 ERR	macos/resource_compression/dcmp_0.ksy	Unsupported	macos/resource_compression/dcmp_0.ksy:250:20	value: array literals are not supported
 ERR	macos/resource_compression/dcmp_1.ksy	Unsupported	macos/resource_compression/dcmp_1.ksy:231:20	value: array literals are not supported
 ERR	macos/resource_compression/dcmp_2.ksy	Unsupported	macos/resource_compression/dcmp_2.ksy:38:11	param header_parameters_with_io: type bytes_with_io is not supported; only integer types, bool and bytes are
 OK	macos/resource_compression/dcmp_variable_length_integer.ksy
-ERR	macos/resource_fork.ksy	Unsupported	macos/resource_fork.ksy:94:12	value instance data_blocks: only integer, boolean and string values are supported
+ERR	macos/resource_fork.ksy	Invalid	macos/resource_fork.ksy:109:3	instance resource_map refers to itself
 OK	media/android_opengl_shaders_cache.ksy
 ERR	media/au.ksy	Unsupported	media/au.ksy:50:47	value: _io in a value instance is not supported
 OK	media/avi.ksy
-ERR	media/blender_blend.ksy	Unsupported	media/blender_blend.ksy:35:42	value: casts are not supported
+OK	media/blender_blend.ksy
 ERR	media/creative_voice_file.ksy	Unsupported	media/creative_voice_file.ksy:90:16	value: float literals are not supported
 OK	media/genmidi_op2.ksy
 OK	media/id3v1_1.ksy
@@ -136,7 +136,7 @@ OK	media/id3v2_4.ksy
 OK	media/magicavoxel_vox.ksy
 OK	media/ogg.ksy
 ERR	media/quicktime_mov.ksy	Unsupported	media/quicktime_mov.ksy:54:31	value: _io in a value instance is not supported
-ERR	media/standard_midi_file.ksy	Unsupported	common/vlq_base128_be.ksy:47:12	value: casts are not supported
+OK	media/standard_midi_file.ksy
 OK	media/stl.ksy
 ERR	media/tracker_modules/fasttracker_xm_module.ksy	Unsupported	media/tracker_modules/fasttracker_xm_module.ksy:278:19	param header: type sample_header is not supported; only integer types, bool and bytes are
 ERR	media/tracker_modules/s3m.ksy	Unsupported	media/tracker_modules/s3m.ksy:194:13	an attribute in type adlib has no id; attributes without one are not supported
@@ -176,11 +176,11 @@ OK	security/openpgp_message.ksy
 OK	security/ssh_public_key.ksy
 OK	serialization/asn1/asn1_der.ksy
 OK	serialization/bson.ksy
-ERR	serialization/chrome_pak.ksy	Unsupported	serialization/chrome_pak.ksy:101:16	value instance resource: only integer, boolean and string values are supported
-ERR	serialization/google_protobuf.ksy	Unsupported	common/vlq_base128_le.ksy:85:45	valid: casts are not supported
+OK	serialization/chrome_pak.ksy
+ERR	serialization/google_protobuf.ksy	Unsupported	common/vlq_base128_le.ksy:46:11	type: integer literal 0x8000_0000_0000_0000 does not fit in a 64-bit signed integer, which expressions are
 OK	serialization/microsoft_cfb.ksy
 ERR	serialization/msgpack.ksy	Unsupported	serialization/msgpack.ksy:124:12	value: float_32_value is a Float32; only integer, boolean, blob, string and set fields can be used in expressions
-ERR	serialization/php_serialized_value.ksy	Unsupported	serialization/php_serialized_value.ksy:219:16	value instance value: only integer, boolean and string values are supported
+OK	serialization/php_serialized_value.ksy
 OK	serialization/python_pickle.ksy
 OK	serialization/ruby_marshal.ksy
 OK	windows/regf.ksy

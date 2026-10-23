@@ -68,11 +68,30 @@ decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, 
 
 	root := Sink{slots = ([^][]fld.Value)(&tree.root)[:1]}
 	rerr := spans ? read_values(&d, &root, format.root, true) : read_values(&d, &root, format.root, false)
+	consumed = d.r.pos
+	if rerr == .None {
+		rerr = spans ? read_pending(&d, true) : read_pending(&d, false)
+	}
 	if rerr != .None && d.err.kind == .None {
 		fail(&d, rerr, d.r.pos)
 	}
+	return consumed, d.err
+}
 
-	return d.r.pos, d.err
+// Reads the parse instances that no expression had read when their set
+// instances were (Pending), in the order those were read, and any that
+// reading them leaves, once the root is read.
+@(private = "file", require_results)
+read_pending :: proc(d: ^Decoder, $SPANS: bool) -> dat.Read_Error {
+	for i := 0; i < len(d.pending); i += 1 {
+		p := d.pending[i]
+		// an expression may have read it since
+		if raw_data(p.instance.slots[p.k]) != nil do continue
+		d.frames, d.streams, d.path = p.frames, p.streams, p.path
+		d.r, d.base = p.r, p.base
+		read_parse_instance(d, p.instance, p.node, p.k, SPANS) or_return
+	}
+	return .None
 }
 
 // Where the values of one field go: its slot, then a slot for each of its
@@ -465,9 +484,10 @@ CHECK_DEPTH :: 32
 
 // Appends one instance of set node to s, read as choice (see
 // field.Instance), with the values of its params, args, and reads its
-// children into it, then the parse instances that no expression has read.
-// An instance nested deeper than MAX_DEPTH is Too_Deep, and so is one read
-// below CHECK_DEPTH frames once decoding has used MAX_STACK.
+// children into it, and keeps the parse instances that no expression has
+// read, to be read once the root is (keep_pending). An instance nested
+// deeper than MAX_DEPTH is Too_Deep, and so is one read below CHECK_DEPTH
+// frames once decoding has used MAX_STACK.
 @(private = "file", require_results)
 read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int, args: []fld.Value, $SPANS: bool) -> dat.Read_Error {
 	when ODIN_DEBUG {
@@ -496,11 +516,20 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	}
 
 	for p, k in node.parse_instances {
-		if raw_data(instance.slots[k]) == nil do read_parse_instance(d, instance, p, k, SPANS) or_return
+		if raw_data(instance.slots[k]) == nil do keep_pending(d, instance, p, k)
 	}
 
 	pop(&d.frames)
 	return .None
+}
+
+// Keeps parse instance node of instance, in slot k, which no expression
+// has read, to be read once the root is (read_pending). Not inlined: it is
+// called only for the sets that have parse instances.
+@(private = "file")
+keep_pending :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int) {
+	if d.pending == nil do d.pending = make([dynamic]Pending, d.allocator)
+	append(&d.pending, Pending{instance, node, k, clone_dynamic(d, d.frames[:]), clone_dynamic(d, d.streams[:]), clone_dynamic(d, d.path[:]), d.r, d.base})
 }
 
 // The bytes of stack used since decoding started, by the frame this is

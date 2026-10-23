@@ -173,7 +173,9 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "instances:\n  x:\n    pos: 0\n", .Invalid, 6, 5, "x needs a type, size, size-eos, terminator or contents"},
 	{HEAD + "instances:\n  x:\n    value: y\n  y:\n    value: x + 1\n", .Invalid, 6, 12, "value instance x refers to itself"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\ninstances:\n  a:\n    value: 1\n", .Invalid, 8, 3, "id a is already used (line 5, column 9)"},
-	{HEAD + "seq:\n  - id: b\n    size: 1\ninstances:\n  x:\n    value: b\n", .Unsupported, 9, 12, "value instance x: only integer, boolean and string values are supported"},
+	{HEAD + "seq:\n  - id: k\n    type: u1\n  - id: a\n    type:\n      switch-on: k\n      cases:\n        1: s\ninstances:\n  x:\n    value: a.as<t>\ntypes:\n  s: {}\n  t: {}\n", .Invalid, 14, 14, "a has no case of type t"},
+	{HEAD + "seq:\n  - id: a\n    type: s\ninstances:\n  x:\n    value: a.as<s>\ntypes:\n  s: {}\n", .Unsupported, 9, 14, "a cast to a user type (s) is only supported of a switch-on field read once"},
+	{HEAD + "seq:\n  - id: b\n    size: 1\ninstances:\n  x:\n    value: b.as<u4>\n", .Invalid, 9, 12, "expected an integer, found a byte array"},
 	{HEAD + "seq:\n  - id: a\n    type: s\ntypes:\n  s:\n    instances:\n      x:\n        value: _parent.y\n", .Invalid, 11, 24, "value: t has no field y"},
 	{HEAD + "instances:\n  x:\n    value: _parent.y\n", .Invalid, 6, 12, "value: _parent: t has no enclosing set here"},
 	{HEAD + "instances:\n  x:\n    value: _io.pos\n", .Unsupported, 6, 12, "_io in a value instance is not supported"},
@@ -1589,6 +1591,137 @@ t[0].tail[0] = <3 bytes> 61 62 63
 	expect_dump(t, "_ of no case", ksy_dump(t, until, {5, 6}), "error: Absent_Field at 1 in t[0]")
 	stuck := HEAD + "seq:\n  - id: xs\n    type:\n      switch-on: _index\n      cases:\n        1: u1\n    repeat: until\n    repeat-until: _index == 3\n"
 	expect_dump(t, "no progress", ksy_dump(t, stuck, {5, 6}), "error: No_Progress at 0 in t[0].xs[0]")
+}
+
+// Value instances of sets (first, an element; picked, whose own instance
+// total uses _parent; word0, a cast), of byte arrays (raw) and of arrays
+// (vals), and casts: to an integer type, which leaves the value as it is,
+// and to a user type, of a switch-on field, which gives its fields; one of
+// an instance read as another case is Wrong_Type. A case's instance can
+// cast the field to a case after it (byte_val's as_word). A value
+// instance can refer to a field after its set's (later), and a parse
+// instance that no expression reads is read once the root is, so it can
+// use an element of its array read after it (body), as in Kaitai.
+@(test)
+ksy_value_instances_and_casts :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: n
+    type: u1
+  - id: recs
+    type: rec
+    repeat: expr
+    repeat-expr: 2
+  - id: blob
+    size: 2
+  - id: nums
+    type: u1
+    repeat: expr
+    repeat-expr: 3
+  - id: entries
+    type: entry
+    repeat: expr
+    repeat-expr: 2
+  - id: by_first
+    size: first.v
+  - id: by_picked
+    size: picked.total
+  - id: by_raw
+    size: raw.size + raw[1]
+  - id: by_vals
+    size: vals.size + vals.max - vals[0]
+  - id: by_cast
+    size: entries[0].body.as<word>.w.as<u2> - 0x100
+  - id: by_word
+    size: word0.w - 0x101
+  - id: items
+    type: item(_index)
+    repeat: expr
+    repeat-expr: 2
+  - id: by_later
+    size: recs[0].later - 1
+instances:
+  first:
+    value: recs[0]
+  picked:
+    value: recs[n % 2]
+  raw:
+    value: blob
+  vals:
+    value: nums
+  word0:
+    value: entries[0].body.as<word>
+types:
+  rec:
+    seq:
+      - id: v
+        type: u1
+    instances:
+      total:
+        value: v + _parent.n
+      later:
+        value: _parent.items.size
+  entry:
+    seq:
+      - id: kind
+        type: u1
+      - id: body
+        type:
+          switch-on: kind
+          cases:
+            1: byte_val
+            2: word
+  byte_val:
+    seq:
+      - id: b
+        type: u1
+    instances:
+      as_word:
+        value: _parent.body.as<word>
+  word:
+    seq:
+      - id: w
+        type: u2
+  item:
+    params:
+      - id: i
+        type: u1
+    seq:
+      - id: ofs
+        type: u1
+    instances:
+      len_body:
+        value: _parent.items[i + 1].ofs - ofs
+      body:
+        pos: ofs
+        size: len_body
+        if: i == 0
+`
+	input := []byte{0x01, 0x02, 0x03, 0xaa, 0x02, 0x04, 0x09, 0x05, 0x02, 0x02, 0x01, 0x01, 0x77, 0x46, 0x46, 0x50, 0x50, 0x50, 0x50, 0x52, 0x52, 0x52, 0x52, 0x56, 0x56, 0x56, 0x56, 0x56, 0x56, 0x56, 0x56, 0x43, 0x43, 0x57, 0x00, 0x03, 0x4c}
+	expect_dump(t, "values and casts", ksy_dump(t, src, input), `t[0].n[0] = 1
+t[0].recs[0].v[0] = 2
+t[0].recs[1].v[0] = 3
+t[0].blob[0] = <2 bytes> aa 02
+t[0].nums[0] = 4
+t[0].nums[1] = 9
+t[0].nums[2] = 5
+t[0].entries[0].kind[0] = 2
+t[0].entries[0].body[0].w[0] = 258
+t[0].entries[1].kind[0] = 1
+t[0].entries[1].body[0].b[0] = 119
+t[0].by_first[0] = <2 bytes> 46 46
+t[0].by_picked[0] = <4 bytes> 50 50 50 50
+t[0].by_raw[0] = <4 bytes> 52 52 52 52
+t[0].by_vals[0] = <8 bytes> 56 56 56 56 56 56 56 56
+t[0].by_cast[0] = <2 bytes> 43 43
+t[0].by_word[0] = <1 bytes> 57
+t[0].items[0].ofs[0] = 0
+t[0].items[0].body[0] = <3 bytes> 01 02 03
+t[0].items[1].ofs[0] = 3
+t[0].by_later[0] = <1 bytes> 4c
+`)
+	wrong := slice.clone(input, context.temp_allocator)
+	wrong[8] = 1
+	expect_dump(t, "cast to another case", ksy_dump(t, src, wrong), "error: Wrong_Type at 30 in t[0].by_cast[0]")
 }
 
 // io on parse instances: each is read at its pos in the stream io gives,

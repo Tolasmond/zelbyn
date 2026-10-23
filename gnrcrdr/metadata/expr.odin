@@ -37,6 +37,7 @@ Expr_Variant :: union {
 	Member,
 	Enum_Constant,
 	Size_Of,
+	Cast,
 
 	// resolved only
 	Instance,
@@ -53,6 +54,7 @@ Expr_Variant :: union {
 	Repeat_Index,
 	Repeat_Element,
 	Value_Ref,
+	Switch_Cast,
 }
 
 Int_Literal :: struct {
@@ -140,6 +142,27 @@ Enum_Constant :: struct {
 Size_Of :: struct {
 	type_name: string,
 	bits:      bool,
+}
+
+// operand.as<type_name>. Resolving it gives the operand itself for an
+// integer type, as the values of all integer types are Ints, and a
+// Switch_Cast for a user type.
+Cast :: struct {
+	operand:   ^Expr,
+	type_name: string,
+}
+
+// operand.as<type_name>: operand, a switch-on field read once, as the
+// instance of the case of user type type_name that it was read as. node is
+// the set of the first of those cases, whose fields the others share, and
+// choices are their indexes in the Switch, as field.Instance.choice
+// records them. An instance read as another case, or a value that is not
+// an instance, is Wrong_Type.
+Switch_Cast :: struct {
+	operand:   ^Expr,
+	type_name: string,
+	node:      ^Node,
+	choices:   []int,
 }
 
 // The set instance being decoded (up = 0), one of its enclosing instances

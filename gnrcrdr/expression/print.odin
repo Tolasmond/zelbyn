@@ -115,6 +115,10 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 		strings.write_string(b, x.bits ? "bitsizeof<" : "sizeof<")
 		strings.write_string(b, x.type_name)
 		strings.write_byte(b, '>')
+	case mdata.Cast:
+		write_cast(b, x.operand, x.type_name)
+	case mdata.Switch_Cast:
+		write_cast(b, x.operand, x.type_name)
 	case mdata.Instance:
 		if x.root {
 			strings.write_string(b, "_root")
@@ -166,4 +170,13 @@ write_member :: proc(b: ^strings.Builder, base: ^mdata.Expr, name: string) {
 		strings.write_byte(b, '.')
 	}
 	strings.write_string(b, name)
+}
+
+// operand.as<type_name>.
+@(private = "file")
+write_cast :: proc(b: ^strings.Builder, operand: ^mdata.Expr, type_name: string) {
+	write(b, operand)
+	strings.write_string(b, ".as<")
+	strings.write_string(b, type_name)
+	strings.write_byte(b, '>')
 }

@@ -251,9 +251,14 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 			if !cond.(bool) do return nil, .Absent_Field
 		}
 		return eval(d, x.instance.expr, self)
+	case mdata.Switch_Cast:
+		operand := eval(d, x.operand, ctx) or_return
+		instance, is_instance := operand.(^fld.Instance)
+		if !is_instance || !slice.contains(x.choices, instance.choice) do return nil, .Wrong_Type
+		return instance, .None
 	case mdata.Io:
 		panic("eval: a Stream expression (eval_stream)")
-	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of:
+	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast:
 		panic("eval: unresolved expression")
 	}
 	panic("eval: invalid expression")
@@ -273,16 +278,22 @@ ancestor :: proc(d: ^Decoder, ctx: Eval_Context, up: int) -> (instance: ^fld.Ins
 		return d.frames[i].instance, .None
 	}
 	if up == 0 do return ctx.self, .None
+	return enclosing(d, ctx.base, ctx.caller^, up)
+}
 
+// The instance up levels above the one that e, a Struct expression
+// evaluated in ctx, gives.
+@(private = "file", require_results)
+enclosing :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context, up: int) -> (instance: ^fld.Instance, err: dat.Read_Error) {
 	up := up
-	e := ctx.base
+	e := e
 	for {
 		#partial switch x in e.variant {
 		case mdata.Field_Ref:
 			// a field's instance is in the instance of its base
 			up -= 1
 			if up == 0 {
-				v := eval(d, x.base, ctx.caller^) or_return
+				v := eval(d, x.base, ctx) or_return
 				return v.(^fld.Instance), .None
 			}
 			e = x.base
@@ -291,14 +302,22 @@ ancestor :: proc(d: ^Decoder, ctx: Eval_Context, up: int) -> (instance: ^fld.Ins
 			e = x.operand
 		case mdata.Array_Method:
 			e = x.operand
+		case mdata.Switch_Cast:
+			e = x.operand
+		case mdata.Value_Ref:
+			// the instance a value instance gives is reached through its
+			// expression, evaluated for the instance of its base
+			base := eval(d, x.base, ctx) or_return
+			caller := ctx
+			return enclosing(d, x.instance.expr, Eval_Context{index = -1, self = base.(^fld.Instance), base = x.base, caller = &caller}, up)
 		case mdata.Instance:
 			if x.root do return nil, .Absent_Field
-			return ancestor(d, ctx.caller^, x.up + up)
+			return ancestor(d, ctx, x.up + up)
 		case mdata.Repeat_Element:
 			// _ is in the instance being decoded
-			return ancestor(d, ctx.caller^, up - 1)
+			return ancestor(d, ctx, up - 1)
 		case:
-			panic("ancestor: the base of a value instance is not an instance")
+			panic("enclosing: not a set instance")
 		}
 	}
 }

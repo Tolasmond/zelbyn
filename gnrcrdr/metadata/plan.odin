@@ -205,10 +205,15 @@ Terminator :: struct {
 // cutting them at a terminator, and are its value, a []byte where an
 // instance would be.
 Switch :: struct {
-	on:      ^Expr, // an Int, Bool or String expression
-	cases:   []Switch_Case,
-	default: ^Node, // nil when there is no _ case
+	on:           ^Expr, // an Int, Bool or String expression
+	cases:        []Switch_Case,
+	default:      ^Node,  // nil when there is no _ case
+	default_type: string, // the user type of default, for casts (Switch_Cast); "" for any other type
 }
+
+// Instance.choice of the _ case, for the front ends, which do not import
+// field.
+DEFAULT_CASE :: fld.DEFAULT_CASE
 
 // value for a Switch whose on is an Int, or a Bool as 0 or 1; text for one
 // whose on is a String.
@@ -216,6 +221,7 @@ Switch_Case :: struct {
 	value: int,
 	text:  string,
 	node:  ^Node,
+	type:  string, // the name of node's user type, for casts (Switch_Cast); "" for any other type
 }
 
 // A parse instance of a set (Kaitai's instances with pos) is a field read
@@ -224,8 +230,10 @@ Switch_Case :: struct {
 // that stream. Its expressions, io and pos among them, are evaluated in the
 // set instance, where _io is still that instance's stream. Each is
 // read when an expression first refers to it, which can be from any field
-// of the set, or else after the set's children, in order, so that every
-// one is in the decoded tree. Its cond is evaluated before pos. Its values
+// of the set, or else once the whole input is, in the order of the set
+// instances, with the context of its set instance as it was after the
+// set's children (reader.Pending), so that every one is in the decoded
+// tree. Its cond is evaluated before pos. Its values
 // are in its own slot of the set instance: those of the parse instances
 // come first, in order, before the children's.
 
