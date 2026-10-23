@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Compares gnrcrdr's YAML parser with libyaml on every .ksy file under a
-directory (decision record §7.1), normally a clone of
+directory, normally a clone of
 https://github.com/kaitai-io/kaitai_struct_formats.
 
     python3 tools/yaml_corpus/compare.py <dir>
