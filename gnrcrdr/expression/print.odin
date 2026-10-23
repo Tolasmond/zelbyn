@@ -55,6 +55,8 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 	switch x in e.variant {
 	case mdata.Int_Literal:
 		strings.write_int(b, x.value)
+	case mdata.Big_Literal:
+		strings.write_u64(b, x.value)
 	case mdata.Float_Literal:
 		// the shortest digits that give the value, always with a . or an
 		// exponent, so that it reads back as a float

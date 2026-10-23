@@ -49,6 +49,7 @@ import "core:strings"
 //     instances: instances with pos, io (_io or the _io of a set instance)
 //     and the keys of an attribute, or without pos when they read nothing
 //   - .pos, .size and .eof of _io and of the _io of another set instance
+//   - integers in expressions exact from -2^63 to 2^64 - 1
 //   - float literals and float fields in expressions, with + - * / and the
 //     comparisons, also with integers
 //   - casts, .as<t>, to an integer type, to bytes of an array of integers,
@@ -1178,7 +1179,7 @@ note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, s
 		note_escapes(c, n, what, x.stream, scope)
 	case mdata.Io_Eof:
 		note_escapes(c, n, what, x.stream, scope)
-	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Root_Arg, mdata.Repeat_Index, mdata.Repeat_Element:
+	case mdata.Int_Literal, mdata.Big_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Root_Arg, mdata.Repeat_Index, mdata.Repeat_Element:
 	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast, mdata.Call:
 		panic("note_escapes: unresolved expression")
 	}

@@ -89,7 +89,7 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	{"1__0", .Syntax, 0, "invalid integer literal 1__0"},
 	{"1_", .Syntax, 0, "invalid integer literal 1_"},
 	{"1e5", .Invalid, 0, "expected an integer, found a float"},
-	{"9223372036854775808", .Unsupported, 0, "does not fit in a 64-bit signed integer"},
+	{"18446744073709551616", .Unsupported, 0, "is above 2^64 - 1"},
 	{`"abc`, .Syntax, 0, "unterminated string literal"},
 	{`'abc`, .Syntax, 0, "unterminated string literal"},
 	{`"a\q"`, .Syntax, 2, "unknown escape \\q"},

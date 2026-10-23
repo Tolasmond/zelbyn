@@ -584,6 +584,135 @@ t[0].c[0] = <1 bytes> 03
 t[0].d[0] = 4
 `)
 
+	// integers are exact up to 2^64 - 1: vlq_base128_le.ksy's arithmetic
+	// on u8 params and values, with 0x8000_0000_0000_0000, gives the
+	// value and its signed reading of a varint as Kaitai's Python runtime
+	// does (2^64 - 1, 5, 2^63, 2^63 - 1 and 100)
+	vlq := HEAD + `seq:
+  - id: num
+    type: vlq
+  - id: neg
+    size: 1
+    if: num.value_signed < 0
+  - id: big
+    size: 1
+    if: num.value == 18446744073709551615
+types:
+  vlq:
+    seq:
+      - id: groups
+        type: |
+          group(
+            _index,
+            _index != 0 ? groups[_index - 1].interm_value : 0,
+            _index != 0 ? (_index == 9 ? 0x8000_0000_0000_0000 : groups[_index - 1].multiplier * 128) : 1
+          )
+        repeat: until
+        repeat-until: not _.has_next
+    types:
+      group:
+        params:
+          - id: idx
+            type: s4
+          - id: prev_interm_value
+            type: u8
+          - id: multiplier
+            type: u8
+        seq:
+          - id: has_next
+            type: b1
+            valid: 'idx == 9 ? false : has_next'
+          - id: value
+            type: b7
+            valid:
+              max: '(idx == 9 ? 1 : 0b111_1111).as<u8>'
+        instances:
+          interm_value:
+            value: (prev_interm_value + value * multiplier).as<u8>
+    instances:
+      len:
+        value: groups.size
+      value:
+        value: groups.last.interm_value
+      sign_bit:
+        value: '(len == 10 ? 0x8000_0000_0000_0000 : groups.last.multiplier * 0b100_0000).as<u8>'
+      value_signed:
+        value: 'sign_bit > 0 and value >= sign_bit ? -(sign_bit - (value - sign_bit)).as<s8> : value.as<s8>'
+`
+	expect_dump(t, "vlq, max", ksy_dump(t, vlq, {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0xaa, 0xbb}), `t[0].num[0].groups[0].has_next[0] = true
+t[0].num[0].groups[0].value[0] = 127
+t[0].num[0].groups[1].has_next[0] = true
+t[0].num[0].groups[1].value[0] = 127
+t[0].num[0].groups[2].has_next[0] = true
+t[0].num[0].groups[2].value[0] = 127
+t[0].num[0].groups[3].has_next[0] = true
+t[0].num[0].groups[3].value[0] = 127
+t[0].num[0].groups[4].has_next[0] = true
+t[0].num[0].groups[4].value[0] = 127
+t[0].num[0].groups[5].has_next[0] = true
+t[0].num[0].groups[5].value[0] = 127
+t[0].num[0].groups[6].has_next[0] = true
+t[0].num[0].groups[6].value[0] = 127
+t[0].num[0].groups[7].has_next[0] = true
+t[0].num[0].groups[7].value[0] = 127
+t[0].num[0].groups[8].has_next[0] = true
+t[0].num[0].groups[8].value[0] = 127
+t[0].num[0].groups[9].has_next[0] = false
+t[0].num[0].groups[9].value[0] = 1
+t[0].neg[0] = <1 bytes> aa
+t[0].big[0] = <1 bytes> bb
+`)
+	expect_dump(t, "vlq, 5", ksy_dump(t, vlq, {0x05, 0xaa, 0xbb}), `t[0].num[0].groups[0].has_next[0] = false
+t[0].num[0].groups[0].value[0] = 5
+`)
+	expect_dump(t, "vlq, 2^63", ksy_dump(t, vlq, {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01, 0xaa, 0xbb}), `t[0].num[0].groups[0].has_next[0] = true
+t[0].num[0].groups[0].value[0] = 0
+t[0].num[0].groups[1].has_next[0] = true
+t[0].num[0].groups[1].value[0] = 0
+t[0].num[0].groups[2].has_next[0] = true
+t[0].num[0].groups[2].value[0] = 0
+t[0].num[0].groups[3].has_next[0] = true
+t[0].num[0].groups[3].value[0] = 0
+t[0].num[0].groups[4].has_next[0] = true
+t[0].num[0].groups[4].value[0] = 0
+t[0].num[0].groups[5].has_next[0] = true
+t[0].num[0].groups[5].value[0] = 0
+t[0].num[0].groups[6].has_next[0] = true
+t[0].num[0].groups[6].value[0] = 0
+t[0].num[0].groups[7].has_next[0] = true
+t[0].num[0].groups[7].value[0] = 0
+t[0].num[0].groups[8].has_next[0] = true
+t[0].num[0].groups[8].value[0] = 0
+t[0].num[0].groups[9].has_next[0] = false
+t[0].num[0].groups[9].value[0] = 1
+t[0].neg[0] = <1 bytes> aa
+`)
+	expect_dump(t, "vlq, 2^63 - 1", ksy_dump(t, vlq, {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f, 0xaa, 0xbb}), `t[0].num[0].groups[0].has_next[0] = true
+t[0].num[0].groups[0].value[0] = 127
+t[0].num[0].groups[1].has_next[0] = true
+t[0].num[0].groups[1].value[0] = 127
+t[0].num[0].groups[2].has_next[0] = true
+t[0].num[0].groups[2].value[0] = 127
+t[0].num[0].groups[3].has_next[0] = true
+t[0].num[0].groups[3].value[0] = 127
+t[0].num[0].groups[4].has_next[0] = true
+t[0].num[0].groups[4].value[0] = 127
+t[0].num[0].groups[5].has_next[0] = true
+t[0].num[0].groups[5].value[0] = 127
+t[0].num[0].groups[6].has_next[0] = true
+t[0].num[0].groups[6].value[0] = 127
+t[0].num[0].groups[7].has_next[0] = true
+t[0].num[0].groups[7].value[0] = 127
+t[0].num[0].groups[8].has_next[0] = false
+t[0].num[0].groups[8].value[0] = 127
+t[0].neg[0] = <1 bytes> aa
+`)
+	expect_dump(t, "vlq, 100", ksy_dump(t, vlq, {0x64, 0xaa, 0xbb}), `t[0].num[0].groups[0].has_next[0] = false
+t[0].num[0].groups[0].value[0] = 100
+t[0].neg[0] = <1 bytes> aa
+`)
+	expect_dump(t, "vlq, 65 bits", ksy_dump(t, vlq, {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02, 0xaa}), "error: Greater_Than_Max at 10 in t[0].num[0].groups[9].value[0]")
+
 	// .size, .pos and .eof of the stream of another set instance: of the
 	// root, of a field's substream, of a ?: of those, and from a value
 	// instance, of _parent once it is read (up_size)

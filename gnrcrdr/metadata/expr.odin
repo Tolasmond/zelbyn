@@ -26,6 +26,7 @@ Expr_Type :: enum {
 Expr_Variant :: union {
 	// syntax and resolved
 	Int_Literal,
+	Big_Literal,
 	Float_Literal,
 	Bool_Literal,
 	String_Literal,
@@ -68,6 +69,12 @@ Expr_Variant :: union {
 
 Int_Literal :: struct {
 	value: int,
+}
+
+// An Int literal above max(int), up to max(u64): an integer expression is
+// exact from min(int) to max(u64), and fails with Integer_Overflow beyond.
+Big_Literal :: struct {
+	value: u64,
 }
 
 // 1.5, 2., 1e3 or 1.5e-3.

@@ -111,6 +111,7 @@ Token :: struct {
 	text:   string,
 	value:  int,    // Int only
 	float:  f64,    // Float only
+	big:    bool,   // Int only: value is the bits of a u64 above max(int)
 	str:    string, // String only: its value, allocated with the parser's allocator
 }
 
@@ -364,9 +365,9 @@ lex_int :: proc(p: ^Parser) -> bool {
 			return fail(p, .Syntax, start, "invalid integer literal %s", text)
 		}
 
-		if value > (u64(max(int)) - u64(d)) / u64(base) {
-			// valid Kaitai, whose expressions are wider
-			return fail(p, .Unsupported, start, "integer literal %s does not fit in a 64-bit signed integer, which expressions are", text)
+		if value > (max(u64) - u64(d)) / u64(base) {
+			// valid Kaitai, whose expressions are wider still
+			return fail(p, .Unsupported, start, "integer literal %s is above 2^64 - 1, the largest integer expressions have", text)
 		}
 		value = value * u64(base) + u64(d)
 		n += 1
@@ -375,7 +376,7 @@ lex_int :: proc(p: ^Parser) -> bool {
 	if base == 10 && n > 1 && p.text[start] == '0' do return fail(p, .Syntax, start, "invalid integer literal %s (use 0o for octal)", text)
 
 	p.pos = end
-	p.tok = Token{kind = .Int, offset = start, text = text, value = int(value)}
+	p.tok = Token{kind = .Int, offset = start, text = text, value = int(value), big = value > u64(max(int))}
 	return true
 }
 
@@ -615,6 +616,7 @@ parse_atom :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 	#partial switch t.kind {
 	case .Int:
 		next(p) or_return
+		if t.big do return new_expr(p, t.offset, mdata.Big_Literal{u64(t.value)}), true
 		return new_expr(p, t.offset, mdata.Int_Literal{t.value}), true
 	case .Float:
 		next(p) or_return
