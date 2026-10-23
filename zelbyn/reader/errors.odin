@@ -30,7 +30,7 @@ Decoder :: struct {
 	frames:      [dynamic]Frame,  // the set instances being decoded, outermost first
 	streams:     [dynamic]Stream, // the streams that substreams were taken from, outermost first, as they are now
 	kept:        map[^fld.Instance]Stream, // the streams of the instances of sets with keeps_stream, in the same arena; nil until one is read
-	cache:       map[Cached]Eval_Value, // the values of the cached value instances evaluated, in the same arena; nil until one is
+	cache:       map[Cached]Kept_Value, // the values of the cached value instances evaluated, in the same arena; nil until one is
 	stack_start: uintptr,         // the address of a local of decode, where the stack that decoding uses starts (stack_used)
 	pending:     [dynamic]Pending, // the parse instances to read once the root is (read_pending), in the same arena
 	pending_at:  map[Pending_Key]int, // the index in pending of each, made when an expression first reads one (read_kept); nil until then
@@ -76,6 +76,15 @@ Pending :: struct {
 Cached :: struct {
 	instance: ^fld.Instance,
 	value:    ^mdata.Value_Instance,
+}
+
+// The value a cached value instance keeps (eval_kept): value, or when it is
+// the values of a field, the slot that holds them, which the decoder updates
+// as the field grows; slot is nil otherwise.
+@(private)
+Kept_Value :: struct {
+	value: Eval_Value,
+	slot:  ^[]fld.Value,
 }
 
 // Parse instance k of instance.
