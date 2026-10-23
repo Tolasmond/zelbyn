@@ -35,6 +35,7 @@ Decoder :: struct {
 	pending:     [dynamic]Pending, // the parse instances to read once the root is (read_pending), in the same arena
 	pending_at:  map[Pending_Key]int, // the index in pending of each, made when an expression first reads one (read_kept); nil until then
 	spans:       bool,            // the tree records spans: read_parse_instance is called with SPANS
+	args:        []fld.Value,     // the arguments of the params of the root's set (Root_Arg)
 	err:         Parse_Error,
 }
 

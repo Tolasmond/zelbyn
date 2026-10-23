@@ -234,6 +234,8 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 	case mdata.To_Bytes:
 		operand := eval(d, x.operand, ctx) or_return
 		return values_to_bytes(d, operand.([]fld.Value))
+	case mdata.Root_Arg:
+		return single_value(d.args[x.index])
 	case mdata.To_I:
 		operand := eval(d, x.operand, ctx) or_return
 		#partial switch o in operand {

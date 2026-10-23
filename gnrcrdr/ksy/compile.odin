@@ -56,20 +56,22 @@ import "core:strings"
 //     literals, [a, b]; and the methods .to_s(encoding) of bytes and
 //     .substring(from, to) of a string
 //   - params of integer types, bool, bytes, str and user types, in types
-//     and at the top level of an imported schema, given as t(a, b)
+//     and at the top level of an imported schema, given as t(a, b), and
+//     but for user types, on the top-level type of the schema compiled,
+//     whose arguments the decoder is given (Root_Arg)
 //   - enums, whose values are names or mappings of id, doc and doc-ref
 //     (enum constants in expressions)
 //   - the extensions -orig-id, -peek, -while-peek, -until-peek and -bits
 //
 // Not supported yet (Unsupported): other encodings, instances without pos or
-// value that read bytes, params of other types (struct, io, any) and on the
-// top-level type of the schema compiled, % of a float, array literals of
-// arrays, valid on a float, min and max on a type other than an integer, an
-// endian that is a switch-on on the top-level type or in a type that
-// contains itself, a bit-endian that is a switch-on, imports in a type, and
-// in a type that contains itself, the members of the sets enclosing it,
-// other than through the schema's _root, and an instance that refers to
-// itself through a field of its type.
+// value that read bytes, params of other types (struct, io, any) and of a
+// user type on the top-level type of the schema compiled, % of a float,
+// array literals of arrays, valid on a float, min and max on a type other
+// than an integer, an endian that is a switch-on on the top-level type or in
+// a type that contains itself, a bit-endian that is a switch-on, imports in
+// a type, and in a type that contains itself, the members of the sets
+// enclosing it, other than through the schema's _root, and an instance that
+// refers to itself through a field of its type.
 
 Error_Kind :: enum {
 	None,
@@ -429,7 +431,11 @@ identifier :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (id: string, ok:
 @(private = "file")
 compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) -> bool {
 	top := load_schema(c, root) or_return
-	if len(top.params) > 0 do return fail(c, .Unsupported, get_key(root, "params"), "params on the top-level type are not supported, except in an imported schema")
+	// their arguments are given to the decoder (Root_Arg), which can give no
+	// instance of a type
+	for p in top.params {
+		if p.type == .Set do return fail(c, .Unsupported, p.id, "param %s: a param of a user type on the top-level type of the schema compiled is not supported, as no argument can be given for it", p.id.text)
+	}
 
 	name := display_name(c, get(root, "meta"), top.name) or_return
 	node := new_node(c, name, top.name)
@@ -442,6 +448,24 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 	// nothing is read before the root that its order could depend on
 	if declares_endian_switch(top) do return fail(c, .Unsupported, top.meta.endian_switch, "endian: switch-on is not supported on the top-level type of the schema compiled, except in an imported schema")
 	compile_fields(c, top, node, {node}) or_return
+	if len(node.params) > 0 {
+		args := make([]^mdata.Expr, len(node.params), c.allocator)
+		for p, k in node.params {
+			type: mdata.Expr_Type
+			#partial switch p.type {
+			case .Int64:
+				type = .Int
+			case .Bool:
+				type = .Bool
+			case .Blob:
+				type = .Bytes
+			case .String:
+				type = .String
+			}
+			args[k] = new_expr(c, type, mdata.Root_Arg{k})
+		}
+		node.args = args
+	}
 
 	// the instances that nothing referred to, now that every field they
 	// can refer to is compiled, as in Kaitai, where any instance can refer
@@ -1154,7 +1178,7 @@ note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, s
 		note_escapes(c, n, what, x.stream, scope)
 	case mdata.Io_Eof:
 		note_escapes(c, n, what, x.stream, scope)
-	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Repeat_Index, mdata.Repeat_Element:
+	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Root_Arg, mdata.Repeat_Index, mdata.Repeat_Element:
 	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast, mdata.Call:
 		panic("note_escapes: unresolved expression")
 	}

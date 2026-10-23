@@ -14,9 +14,12 @@ import "core:slice"
 // copy, or for a string in an encoding that is decoded, in the arena too,
 // so the tree owns its input: it needs neither the file nor the
 // schema once read returns. With spans, the tree records the span of each
-// value (field.value_span), which costs memory and time.
+// value (field.value_span), which costs memory and time. args are the
+// arguments of the params of the schema's top-level type, one of each
+// param's type: an i64 for an integer type, a bool, []byte for bytes or a
+// string for str, which the tree copies; else Invalid_Arguments.
 @(require_results)
-read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false) -> (consumed: int, err: Parse_Error) {
+read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false, args: []fld.Value = nil) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read: tree must be zero or destroyed")
 	f, open_err := os.open(name)
 	if open_err != nil {
@@ -30,19 +33,50 @@ read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, sp
 	if read_err != nil {
 		return 0, Parse_Error{kind = .File_Read_Failed, os_error = read_err}
 	}
-	return decode(data, format, tree, spans)
+	return decode(data, format, tree, spans, args)
 }
 
 // Decodes data into tree, which must be zero or destroyed. Strings and
 // blobs are views of data, which the tree borrows, but for strings in an
 // encoding that is decoded, which are in the tree's arena: keep data alive and
 // unchanged for as long as the tree is used. The tree references nothing
-// in the schema. spans is as for read.
+// in the schema. spans and args are as for read.
 @(require_results)
-read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false) -> (consumed: int, err: Parse_Error) {
+read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false, args: []fld.Value = nil) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
 	init_arena(tree, len(data))
-	return decode(data, format, tree, spans)
+	return decode(data, format, tree, spans, args)
+}
+
+// args, the arguments of the params of params, copied into the tree's
+// arena; ok is false unless there is one of each param's type.
+@(private = "file")
+root_args :: proc(params: []^mdata.Node, args: []fld.Value, arena: ^arn.Arena) -> (copied: []fld.Value, ok: bool) {
+	if len(args) != len(params) do return
+	copied = arn.arena_make(arena, fld.Value, len(args))
+	for p, k in params {
+		#partial switch p.type {
+		case .Int64:
+			_ = args[k].(i64) or_return
+			copied[k] = args[k]
+		case .Bool:
+			_ = args[k].(bool) or_return
+			copied[k] = args[k]
+		case .Blob:
+			v := args[k].([]byte) or_return
+			b := arn.arena_make(arena, byte, len(v))
+			copy(b, v)
+			copied[k] = b
+		case .String:
+			v := args[k].(string) or_return
+			b := arn.arena_make(arena, byte, len(v))
+			copy(b, v)
+			copied[k] = string(b)
+		case:
+			return
+		}
+	}
+	return copied, true
 }
 
 // Sizes the first block of tree's arena for an input of input_size bytes.
@@ -57,7 +91,7 @@ init_arena :: proc(tree: ^fld.Value_Tree, input_size: int) {
 // compiled twice, with and without spans, so that a decode without them
 // pays nothing for them.
 @(private = "file", require_results)
-decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans: bool) -> (consumed: int, err: Parse_Error) {
+decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans: bool, args: []fld.Value) -> (consumed: int, err: Parse_Error) {
 	allocator := arn.arena_allocator(&tree.arena)
 	tree.spans = spans
 
@@ -67,6 +101,11 @@ decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, 
 	d.frames = make([dynamic]Frame, allocator)
 	d.streams = make([dynamic]Stream, allocator)
 	dat.reader_init(&d.r, data)
+	if params := format.root.params; len(params) > 0 || len(args) > 0 {
+		args_ok: bool
+		d.args, args_ok = root_args(params, args, &tree.arena)
+		if !args_ok do return 0, Parse_Error{kind = .Invalid_Arguments}
+	}
 
 	root := Sink{slots = ([^][]fld.Value)(&tree.root)[:1]}
 	rerr := spans ? read_values(&d, &root, format.root, true) : read_values(&d, &root, format.root, false)

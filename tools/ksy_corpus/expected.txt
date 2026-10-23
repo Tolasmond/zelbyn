@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 175 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 177 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -19,7 +19,7 @@ OK	archive/zchunk.ksy
 OK	archive/zip.ksy
 OK	archive/zisofs.ksy
 OK	cad/monomakh_sapr_chg.ksy
-ERR	common/bcd.ksy	Unsupported	common/bcd.ksy:37:1	params on the top-level type are not supported, except in an imported schema
+OK	common/bcd.ksy
 OK	common/bytes_with_io.ksy
 OK	common/dos_datetime.ksy
 OK	common/riff.ksy
@@ -121,7 +121,7 @@ OK	macos/ds_store.ksy
 OK	macos/mac_os_resource_snd.ksy
 OK	macos/resource_compression/dcmp_0.ksy
 OK	macos/resource_compression/dcmp_1.ksy
-ERR	macos/resource_compression/dcmp_2.ksy	Unsupported	macos/resource_compression/dcmp_2.ksy:31:1	params on the top-level type are not supported, except in an imported schema
+ERR	macos/resource_compression/dcmp_2.ksy	Unsupported	macos/resource_compression/dcmp_2.ksy:37:9	param header_parameters_with_io: a param of a user type on the top-level type of the schema compiled is not supported, as no argument can be given for it
 OK	macos/resource_compression/dcmp_variable_length_integer.ksy
 OK	macos/resource_fork.ksy
 OK	media/android_opengl_shaders_cache.ksy
@@ -154,7 +154,7 @@ OK	network/ipv6_packet.ksy
 OK	network/microsoft_network_monitor_v2.ksy
 OK	network/packet_ppi.ksy
 OK	network/pcap.ksy
-ERR	network/protocol_body.ksy	Unsupported	network/protocol_body.ksy:25:1	params on the top-level type are not supported, except in an imported schema
+OK	network/protocol_body.ksy
 OK	network/rtcp_payload.ksy
 OK	network/rtp_packet.ksy
 OK	network/rtpdump.ksy

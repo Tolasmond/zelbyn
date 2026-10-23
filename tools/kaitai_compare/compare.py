@@ -2,7 +2,7 @@
 """Compares gnrcrdr's decode of files with the official Kaitai Struct
 runtime's, value by value (decision record §8, step 6).
 
-    python3 tools/kaitai_compare/compare.py [--import-path DIRS] [--offsets] <schema.ksy> <file>...
+    python3 tools/kaitai_compare/compare.py [--import-path DIRS] [--offsets] [--param NAME=VALUE]... <schema.ksy> <file>...
 
 Run from the repository root, after `npm ci --prefix tools/kaitai_compare`.
 Needs Odin, Node.js and PyYAML. The schema is compiled with the official
@@ -22,7 +22,9 @@ it, where the runtime writes the double it widens to: a float of
 gnrcrdr's is also equal to the runtime's when it rounds to it as an f4.
 Imports are read relative to the importing schema, or for an absolute one,
 from the directories of --import-path (separated as in PATH), and given to
-both. Exits 1 if any file differs, or fails to decode on either side.
+both. Each --param is an argument for a param of the schema's top-level
+type, as gnrcrdr's --param takes it, given to both. Exits 1 if any file
+differs, or fails to decode on either side.
 
 With --offsets, the offsets of the values are compared instead: those of
 gnrcrdr's text dump with --offsets, and the starts that the runtime
@@ -131,6 +133,26 @@ def as_f4(x):
         return None
 
 
+def root_args(ksy, params):
+    """The arguments that params, each name=value as gnrcrdr's --param takes
+    it, give the params of the top-level type of ksy, in their order, as
+    decode.js takes them: integers, booleans, strings, and byte arrays as
+    lists of integers."""
+    given = dict(p.split('=', 1) for p in params)
+    args = []
+    for param in ksy.get('params', []):
+        text, t = given[param['id']], param['type']
+        if t == 'bool':
+            args.append(text == 'true')
+        elif t == 'bytes':
+            args.append(list(bytes.fromhex(text)))
+        elif t == 'str':
+            args.append(text)
+        else:
+            args.append(int(text, 0))
+    return args
+
+
 def first_difference(a, b, path):
     """The path of the first value that differs, and the two values; None
     when a and b are equal. Also counts the values compared."""
@@ -182,6 +204,7 @@ def main():
     p = argparse.ArgumentParser(usage=__doc__)
     p.add_argument('--import-path', default='')
     p.add_argument('--offsets', action='store_true')
+    p.add_argument('--param', action='append', default=[])
     p.add_argument('schema')
     p.add_argument('files', nargs='+')
     args = p.parse_args()
@@ -208,7 +231,8 @@ def main():
         imports_json = os.path.join(tmp, 'imports.json')
         with open(imports_json, 'w') as f:
             json.dump(imports, f)
-        out = subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema_json, '--imports', imports_json] + (['--offsets'] if args.offsets else []) + files,
+        params = ['--params', json.dumps(root_args(ksy, args.param))] if args.param else []
+        out = subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema_json, '--imports', imports_json] + params + (['--offsets'] if args.offsets else []) + files,
                              check=True, capture_output=True, text=True).stdout
         reference = [json.loads(line) for line in out.splitlines()]
 
@@ -219,6 +243,8 @@ def main():
             cmd = [tool, schema, path] + (['--offsets'] if args.offsets else ['--dump', 'json'])
             if args.import_path:
                 cmd += ['--import-path', args.import_path]
+            for param in args.param:
+                cmd += ['--param', param]
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode != 0:
                 mine.append({'error': r.stderr.strip()})

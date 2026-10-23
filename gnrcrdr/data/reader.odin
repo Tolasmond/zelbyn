@@ -28,6 +28,7 @@ Read_Error :: enum {
 	Wrong_Type,            // an expression casts a value to a user type it was not read as (.as<t> of a switch-on field)
 	Undecided_Endianness,  // the endian switch-on of a type matches none of its cases (Kaitai's UndecidedEndiannessError)
 	Decompression_Failed,  // the bytes of a field with process: zlib are not a valid zlib stream
+	Invalid_Arguments,     // the arguments given for the params of the schema's top-level type are not one of each param's type
 }
 
 // Bounds-checked cursor over a byte slice. Every read either succeeds and

@@ -279,7 +279,7 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		return resolve_call(r, e, x)
 	case mdata.Array_Literal:
 		return resolve_array_literal(r, e, x)
-	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.String_Length, mdata.Decode, mdata.Substring, mdata.To_Bytes, mdata.To_S, mdata.To_I, mdata.Array_Method, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref, mdata.Switch_Cast, mdata.Bytes_Literal:
+	case mdata.Instance, mdata.Field_Ref, mdata.Size, mdata.String_Length, mdata.Decode, mdata.Substring, mdata.To_Bytes, mdata.Root_Arg, mdata.To_S, mdata.To_I, mdata.Array_Method, mdata.Io, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Value_Ref, mdata.Switch_Cast, mdata.Bytes_Literal:
 		assert(e.type != .Unresolved, "resolve: a resolved variant without a type")
 	case:
 		panic("resolve: empty expression")
@@ -619,7 +619,7 @@ reach_of :: proc(e: ^mdata.Expr) -> int {
 		return x.stream == nil ? 0 : reach_of(x.stream)
 	case mdata.Io_Eof:
 		return x.stream == nil ? 0 : reach_of(x.stream)
-	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Repeat_Index, mdata.Repeat_Element:
+	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Root_Arg, mdata.Repeat_Index, mdata.Repeat_Element:
 		return 0
 	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast, mdata.Call:
 		panic("reach_of: unresolved expression")
