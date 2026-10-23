@@ -179,6 +179,7 @@ EVAL_CASES := [?]Eval_Case {
 	{text = "_io.pos", want = "9"},
 	{text = "_io.size", want = "12"},
 	{text = "_io.eof", want = "false"},
+	{text = "_root._io.size + hdr._io.size * 100", want = "1212"},
 	{text = "data.size", err = .Absent_Field}, // itself: not read yet
 
 	// strings, compared byte by byte; .length counts code points

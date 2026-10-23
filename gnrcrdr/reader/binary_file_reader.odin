@@ -235,21 +235,25 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, $SPANS: bool) -> d
 		}
 		return .None
 	case mdata.Until_Count:
-		for i := 0;; i += 1 {
+		// read is the count of elements read once element i is
+		for read := 1;; read += 1 {
+			i := read - 1
 			start, start_bits := d.r.pos, dat.bit_pos(&d.r)
 			reserve_growing(d, s, i + 1, SPANS)
 			n := len(s.slots[0])
 			read_element(d, s, node, i, SPANS) or_return
 
 			// _ is the element just read; an element of a switch-on that chose
-			// no case added none, and _ then has no value
+			// no case added none, and _ then has no value. _index is the count
+			// of elements read, as the official compiler's JavaScript, C++ and
+			// Java increment it before the test; its Python tests first
 			values := s.slots[0]
 			done: bool
 			err: dat.Read_Error
 			if len(values) > n {
-				done, err = eval_bool(d, c.expr, i, values[n])
+				done, err = eval_bool(d, c.expr, read, values[n])
 			} else {
-				done, err = eval_bool(d, c.expr, i, nil)
+				done, err = eval_bool(d, c.expr, read, nil)
 			}
 			if err != .None do return fail(d, err, d.r.pos)
 			if done do return .None

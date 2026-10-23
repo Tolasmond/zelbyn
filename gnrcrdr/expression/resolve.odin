@@ -613,7 +613,13 @@ reach_of :: proc(e: ^mdata.Expr) -> int {
 		return reach_of(x.instance)
 	case mdata.Switch_Cast:
 		return reach_of(x.operand)
-	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element:
+	case mdata.Io_Pos:
+		return x.stream == nil ? 0 : reach_of(x.stream)
+	case mdata.Io_Size:
+		return x.stream == nil ? 0 : reach_of(x.stream)
+	case mdata.Io_Eof:
+		return x.stream == nil ? 0 : reach_of(x.stream)
+	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Repeat_Index, mdata.Repeat_Element:
 		return 0
 	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast, mdata.Call:
 		panic("reach_of: unresolved expression")
@@ -728,30 +734,7 @@ struct_node :: proc(e: ^mdata.Expr) -> ^mdata.Node {
 
 @(private = "file")
 resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
-	if name, is_name := m.operand.variant.(mdata.Name); is_name && name.name == "_io" {
-		if r.scope.instance != nil {
-			// a value instance is evaluated also once its set instance is
-			// decoded, in the stream the decoder then keeps; the position
-			// changes as the stream is read, so a value that depends on it
-			// is the one it had when first used, as in Kaitai
-			r.scope.types[len(r.scope.types) - 1].keeps_stream = true
-			if m.name == "pos" || m.name == "eof" do r.scope.instance.cached = true
-		}
-		switch m.name {
-		case "pos":
-			e.variant = mdata.Io_Pos{}
-		case "size":
-			e.variant = mdata.Io_Size{}
-		case "eof":
-			e.variant = mdata.Io_Eof{}
-			e.type = .Bool
-			return true
-		case:
-			return fail(r, .Unsupported, e.offset, "_io.%s is not supported; only _io.pos, _io.size and _io.eof are", m.name)
-		}
-		e.type = .Int
-		return true
-	}
+	if name, is_name := m.operand.variant.(mdata.Name); is_name && name.name == "_io" do return resolve_stream_member(r, e, nil, m.name)
 
 	if m.name == "_sizeof" do return resolve_member_size_of(r, e, m.operand)
 
@@ -788,7 +771,7 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 	case .Struct:
 		return resolve_field(r, e, operand, m.name)
 	case .Stream:
-		return fail(r, .Unsupported, e.offset, "%s of a stream other than _io is not supported", m.name)
+		return resolve_stream_member(r, e, operand, m.name)
 	case .Array, .Bytes:
 		switch m.name {
 		case "size":
@@ -829,6 +812,50 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 		}
 	}
 	return fail(r, .Unsupported, e.offset, "%s has no member %s (of methods, only _sizeof, .size, .length, .first, .last, .min, .max, .to_i and .to_s are supported)", type_name(operand.type), m.name)
+}
+
+// stream.name, where name is pos, size or eof, of stream, a Stream
+// expression, or of _io itself when it is nil.
+@(private = "file")
+resolve_stream_member :: proc(r: ^Resolver, e: ^mdata.Expr, stream: ^mdata.Expr, name: string) -> bool {
+	if r.scope.instance != nil {
+		// a value instance is evaluated also once its set instance is
+		// decoded, in the stream the decoder then keeps; the position
+		// changes as the stream is read, so a value that depends on it is
+		// the one it had when first used, as in Kaitai
+		if stream == nil do r.scope.types[len(r.scope.types) - 1].keeps_stream = true
+		else do keep_streams(stream)
+		if name == "pos" || name == "eof" do r.scope.instance.cached = true
+	}
+	switch name {
+	case "pos":
+		e.variant = mdata.Io_Pos{stream}
+	case "size":
+		e.variant = mdata.Io_Size{stream}
+	case "eof":
+		e.variant = mdata.Io_Eof{stream}
+		e.type = .Bool
+		return true
+	case:
+		return fail(r, .Unsupported, e.offset, "%s of a stream is not supported; only .pos, .size and .eof are", name)
+	}
+	e.type = .Int
+	return true
+}
+
+// Marks the sets whose streams stream, a Stream expression in a value
+// instance, gives keeps_stream: those of _parent and the like too, as the
+// value instance can be evaluated once they are no longer decoded. A
+// field's is marked as its _io is resolved; the root's is always found.
+@(private = "file")
+keep_streams :: proc(stream: ^mdata.Expr) {
+	#partial switch x in stream.variant {
+	case mdata.Io:
+		if inst, is_instance := x.instance.variant.(mdata.Instance); is_instance && !inst.root do inst.node.keeps_stream = true
+	case mdata.Ternary:
+		keep_streams(x.then)
+		keep_streams(x.otherwise)
+	}
 }
 
 // operand.name, where name is first, last, min or max, and operand an

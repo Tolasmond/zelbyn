@@ -291,11 +291,14 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 			return len(o), .None
 		}
 	case mdata.Io_Pos:
-		return stream_of(d, ctx.self).pos, .None
+		r := stream_reader(d, x.stream, ctx) or_return
+		return r.pos, .None
 	case mdata.Io_Size:
-		return len(stream_of(d, ctx.self).data), .None
+		r := stream_reader(d, x.stream, ctx) or_return
+		return len(r.data), .None
 	case mdata.Io_Eof:
-		return dat.at_eof(stream_of(d, ctx.self)), .None
+		r := stream_reader(d, x.stream, ctx) or_return
+		return dat.at_eof(r), .None
 	case mdata.Repeat_Index:
 		assert(ctx.index >= 0, "eval: _index outside a repeat")
 		return ctx.index, .None
@@ -438,6 +441,22 @@ stream_of :: proc(d: ^Decoder, instance: ^fld.Instance) -> ^dat.Reader {
 	kept, ok := &d.kept[instance]
 	assert(ok, "stream_of: the stream of the instance was not kept")
 	return &kept.r
+}
+
+// The reader of stream, a Stream expression evaluated in ctx (Io_Pos), or
+// when it is nil, of _io (stream_of).
+@(private = "file", require_results)
+stream_reader :: proc(d: ^Decoder, stream: ^mdata.Expr, ctx: Eval_Context) -> (r: ^dat.Reader, err: dat.Read_Error) {
+	if stream == nil do return stream_of(d, ctx.self), .None
+	#partial switch x in stream.variant {
+	case mdata.Ternary:
+		cond := eval(d, x.cond, ctx) or_return
+		return stream_reader(d, cond.(bool) ? x.then : x.otherwise, ctx)
+	case mdata.Io:
+		v := eval(d, x.instance, ctx) or_return
+		return stream_of(d, v.(^fld.Instance)), .None
+	}
+	panic("stream_reader: not a Stream expression")
 }
 
 // Evaluates value instance inst, which is cached, in self, its context: the

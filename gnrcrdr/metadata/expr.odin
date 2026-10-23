@@ -293,12 +293,20 @@ Array_Method_Kind :: enum {
 	Max,
 }
 
-// _io.pos, _io.size and _io.eof: the position in the stream of the set
-// instance being decoded, its length, and whether the position is at the
-// end.
-Io_Pos :: struct {}
-Io_Size :: struct {}
-Io_Eof :: struct {}
+// .pos, .size and .eof of stream, a Stream expression (X._io, or a ?: of
+// those): the position in it, its length, and whether the position is at
+// the end. stream is nil for _io itself, the stream of the set instance
+// being decoded, or in a value instance, of the instance it is evaluated
+// for.
+Io_Pos :: struct {
+	stream: ^Expr,
+}
+Io_Size :: struct {
+	stream: ^Expr,
+}
+Io_Eof :: struct {
+	stream: ^Expr,
+}
 
 // _index: the index of the element being read.
 Repeat_Index :: struct {}
