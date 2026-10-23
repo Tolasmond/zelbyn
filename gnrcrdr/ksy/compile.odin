@@ -26,7 +26,8 @@ import "core:strings"
 //     license and tags (ignored); seq, types, instances, enums, doc,
 //     doc-ref and to-string (parsed, and otherwise ignored)
 //   - meta in a type, with the same keys but imports, whose endian,
-//     bit-endian and encoding apply in it and the types declared in it
+//     bit-endian and encoding apply in it and the types declared in it; its
+//     endian can be a switch-on, chosen as each instance is read
 //   - imported schemas, whose top-level types are used by their meta id,
 //     each with its own meta
 //   - attributes: id (without one, named _unnamed and their index in seq,
@@ -61,10 +62,11 @@ import "core:strings"
 // value that read bytes, params of other types (struct, io, any) and on the
 // top-level type of the schema compiled, % of a float, array literals of
 // arrays, valid on a float, min and max on a type other than an integer, an
-// endian that is a switch-on, imports in a type, and in a type that contains
-// itself, the members of the sets enclosing it, other than through the
-// schema's _root, and an instance that refers to itself through a field of
-// its type.
+// endian that is a switch-on on the top-level type or in a type that
+// contains itself, a bit-endian that is a switch-on, imports in a type, and
+// in a type that contains itself, the members of the sets enclosing it,
+// other than through the schema's _root, and an instance that refers to
+// itself through a field of its type.
 
 Error_Kind :: enum {
 	None,
@@ -134,6 +136,7 @@ Compiler :: struct {
 	instances:       map[^mdata.Value_Instance]^Instance_Source, // in scratch
 	parse_instances: map[^mdata.Node]^Parse_Source,              // in scratch
 	type_defs:       [dynamic]Set_Type,                          // the type of each set compiled, for sizes; in scratch
+	order:           Maybe(endian.Byte_Order),                   // the byte order of the set of a type whose endian is a switch-on being compiled (compile_type), which the types declared in it take
 	deferred:        [dynamic]Deferred,                          // the instances that nothing referred to by the end of their set, compiled once every set is; in scratch
 	err:             Error,
 }
@@ -183,9 +186,11 @@ new_schema :: proc(c: ^Compiler, path: string) -> ^Schema {
 // over those of the type it is declared in, as in Kaitai.
 @(private = "file")
 Meta :: struct {
-	bit_endian: endian.Byte_Order,        // bit-endian; .Big when absent, as in Kaitai
-	endian:     Maybe(endian.Byte_Order), // endian
-	encoding:   Maybe(mdata.Encoding),    // encoding
+	bit_endian:    endian.Byte_Order,        // bit-endian; .Big when absent, as in Kaitai
+	endian:        Maybe(endian.Byte_Order), // endian
+	endian_switch: ^yml.Node,                // endian when it is a switch-on, chosen as each instance of the type that declares it is read; nil otherwise
+	endian_owner:  string,                   // the type that declares endian_switch
+	encoding:      Maybe(mdata.Encoding),    // encoding
 }
 
 // Parses src, the text of c.schema, in scratch, and returns the root of its
@@ -232,6 +237,7 @@ Parse_Source :: struct {
 	entry:     yml.Entry, // its key and spec in instances
 	td:        ^Type_Def,
 	scope:     expr.Scope, // that of the set's fields
+	order:     Maybe(endian.Byte_Order), // Compiler.order for the set
 	compiling: bool,
 }
 
@@ -430,6 +436,8 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 	ff.name = node.name
 	ff.root = node
 	c.root = node
+	// nothing is read before the root that its order could depend on
+	if declares_endian_switch(top) do return fail(c, .Unsupported, top.meta.endian_switch, "endian: switch-on is not supported on the top-level type of the schema compiled, except in an imported schema")
 	compile_fields(c, top, node, {node}) or_return
 
 	// the instances that nothing referred to, now that every field they
@@ -489,9 +497,16 @@ load_schema :: proc(c: ^Compiler, root: ^yml.Node) -> (top: ^Type_Def, ok: bool)
 meta_of :: proc(c: ^Compiler, meta: ^yml.Node, inherited: Meta) -> (m: Meta, ok: bool) {
 	m = inherited
 	if n := get(meta, "endian"); n != nil {
-		m.endian = byte_order(c, n, "endian") or_return
+		if n.kind == .Map {
+			check_endian_switch(c, n) or_return
+			m.endian, m.endian_switch = nil, n
+		} else {
+			m.endian = byte_order(c, n, "endian") or_return
+			m.endian_switch = nil
+		}
 	}
 	if n := get(meta, "bit-endian"); n != nil {
+		if n.kind == .Map do return m, fail(c, .Unsupported, n, "bit-endian: switch-on is not supported")
 		m.bit_endian = byte_order(c, n, "bit-endian") or_return
 	}
 	if n := get(meta, "encoding"); n != nil {
@@ -556,7 +571,6 @@ load_import :: proc(c: ^Compiler, item: ^yml.Node, path: string) -> (top: ^Type_
 
 @(private = "file")
 byte_order :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (order: endian.Byte_Order, ok: bool) {
-	if n.kind == .Map && get(n, "switch-on") != nil do return .Little, fail(c, .Unsupported, n, "%s: switch-on is not supported", what)
 	text := expect_scalar(c, n, what) or_return
 	switch text {
 	case "le":
@@ -565,6 +579,19 @@ byte_order :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (order: endian.B
 		return .Big, true
 	}
 	return .Little, fail(c, .Invalid, n, "%s must be le or be, not %q", what, text)
+}
+
+// Checks n, an endian that is a switch-on: its keys, and that each case is
+// le or be. The expressions are compiled with the type (compile_type).
+@(private = "file")
+check_endian_switch :: proc(c: ^Compiler, n: ^yml.Node) -> bool {
+	check_keys(c, n, {what = "endian", allowed = {"switch-on", "cases"}}) or_return
+	if get(n, "switch-on") == nil do return fail(c, .Invalid, n, "endian: a mapping needs switch-on")
+	cases := get(n, "cases")
+	if cases == nil do return fail(c, .Invalid, n, "endian: switch-on needs cases")
+	expect_map(c, cases, "cases") or_return
+	for e in cases.entries do byte_order(c, e.value, "endian") or_return
+	return true
 }
 
 // An encoding the decoder supports: its canonical name and its aliases,
@@ -675,6 +702,8 @@ build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_De
 			td.meta = type_meta(c, name, meta, parent.meta) or_return
 		}
 	}
+	// for the types declared in it, which inherit its meta
+	if declares_endian_switch(td) do td.meta.endian_owner = name
 	if n := get(spec, "to-string"); n != nil {
 		check_to_string(c, n) or_return
 	}
@@ -926,7 +955,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 		} else {
 			p := new_node(c, display_name(c, e.value, e.key.text) or_return, e.key.text)
 			src := new(Parse_Source, c.scratch)
-			src^ = {entry = e, td = td, scope = scope}
+			src^ = {entry = e, td = td, scope = scope, order = c.order}
 			c.parse_instances[p] = src
 			append(&parse_instances, p)
 		}
@@ -1315,6 +1344,9 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 	if src.compiling do return fail(c, .Invalid, src.entry.key, "instance %s refers to itself", inst.ref_name)
 	src.compiling = true
 	defer src.compiling = false
+	order := c.order
+	defer c.order = order
+	c.order = src.order
 
 	spec := src.entry.value
 	pos := get(spec, "pos")
@@ -1613,10 +1645,17 @@ builtin_type :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id, type_n
 	if prim, order, is_primitive := primitive(type_name); is_primitive {
 		sizes := TYPE_SIZE
 		node.type = prim
-		if order == nil && td.meta.endian == nil && sizes[prim] > 1 {
+		meta_order := td.meta.endian
+		if meta_order == nil && td.meta.endian_switch != nil && sizes[prim] > 1 && order == nil {
+			// the order of the instance of the type that declares the
+			// switch-on, as the instance that reads this one gives it
+			meta_order = c.order
+			if meta_order == nil do return true, false, fail(c, .Unsupported, n, "%s: %s takes its byte order from the endian switch-on of type %s, but is read outside it", id, type_name, td.meta.endian_owner)
+		}
+		if order == nil && meta_order == nil && sizes[prim] > 1 {
 			return true, false, fail(c, .Invalid, n, "%s: %s needs le or be, or meta endian", id, type_name)
 		}
-		node.order = order.? or_else (td.meta.endian.? or_else .Little)
+		node.order = order.? or_else (meta_order.? or_else .Little)
 		return true, false, true
 	}
 	if type_name == "str" || type_name == "strz" {
@@ -1917,11 +1956,73 @@ compile_user :: proc(c: ^Compiler, user: ^Type_Def, node: ^mdata.Node, n: ^yml.N
 		if p.type != .Set do continue
 		arg_sets: []^mdata.Node
 		node.args, arg_sets = compile_args(c, n, id, user, call, scope) or_return
-		return compile_fields(c, user, node, chain_of(c, field_scope.types, user, node), arg_sets)
+		return compile_type(c, user, node, field_scope, arg_sets)
 	}
-	compile_fields(c, user, node, chain_of(c, field_scope.types, user, node)) or_return
+	compile_type(c, user, node, field_scope) or_return
 	node.args, _ = compile_args(c, n, id, user, call, scope) or_return
 	return true
+}
+
+// Compiles the fields of user into node, a set of a field of scope. A type
+// whose endian is a switch-on is compiled twice: little-endian into node,
+// and big-endian into a set of its own, which node's Order_Switch chooses
+// as each instance is read. The types declared in it take the order of the
+// set they are compiled in (Compiler.order). Expressions refer to node's
+// members, which have the same slots as the other set's.
+@(private = "file")
+compile_type :: proc(c: ^Compiler, user: ^Type_Def, node: ^mdata.Node, field_scope: expr.Scope, arg_sets: []^mdata.Node = nil) -> bool {
+	if !declares_endian_switch(user) do return compile_fields(c, user, node, chain_of(c, field_scope.types, user, node), arg_sets)
+
+	sw_node := user.meta.endian_switch
+	// inside itself, each instance would choose its own order, which a set
+	// reused for it does not
+	if user.compiling != nil do return fail(c, .Unsupported, sw_node, "type %s, whose endian is a switch-on, contains itself, which is not supported", user.name)
+	order := c.order
+	defer c.order = order
+
+	c.order = .Little
+	chain := chain_of(c, field_scope.types, user, node)
+	compile_fields(c, user, node, chain, arg_sets) or_return
+	big := new_node(c, node.name, node.ref_name)
+	big.type = .Set
+	c.order = .Big
+	compile_fields(c, user, big, chain_of(c, field_scope.types, user, big), arg_sets) or_return
+
+	// evaluated in the instance, before its fields are read
+	schema := c.schema
+	defer c.schema = schema
+	c.schema = user.schema
+	scope := scope_of(c, user, chain)
+	on := compile_expr(c, get(sw_node, "switch-on"), "switch-on", scope, .Unresolved) or_return
+	#partial switch on.type {
+	case .Int, .Bool, .String, .Bytes:
+	case:
+		return fail(c, .Unsupported, get(sw_node, "switch-on"), "endian: switch-on over %s is not supported; only over an integer, a boolean, a string or a byte array", expr.type_name(on.type))
+	}
+	sw := new(mdata.Order_Switch, c.allocator)
+	sw.big = big
+	cases := make([dynamic]mdata.Order_Case, c.allocator)
+	for e in get(sw_node, "cases").entries {
+		case_order := byte_order(c, e.value, "endian") or_return
+		if e.key.text == "_" && e.key.style == .Plain {
+			sw.default = case_order
+			continue
+		}
+		key := compile_expr(c, e.key, "a case", scope, on.type) or_return
+		test := new_expr(c, .Bool, mdata.Binary{.Eq, on, key})
+		append(&cases, mdata.Order_Case{test, case_order})
+	}
+	sw.cases = cases[:]
+	node.order_switch = sw
+	return true
+}
+
+// Whether td's own meta has an endian that is a switch-on.
+@(private = "file")
+declares_endian_switch :: proc(td: ^Type_Def) -> bool {
+	sw := td.meta.endian_switch
+	meta := get(td.spec, "meta")
+	return sw != nil && meta != nil && get(meta, "endian") == sw
 }
 
 // The arguments of call, of user, the type of id given in n, compiled in

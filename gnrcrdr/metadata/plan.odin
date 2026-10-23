@@ -24,6 +24,7 @@ Node :: struct {
 	children:        []^Node,           // Set only, in order; nil when switch_on is set
 	slot_count:      int,               // Set only: the slots in each instance (count_slots), recorded when children is set
 	switch_on:       ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
+	order_switch:    ^Order_Switch,     // Set only: of a type whose endian is a switch-on, compiled little-endian; it chooses, as each instance is read, this set or the one compiled big-endian; nil otherwise
 	recursive:       ^Node,             // Set only: for a field of a type inside the same type (a recursive type), the set of that type that encloses it, whose children, instances, parse instances, params and slot count it is given, once that set is compiled (members); nil otherwise
 	instances:       []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
 	parse_instances: []^Node,           // Set only: Kaitai's instances with pos, each read at an offset (see pos)
@@ -211,6 +212,23 @@ Switch :: struct {
 	cases:        []Switch_Case,
 	default:      ^Node,  // nil when there is no _ case
 	default_type: string, // the user type of default, for casts (Switch_Cast); "" for any other type
+}
+
+// The byte order of each instance of a set (Kaitai's endian with
+// switch-on), chosen once the instance's frame is pushed, before its fields
+// are read: that of the first case whose test, a Bool expression in the
+// instance, is true, else default; with neither, Undecided_Endianness. The
+// set itself is the little-endian one, and big has the same slots and
+// members, compiled big-endian.
+Order_Switch :: struct {
+	cases:   []Order_Case,
+	default: Maybe(endian.Byte_Order),
+	big:     ^Node,
+}
+
+Order_Case :: struct {
+	test:  ^Expr,
+	order: endian.Byte_Order,
 }
 
 // Instance.choice of the _ case, for the front ends, which do not import

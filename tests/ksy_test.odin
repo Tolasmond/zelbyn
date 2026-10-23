@@ -58,7 +58,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  title: t\n", .Invalid, 2, 3, "meta has no id"},
 	{"meta:\n  id: T\n", .Invalid, 2, 7, `meta id "T" is not an identifier`},
 	{"meta:\n  id: t\n  endian: little\n", .Invalid, 3, 11, `endian must be le or be, not "little"`},
-	{"meta:\n  id: t\n  endian:\n    switch-on: x\n", .Unsupported, 4, 5, "endian: switch-on is not supported"},
+	{"meta:\n  id: t\n  endian:\n    switch-on: x\n", .Invalid, 4, 5, "endian: switch-on needs cases"},
+	{"meta:\n  id: t\n  endian:\n    switch-on: x\n    cases:\n      1: le\n", .Unsupported, 4, 5, "endian: switch-on is not supported on the top-level type of the schema compiled"},
 	{"meta:\n  id: t\n  encoding: Shift_JIS\n", .Unsupported, 3, 13, `encoding "Shift_JIS" is not supported; only ASCII, UTF-8, UTF-16LE, UTF-16BE, UTF-32LE, UTF-32BE, ISO-8859-1, windows-1251, windows-1252 and IBM437 are`},
 	{"meta:\n  id: t\n  encoding: UTF-16\n", .Unsupported, 3, 13, `encoding "UTF-16" is not supported`},
 	{"meta:\n  id: t\n  ks-version: 0.12\n", .Unsupported, 3, 15, "ks-version 0.12 is newer than 0.11, the Kaitai version gnrcrdr follows"},
@@ -79,7 +80,12 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "types:\n  u:\n    meta:\n      ks-debug: true\n", .Unsupported, 7, 7, "type u: meta: ks-debug is not supported"},
 	{HEAD + "types:\n  u:\n    meta:\n      imports: [x]\n", .Unsupported, 7, 7, "type u: imports in a type are not supported"},
 	{HEAD + "types:\n  u:\n    meta:\n      id: U\n", .Invalid, 7, 11, `meta id "U" is not an identifier`},
-	{HEAD + "types:\n  u:\n    meta:\n      endian:\n        switch-on: x\n", .Unsupported, 8, 9, "endian: switch-on is not supported"},
+	{HEAD + "types:\n  u:\n    meta:\n      endian:\n        switch-on: x\n", .Invalid, 8, 9, "endian: switch-on needs cases"},
+	{HEAD + "types:\n  u:\n    meta:\n      endian:\n        switch-on: x\n        cases:\n          1: middle\n", .Invalid, 10, 14, `endian must be le or be, not "middle"`},
+	{HEAD + "types:\n  u:\n    meta:\n      endian:\n        switch-on: x\n        cases:\n          1: le\n        size: 1\n", .Invalid, 11, 9, `endian: unknown key "size"`},
+	{HEAD + "seq:\n  - id: a\n    type: u\ntypes:\n  u:\n    meta:\n      endian:\n        switch-on: _root.a\n        cases:\n          1: le\n    seq:\n      - id: b\n        type: u\n        if: false\n", .Unsupported, 11, 9, "type u, whose endian is a switch-on, contains itself, which is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: u\ntypes:\n  u:\n    meta:\n      endian:\n        switch-on: 1.5\n        cases:\n          1: le\n", .Unsupported, 11, 20, "endian: switch-on over a float is not supported"},
+	{"meta:\n  id: t\n  bit-endian:\n    switch-on: x\n", .Unsupported, 4, 5, "bit-endian: switch-on is not supported"},
 	{HEAD + "types:\n  u:\n    meta:\n      encoding: Shift_JIS\n", .Unsupported, 7, 17, `encoding "Shift_JIS" is not supported`},
 	{HEAD + "types:\n  u:\n    meta:\n      ks-version: 0.12\n", .Unsupported, 7, 19, "ks-version 0.12 is newer than 0.11"},
 	{"meta:\n  id: t\nseq:\n  - id: a\n    type: u\ntypes:\n  u:\n    meta:\n      encoding: ASCII\n    seq:\n      - id: b\n        type: w\n  w:\n    seq:\n      - id: s\n        type: strz\n", .Invalid, 16, 15, "s: str needs an encoding, or meta encoding"},
@@ -1398,6 +1404,109 @@ t[0].inner[0].deeper[0].s[0] = "hi"
 t[0].inner[0].other[0].w[0] = 513
 t[0].other[0].w[0] = 3
 `)
+
+	// an endian that is a switch-on is chosen as each instance of its type
+	// is read, in the instance (_root.bom), and the types declared in the
+	// type take it (inner), but for one with its own (fixed); a parse
+	// instance has its instance's, whether read once the root is (peek) or
+	// by an expression (probe), and a case can be _
+	orders := HEAD + `seq:
+  - id: bom
+    type: u1
+  - id: bodies
+    type: body
+    repeat: expr
+    repeat-expr: 2
+  - id: probe
+    size: (bodies[1].inner.peek & 3) + (bodies[0].via & 1)
+  - id: sig
+    size: 2
+  - id: tagged
+    type: tagged
+types:
+  body:
+    meta:
+      endian:
+        switch-on: _root.bom
+        cases:
+          1: le
+          2: be
+    seq:
+      - id: a
+        type: u2
+      - id: inner
+        type: inner
+      - id: fixed
+        type: fixed
+    instances:
+      later:
+        pos: 1
+        type: u2
+      via:
+        value: inner.peek + 1
+    types:
+      inner:
+        seq:
+          - id: b
+            type: u4
+          - id: c
+            type: u2le
+        instances:
+          peek:
+            pos: 1
+            type: u2
+  fixed:
+    meta:
+      endian: be
+    seq:
+      - id: d
+        type: u2
+  tagged:
+    meta:
+      endian:
+        switch-on: _root.sig
+        cases:
+          '[0x49, 0x49]': le
+          _: be
+    seq:
+      - id: v
+        type: u2
+`
+	expect_dump(t, "endian switch-on, le", ksy_dump(t, orders, {1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 48, 73, 73, 171, 205}), `t[0].bom[0] = 1
+t[0].bodies[0].a[0] = 513
+t[0].bodies[0].inner[0].b[0] = 100992003
+t[0].bodies[0].inner[0].c[0] = 2055
+t[0].bodies[0].inner[0].peek[0] = 513
+t[0].bodies[0].fixed[0].d[0] = 2314
+t[0].bodies[0].later[0] = 513
+t[0].bodies[1].a[0] = 3083
+t[0].bodies[1].inner[0].b[0] = 269422093
+t[0].bodies[1].inner[0].c[0] = 4625
+t[0].bodies[1].inner[0].peek[0] = 513
+t[0].bodies[1].fixed[0].d[0] = 4884
+t[0].bodies[1].later[0] = 513
+t[0].probe[0] = <1 bytes> 30
+t[0].sig[0] = <2 bytes> 49 49
+t[0].tagged[0].v[0] = 52651
+`)
+	expect_dump(t, "endian switch-on, be", ksy_dump(t, orders, {2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 48, 49, 50, 77, 77, 171, 205}), `t[0].bom[0] = 2
+t[0].bodies[0].a[0] = 258
+t[0].bodies[0].inner[0].b[0] = 50595078
+t[0].bodies[0].inner[0].c[0] = 2055
+t[0].bodies[0].inner[0].peek[0] = 258
+t[0].bodies[0].fixed[0].d[0] = 2314
+t[0].bodies[0].later[0] = 258
+t[0].bodies[1].a[0] = 2828
+t[0].bodies[1].inner[0].b[0] = 219025168
+t[0].bodies[1].inner[0].c[0] = 4625
+t[0].bodies[1].inner[0].peek[0] = 258
+t[0].bodies[1].fixed[0].d[0] = 4884
+t[0].bodies[1].later[0] = 258
+t[0].probe[0] = <3 bytes> 30 31 32
+t[0].sig[0] = <2 bytes> 4d 4d
+t[0].tagged[0].v[0] = 43981
+`)
+	expect_dump(t, "endian switch-on, no case", ksy_dump(t, orders, {3, 1, 2}), "error: Undecided_Endianness at 1 in t[0].bodies[0]")
 }
 
 // switch-on cases of primitive, bit and string types, read as fields of

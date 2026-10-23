@@ -495,6 +495,7 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	}
 	if len(d.frames) >= CHECK_DEPTH && (len(d.frames) >= MAX_DEPTH || stack_used(d) > MAX_STACK) do return fail(d, .Too_Deep, d.r.pos)
 
+	node := node
 	instance, cells := fld.make_instance(d.arena, node.slot_count, choice, SPANS)
 	push(s, 0, instance)
 	for v, k in args {
@@ -504,7 +505,8 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	}
 
 	// on error the frame is left pushed, like the path segment
-	append(&d.frames, Frame{instance, len(d.streams), len(d.path)})
+	append(&d.frames, Frame{instance, len(d.streams), len(d.path), node})
+	if node.order_switch != nil do node = choose_order(d, node) or_return
 
 	slot := len(node.parse_instances)
 	for child in node.children {
@@ -521,6 +523,28 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 
 	pop(&d.frames)
 	return .None
+}
+
+// The set of node, a set with an Order_Switch, to read the instance of the
+// innermost frame as: node, compiled little-endian, or its big-endian set,
+// which the frame then records. Not inlined: only types whose endian is a
+// switch-on call it.
+@(private = "file", require_results)
+choose_order :: #force_no_inline proc(d: ^Decoder, node: ^mdata.Node) -> (set: ^mdata.Node, err: dat.Read_Error) {
+	sw := node.order_switch
+	order, decided := sw.default.?
+	for c in sw.cases {
+		is, test_err := eval_bool(d, c.test)
+		if test_err != .None do return nil, fail(d, test_err, d.r.pos)
+		if is {
+			order, decided = c.order, true
+			break
+		}
+	}
+	if !decided do return nil, fail(d, .Undecided_Endianness, d.r.pos)
+	if order == .Little do return node, .None
+	d.frames[len(d.frames) - 1].set = sw.big
+	return sw.big, .None
 }
 
 // Keeps parse instance node of instance, in slot k, which no expression
@@ -580,6 +604,7 @@ keep_stream :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance) {
 // put back as they were. It is Too_Deep once decoding has used MAX_STACK.
 @(private, require_results)
 read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int, $SPANS: bool) -> dat.Read_Error {
+	node := node
 	if stack_used(d) > MAX_STACK {
 		append(&d.path, Path_Segment{node.name, 0})
 		return fail(d, .Too_Deep, d.r.pos)
@@ -588,6 +613,11 @@ read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.N
 	for j >= 0 && d.frames[j].instance != instance do j -= 1
 	if j < 0 do return read_kept(d, instance, node, k, SPANS)
 	frame := d.frames[j]
+	// as the set the instance was read as has it: an expression compiled
+	// outside a type whose endian is a switch-on refers to the parse
+	// instances of its little-endian sets, also for an instance of one of
+	// the big-endian ones (Order_Switch)
+	node = frame.set.parse_instances[k]
 
 	cells := fld.instance_cells(instance)
 	// from here on the slot is not nil, so the instance is read only once
