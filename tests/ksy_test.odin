@@ -31,7 +31,10 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 
 	// keys: Kaitai keys outside the subset, unknown keys, misplaced extensions
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    pos: 1\n", .Unsupported, 7, 5, "attribute a: pos is not supported"},
-	{HEAD + "seq:\n  - id: a\n    size: 1\n    process: xor(1)\n", .Unsupported, 7, 5, "process is not supported"},
+	{HEAD + "seq:\n  - id: a\n    size: 1\n    process: xor(1)\n", .Unsupported, 7, 14, "a: process xor(1) is not supported; only zlib is"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    process: zlib\n", .Invalid, 7, 5, "a: process applies only to a byte array or a user type"},
+	{HEAD + "seq:\n  - id: a\n    type: s\n    process: zlib\ntypes:\n  s: {}\n", .Invalid, 7, 5, "a: process needs size, size-eos or terminator"},
+	{HEAD + "seq:\n  - id: a\n    size: 2\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n    process: zlib\n", .Unsupported, 11, 5, "a: process on a switch-on with a case that is not a user type is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    io: _root._io\n", .Unsupported, 7, 5, "attribute a: io is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    sizee: 1\n", .Invalid, 7, 5, `attribute a: unknown key "sizee"`},
 	{HEAD + "params:\n  - id: p\n    type: u1\n", .Unsupported, 4, 1, "params on the top-level type are not supported, except in an imported schema"},
@@ -579,6 +582,72 @@ t[0].b[0] = <2 bytes> 01 02
 t[0].c[0] = <1 bytes> 03
 t[0].d[0] = 4
 `)
+
+	// process: zlib decompresses the bytes of a byte array, once pad-right
+	// is removed (a) or at a terminator (b), and the substream of a user
+	// type, whose offsets count from its field's start (e); also the bytes
+	// of a switch-on that chooses no case (f)
+	zlib_src := HEAD + `seq:
+  - id: len_a
+    type: u1
+  - id: a
+    size: len_a + 2
+    pad-right: 0
+    process: zlib
+  - id: b
+    terminator: 0
+    process: zlib
+  - id: len_e
+    type: u1
+  - id: e
+    type:
+      switch-on: a.size
+      cases:
+        11: inner
+    size: len_e
+    process: zlib
+  - id: lens
+    type: u1
+    repeat: expr
+    repeat-expr: 2
+  - id: d
+    size: lens[_index]
+    process: zlib
+    repeat: expr
+    repeat-expr: 2
+  - id: len_f
+    type: u1
+  - id: f
+    type:
+      switch-on: a.size
+      cases:
+        99: inner
+    size: len_f
+    process: zlib
+types:
+  inner:
+    seq:
+      - id: x
+        type: u1
+      - id: rest
+        size-eos: true
+`
+	zlib_input := []byte{0x13, 0x78, 0x9c, 0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x57, 0x28, 0xcf, 0x2f, 0xca, 0x49, 0x01, 0x00, 0x1a, 0x0b, 0x04, 0x5d, 0x00, 0x00, 0x78, 0x01, 0x4b, 0x4c, 0x4a, 0x4e, 0x49, 0x4d, 0x4b, 0xcf, 0x48, 0x44, 0xa3, 0x01, 0x75, 0x60, 0x09, 0x6d, 0x00, 0x0b, 0x78, 0x9c, 0x63, 0xe7, 0xe0, 0x04, 0x00, 0x00, 0x31, 0x00, 0x19, 0x0a, 0x08, 0x78, 0x9c, 0xab, 0xa8, 0x04, 0x00, 0x01, 0x6b, 0x00, 0xf2, 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x10, 0x78, 0x9c, 0x2b, 0xcd, 0x4b, 0xce, 0xc8, 0x2f, 0x4e, 0xcd, 0x03, 0x00, 0x0f, 0x59, 0x03, 0x64}
+	expect_dump(t, "process: zlib", ksy_dump(t, zlib_src, zlib_input), `t[0].len_a[0] = 19
+t[0].a[0] = <11 bytes> 68 65 6c 6c 6f 20 77 6f 72 6c 64
+t[0].b[0] = <24 bytes> 61 62 63 64 65 66 67 68 61 62 63 64 65 66 67 68 ...
+t[0].len_e[0] = 11
+t[0].e[0].x[0] = 7
+t[0].e[0].rest[0] = <2 bytes> 08 09
+t[0].lens[0] = 10
+t[0].lens[1] = 8
+t[0].d[0] = <2 bytes> 78 79
+t[0].d[1] = <0 bytes>
+t[0].len_f[0] = 16
+t[0].f[0] = <8 bytes> 75 6e 63 68 6f 73 65 6e
+`)
+	zlib_input[1] = 0
+	expect_dump(t, "process: zlib, not zlib", ksy_dump(t, zlib_src, zlib_input), "error: Decompression_Failed at 1 in t[0].a[0]")
 
 	// float fields in expressions, with integers; .to_i rounds toward zero
 	floats := HEAD + `seq:

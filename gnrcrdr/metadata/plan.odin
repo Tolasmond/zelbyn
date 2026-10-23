@@ -20,6 +20,7 @@ Node :: struct {
 	length:          Length,            // String and Blob: the byte length of each element; Set: the length of the substream each instance is read from. nil for a terminator alone, or for a Set read from its parent's stream
 	terminator:      Maybe(Terminator), // String, Blob and Set: the byte that ends each element's bytes (Kaitai's terminator, and strz)
 	pad_right:       Maybe(u8),         // String, Blob and Set with a length: removed from the end of each element's bytes (Kaitai's pad-right)
+	process:         Process,           // Blob and Set: how each element's bytes, once pad_right is removed or they are cut at terminator, are turned into its value or its substream (Kaitai's process)
 	encoding:        Encoding,          // String only: how its bytes are decoded
 	children:        []^Node,           // Set only, in order; nil when switch_on is set
 	slot_count:      int,               // Set only: the slots in each instance (count_slots), recorded when children is set
@@ -229,6 +230,13 @@ Order_Switch :: struct {
 Order_Case :: struct {
 	test:  ^Expr,
 	order: endian.Byte_Order,
+}
+
+// What process does to an element's bytes: nothing, or zlib, which
+// decompresses them (a zlib stream, with its header and checksum).
+Process :: enum u8 {
+	None,
+	Zlib,
 }
 
 // Instance.choice of the _ case, for the front ends, which do not import
