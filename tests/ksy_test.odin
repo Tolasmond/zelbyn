@@ -48,6 +48,11 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "instances:\n  x:\n    pos: 0\n    type: u1\n    io: 1\n", .Invalid, 8, 9, "io: expected a stream, found an integer"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\ninstances:\n  x:\n    pos: 0\n    type: u1\n    io: a._io\n", .Invalid, 11, 11, "io: an integer has no _io"},
 
+	// to-string: parsed, and otherwise ignored
+	{HEAD + "to-string: '(1 +'\n", .Syntax, 4, 17, "to-string: unexpected end of expression"},
+	{HEAD + "types:\n  u:\n    to-string: 1.5.to_s\n", .Unsupported, 6, 16, "to-string: float literals are not supported"},
+	{HEAD + "to-string: [a]\n", .Invalid, 4, 12, "to-string must be a scalar"},
+
 	// the top level and meta
 	{"# nothing\n", .Invalid, 0, 0, "the schema is empty"},
 	{"seq: []\n", .Invalid, 1, 1, "the schema has no meta"},
@@ -1784,6 +1789,14 @@ t[0].flags[0] = <1 bytes> 53
 t[0].arr_ops[0] = <6 bytes> 46 41 41 41 41 41
 `)
 	expect_dump(t, "neither", ksy_dump(t, src, {'P', 'Z', 0}), "error: Not_Any_Of at 0 in t[0].magic[0]")
+}
+
+// to-string, at the top level and in a type, is parsed and otherwise
+// ignored: as in the official compiler, its names are not resolved.
+@(test)
+ksy_to_string :: proc(t: ^testing.T) {
+	src := HEAD + "seq:\n  - id: a\n    type: s\nto-string: '\"t\" + a.v.to_s'\ntypes:\n  s:\n    seq:\n      - id: v\n        type: u1\n    to-string: no_such_field\n"
+	expect_dump(t, "to-string", ksy_dump(t, src, {7}), "t[0].a[0].v[0] = 7\n")
 }
 
 // io on parse instances: each is read at its pos in the stream io gives,
