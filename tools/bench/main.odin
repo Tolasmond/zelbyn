@@ -1,8 +1,8 @@
-// One cold measurement of gnrcrdr (decision record §10.2): in a fresh
-// process, compiles a schema from its file, reads the input, decodes it and
-// writes the JSON dump to memory, once each, and prints how long each phase
-// took. bench.py builds it and runs it in a new process for every
-// measurement; run that rather than this.
+// One cold measurement of gnrcrdr: in a fresh process, compiles a schema
+// from its file, reads the input, decodes it and writes the JSON dump to
+// memory, once each, and prints how long each phase took. bench.py builds it
+// and runs it in a new process for every measurement; run that rather than
+// this.
 //
 //     bench_oneshot <schema.ksy> <file> [--spans]
 //     bench_oneshot --start-only
