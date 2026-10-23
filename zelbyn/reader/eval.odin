@@ -71,10 +71,19 @@ eval_string :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (s: string, err
 }
 
 // Evaluates e, an Int, Float, Bool, Bytes, String or Struct expression, as
-// eval_int does, as a value of the tree: an Int is an i64.
+// eval_int does, as a value of the tree: an Int is an i64, and a String is
+// copied into the tree's arena, as it can be a literal of the schema, or
+// part of one, which the tree outlives. Copying here, where a value enters
+// the tree, rather than in the String_Literal case, spares the comparisons
+// that use a literal a copy each time they are evaluated.
 @(private, require_results)
 eval_value :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (value: fld.Value, err: dat.Read_Error) {
 	v := eval(d, e, {index = index}) or_return
+	if s, is_string := v.(string); is_string {
+		copied := arn.arena_make(d.arena, byte, len(s))
+		copy(copied, s)
+		return string(copied), .None
+	}
 	return tree_value(v), .None
 }
 
