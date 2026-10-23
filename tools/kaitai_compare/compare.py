@@ -15,7 +15,11 @@ out on both sides, as are value instances and params, which gnrcrdr does
 not dump. Field names are compared as the generated code spells them,
 from their ids: gnrcrdr's names, which are the -orig-id where there is
 one, are mapped back to the id. Integers beyond 2^53, which the
-JavaScript runtime holds as doubles, are compared as doubles.
+JavaScript runtime holds as doubles, are compared as doubles. A float is
+compared as a number, as the runtime writes one with an integer value as
+an integer, and gnrcrdr writes an f4 with the shortest digits that give
+it, where the runtime writes the double it widens to: a float of
+gnrcrdr's is also equal to the runtime's when it rounds to it as an f4.
 Imports are read relative to the importing schema, or for an absolute one,
 from the directories of --import-path (separated as in PATH), and given to
 both. Exits 1 if any file differs, or fails to decode on either side.
@@ -36,6 +40,7 @@ import argparse
 import json
 import os
 import subprocess
+import struct
 import sys
 import tempfile
 
@@ -118,6 +123,14 @@ def read_imports(path, ksy, import_paths, out, seen):
         read_imports(file, out[key], import_paths, out, seen)
 
 
+def as_f4(x):
+    """x rounded to an f4, as a double; None when it is beyond an f4."""
+    try:
+        return struct.unpack('<f', struct.pack('<f', x))[0]
+    except OverflowError:
+        return None
+
+
 def first_difference(a, b, path):
     """The path of the first value that differs, and the two values; None
     when a and b are equal. Also counts the values compared."""
@@ -136,6 +149,8 @@ def first_difference(a, b, path):
     first_difference.values += 1
     if type(a) is int and type(b) is int and max(abs(a), abs(b)) > 2**53:
         return None if float(a) == float(b) else (path, a, b)
+    if float in (type(a), type(b)) and type(a) in (int, float) and type(b) in (int, float):
+        return None if a == b or as_f4(a) == b else (path, a, b)
     return None if a == b and type(a) is type(b) else (path, a, b)
 
 

@@ -211,6 +211,25 @@ EVAL_CASES := [?]Eval_Case {
 	{text = "hdr.tag.first + hdr.tag.last + hdr.tag.min + hdr.tag.max", want = "952"},
 	{text = "(a == 5).to_i * 2 + (a == 4).to_i", want = "2"},
 	{text = "a.to_i + hdr.n.to_i", want = "8"},
+
+	// floats: an operation with one is on floats, and / of a float divides
+	// exactly; .to_i rounds toward zero
+	{text = "1.5 + 1", want = "2.5"},
+	{text = "(a + 0.0) / 2", want = "2.5"},
+	{text = "a / 2", want = "2"},
+	{text = "24000. * 2 - 1e3", want = "47000"},
+	{text = "1.5e1 == 15 and 15 == 1.5e1", want = "true"},
+	{text = "a < 5.5 and 5.5 > a and a >= 5.0 and a != 5.5", want = "true"},
+	{text = "-(a * 0.5)", want = "-2.5"},
+	{text = "a == 5 ? 0.5 : 1.5", want = "0.5"},
+	{text = "1 / 0.0 > 1e308", want = "true"},
+	{text = "2.9.to_i", want = "2"},
+	{text = "(-2.9).to_i", want = "-2"},
+	{text = "(a / 2.0).to_i * 2", want = "4"},
+	{text = "1e19.to_i", err = .Integer_Overflow},
+	{text = "(0.0 / 0).to_i", err = .Integer_Overflow},
+	{text = "[0.5, 2][1] / 4", want = "0.5"},
+	{text = "[0.5, 2.5][a - 4]", want = "2.5"},
 }
 
 @(test)
@@ -284,6 +303,9 @@ expression_resolved_text :: proc(t: ^testing.T) {
 
 	e = must_compile(t, &p.ff, "_parent.a + n", p.root, p.hdr)
 	if e != nil do testing.expect_value(t, expr.to_string(e, context.temp_allocator), "(_parent.a + n)")
+
+	e = must_compile(t, &p.ff, "(1.5 + 2. + 1e3 + 1e20 + 0.1).to_i", p.root)
+	if e != nil do testing.expect_value(t, expr.to_string(e, context.temp_allocator), "((((1.5 + 2.0) + 1000.0) + 1e+20) + 0.1).to_i")
 
 	tag := p.hdr.children[1].length.(mdat.Rule_Length).expr
 	testing.expect_value(t, expr.to_string(tag, context.temp_allocator), "(_parent.a - 3)")

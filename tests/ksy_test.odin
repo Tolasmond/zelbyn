@@ -50,7 +50,6 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 
 	// to-string: parsed, and otherwise ignored
 	{HEAD + "to-string: '(1 +'\n", .Syntax, 4, 17, "to-string: unexpected end of expression"},
-	{HEAD + "types:\n  u:\n    to-string: 1.5.to_s\n", .Unsupported, 6, 16, "to-string: float literals are not supported"},
 	{HEAD + "to-string: [a]\n", .Invalid, 4, 12, "to-string must be a scalar"},
 
 	// the top level and meta
@@ -206,7 +205,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: n\n    type: u1\n    repeat: expr\n    repeat-expr: 2\n  - id: a\n    size: n._sizeof\n", .Unsupported, 10, 13, "size: n is repeated; _sizeof of a repeated attribute is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: v._sizeof\ninstances:\n  v:\n    value: 1\n", .Invalid, 6, 13, "size: v is a value instance, which has no _sizeof"},
 	{HEAD + "seq:\n  - id: a\n    type: s(1)\ntypes:\n  s:\n    params:\n      - id: p\n        type: u1\n    seq:\n      - id: b\n        size: p._sizeof\n", .Invalid, 14, 17, "size: p is a param, which has no _sizeof"},
-	{HEAD + "seq:\n  - id: a\n    size: 2.\n", .Unsupported, 6, 11, "size: float literals are not supported"},
+	{HEAD + "seq:\n  - id: a\n    size: 2.\n", .Invalid, 6, 11, "size: expected an integer, found a float"},
 
 	// valid
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    valid: 256\n", .Invalid, 7, 12, "a: 256 does not fit in a UInt8"},
@@ -567,6 +566,39 @@ types:
 t[0].b[0] = <2 bytes> 01 02
 t[0].c[0] = <1 bytes> 03
 t[0].d[0] = 4
+`)
+
+	// float fields in expressions, with integers; .to_i rounds toward zero
+	floats := HEAD + `seq:
+  - id: x
+    type: f4
+  - id: y
+    type: f8
+  - id: d
+    size: (x * 2 + y).to_i
+  - id: e
+    type: u1
+    repeat: until
+    repeat-until: _ > ratio
+  - id: g
+    type: f4
+    repeat: expr
+    repeat-expr: 2
+  - id: h
+    size: g[1].to_i - g.first.to_i
+instances:
+  ratio:
+    value: x / 2
+`
+	float_input := []byte{0, 0, 0xc0, 0x3f, 0, 0, 0, 0, 0, 0, 2, 0x40, 'a', 'b', 'c', 'd', 'e', 0, 1, 0, 0, 0xc0, 0xbf, 0, 0, 0x30, 0x40, 'x', 'y', 'z'}
+	expect_dump(t, "floats", ksy_dump(t, floats, float_input), `t[0].x[0] = 1.5
+t[0].y[0] = 2.25
+t[0].d[0] = <5 bytes> 61 62 63 64 65
+t[0].e[0] = 0
+t[0].e[1] = 1
+t[0].g[0] = -1.5
+t[0].g[1] = 2.75
+t[0].h[0] = <3 bytes> 78 79 7a
 `)
 }
 

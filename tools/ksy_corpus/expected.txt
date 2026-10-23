@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 146 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 151 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -79,7 +79,7 @@ OK	game/heaps_pak.ksy
 OK	game/heroes_of_might_and_magic_agg.ksy
 OK	game/heroes_of_might_and_magic_bmp.ksy
 OK	game/minecraft_nbt.ksy
-ERR	game/quake2_md2.ksy	Unsupported	game/quake2_md2.ksy:340:24	value: float literals are not supported
+ERR	game/quake2_md2.ksy	Unsupported	game/quake2_md2.ksy:166:12	value: an array literal of an array is not supported; only of integers, floats, booleans, strings and byte arrays
 OK	game/quake_mdl.ksy
 OK	game/quake_pak.ksy
 OK	game/renderware_binary_stream.ksy
@@ -88,9 +88,9 @@ OK	game/warcraft_2_pud.ksy
 OK	geospatial/shapefile_index.ksy
 OK	geospatial/shapefile_main.ksy
 OK	hardware/dtb.ksy
-ERR	hardware/edid.ksy	Unsupported	hardware/edid.ksy:140:28	value: float literals are not supported
+ERR	hardware/edid.ksy	Unsupported	hardware/edid.ksy:268:12	value: method calls are not supported
 ERR	hardware/mifare/mifare_classic.ksy	Unsupported	hardware/mifare/mifare_classic.ksy:221:23	param ac: type ac is not supported; only integer types, bool and bytes are
-ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:488:23	value: float literals are not supported
+ERR	image/bmp.ksy	Unsupported	image/bmp.ksy:169:16	value: ?: on a set is not supported
 OK	image/dicom.ksy
 ERR	image/exif.ksy	Unsupported	image/exif.ksy:48:9	endian: switch-on is not supported
 OK	image/gif.ksy
@@ -118,7 +118,7 @@ OK	log/windows_evt_log.ksy
 OK	machine_code/code_6502.ksy
 OK	macos/compressed_resource.ksy
 ERR	macos/ds_store.ksy	Unsupported	macos/ds_store.ksy:107:7	instance directories: an instance without pos or value is not supported
-ERR	macos/mac_os_resource_snd.ksy	Unsupported	macos/mac_os_resource_snd.ksy:264:45	value: float literals are not supported
+OK	macos/mac_os_resource_snd.ksy
 OK	macos/resource_compression/dcmp_0.ksy
 OK	macos/resource_compression/dcmp_1.ksy
 ERR	macos/resource_compression/dcmp_2.ksy	Unsupported	macos/resource_compression/dcmp_2.ksy:38:11	param header_parameters_with_io: type bytes_with_io is not supported; only integer types, bool and bytes are
@@ -128,7 +128,7 @@ OK	media/android_opengl_shaders_cache.ksy
 OK	media/au.ksy
 OK	media/avi.ksy
 OK	media/blender_blend.ksy
-ERR	media/creative_voice_file.ksy	Unsupported	media/creative_voice_file.ksy:90:16	value: float literals are not supported
+OK	media/creative_voice_file.ksy
 OK	media/genmidi_op2.ksy
 OK	media/id3v1_1.ksy
 OK	media/id3v2_3.ksy
@@ -169,8 +169,8 @@ OK	network/udp_datagram.ksy
 OK	network/websocket.ksy
 OK	scientific/nt_mdt/nt_mdt.ksy
 OK	scientific/nt_mdt/nt_mdt_pal.ksy
-ERR	scientific/spectroscopy/avantes_roh60.ksy	Unsupported	scientific/spectroscopy/avantes_roh60.ksy:64:18	repeat-expr: ipixlast is a Float32; only integer, boolean, blob, string and set fields can be used in expressions
-ERR	scientific/spectroscopy/specpr.ksy	Unsupported	scientific/spectroscopy/specpr.ksy:91:33	value: float literals are not supported
+OK	scientific/spectroscopy/avantes_roh60.ksy
+OK	scientific/spectroscopy/specpr.ksy
 OK	security/efivar_signature_list.ksy
 OK	security/openpgp_message.ksy
 OK	security/ssh_public_key.ksy
@@ -179,7 +179,7 @@ OK	serialization/bson.ksy
 OK	serialization/chrome_pak.ksy
 ERR	serialization/google_protobuf.ksy	Unsupported	common/vlq_base128_le.ksy:46:11	type: integer literal 0x8000_0000_0000_0000 does not fit in a 64-bit signed integer, which expressions are
 OK	serialization/microsoft_cfb.ksy
-ERR	serialization/msgpack.ksy	Unsupported	serialization/msgpack.ksy:124:12	value: float_32_value is a Float32; only integer, boolean, blob, string and set fields can be used in expressions
+OK	serialization/msgpack.ksy
 OK	serialization/php_serialized_value.ksy
 OK	serialization/python_pickle.ksy
 OK	serialization/ruby_marshal.ksy

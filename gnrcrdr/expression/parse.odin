@@ -3,6 +3,7 @@ package expression
 import mdata "../metadata"
 import "core:fmt"
 import "core:mem"
+import "core:strconv"
 import "core:strings"
 
 Error_Kind :: enum {
@@ -72,6 +73,7 @@ parse_list :: proc(text: string, allocator: mem.Allocator) -> (list: []^mdata.Ex
 Token_Kind :: enum {
 	EOF,
 	Int,
+	Float,
 	String,
 	Ident,
 	Plus,
@@ -108,6 +110,7 @@ Token :: struct {
 	offset: int,
 	text:   string,
 	value:  int,    // Int only
+	float:  f64,    // Float only
 	str:    string, // String only: its value, allocated with the parser's allocator
 }
 
@@ -337,9 +340,7 @@ lex_int :: proc(p: ^Parser) -> bool {
 	end := digits
 	for end < len(p.text) && (is_ident_start(p.text[end]) || is_digit(p.text[end])) do end += 1
 	// 1.5 and 1. are floats; 1.to_s is a method of 1
-	if end < len(p.text) && base == 10 && p.text[end] == '.' && (end + 1 == len(p.text) || !is_ident_start(p.text[end + 1])) {
-		return fail(p, .Unsupported, start, "float literals are not supported")
-	}
+	if end < len(p.text) && base == 10 && p.text[end] == '.' && (end + 1 == len(p.text) || !is_ident_start(p.text[end + 1])) do return lex_float(p)
 
 	text := p.text[start:end]
 	value: u64
@@ -357,7 +358,11 @@ lex_int :: proc(p: ^Parser) -> bool {
 		case 'A' ..= 'F':
 			d = int(c - 'A') + 10
 		}
-		if d >= base do return fail(p, .Syntax, start, "invalid integer literal %s", text)
+		if d >= base {
+			// so is 1e3, which no integer literal would be
+			if base == 10 && (c == 'e' || c == 'E') && exponent(p.text[i:]) > 0 do return lex_float(p)
+			return fail(p, .Syntax, start, "invalid integer literal %s", text)
+		}
 
 		if value > (u64(max(int)) - u64(d)) / u64(base) {
 			// valid Kaitai, whose expressions are wider
@@ -372,6 +377,42 @@ lex_int :: proc(p: ^Parser) -> bool {
 	p.pos = end
 	p.tok = Token{kind = .Int, offset = start, text = text, value = int(value)}
 	return true
+}
+
+// A float literal at p.pos, which is a digit, as Kaitai writes one: digits,
+// then a . and any digits, an exponent, or both (metadata.Float_Literal).
+@(private = "file")
+lex_float :: proc(p: ^Parser) -> bool {
+	start := p.pos
+	end := start
+	for end < len(p.text) && is_digit(p.text[end]) do end += 1
+	if end < len(p.text) && p.text[end] == '.' {
+		end += 1
+		for end < len(p.text) && is_digit(p.text[end]) do end += 1
+	}
+	end += exponent(p.text[end:])
+	text := p.text[start:end]
+	if end < len(p.text) && (is_ident_start(p.text[end]) || is_digit(p.text[end])) {
+		return fail(p, .Syntax, start, "invalid float literal %s", p.text[start:end + 1])
+	}
+	value, ok := strconv.parse_f64(text)
+	// valid Kaitai, whose literals are exact decimals
+	if !ok do return fail(p, .Unsupported, start, "float literal %s does not fit in a 64-bit float, which expressions are", text)
+	p.pos = end
+	p.tok = Token{kind = .Float, offset = start, text = text, float = value}
+	return true
+}
+
+// The length of the exponent at the start of s, e or E, an optional sign
+// and digits; 0 when there is none.
+@(private = "file")
+exponent :: proc(s: string) -> int {
+	if len(s) < 2 || (s[0] != 'e' && s[0] != 'E') do return 0
+	n := 1
+	if s[n] == '+' || s[n] == '-' do n += 1
+	if n == len(s) || !is_digit(s[n]) do return 0
+	for n < len(s) && is_digit(s[n]) do n += 1
+	return n
 }
 
 // Binding powers, loosest first.
@@ -556,6 +597,9 @@ parse_atom :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 	case .Int:
 		next(p) or_return
 		return new_expr(p, t.offset, mdata.Int_Literal{t.value}), true
+	case .Float:
+		next(p) or_return
+		return new_expr(p, t.offset, mdata.Float_Literal{t.float}), true
 	case .String:
 		next(p) or_return
 		return new_expr(p, t.offset, mdata.String_Literal{t.str}), true

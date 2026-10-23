@@ -14,6 +14,7 @@ Expr :: struct {
 Expr_Type :: enum {
 	Unresolved,
 	Int,
+	Float,  // an f64: a float literal, a float field, or an operation on one
 	Bool,
 	Bytes,  // a Blob value
 	String, // a String value, or a string made by an expression; kept as bytes, as the input has them
@@ -25,6 +26,7 @@ Expr_Type :: enum {
 Expr_Variant :: union {
 	// syntax and resolved
 	Int_Literal,
+	Float_Literal,
 	Bool_Literal,
 	String_Literal,
 	Unary,
@@ -63,6 +65,11 @@ Int_Literal :: struct {
 	value: int,
 }
 
+// 1.5, 2., 1e3 or 1.5e-3.
+Float_Literal :: struct {
+	value: f64,
+}
+
 Bool_Literal :: struct {
 	value: bool,
 }
@@ -85,10 +92,14 @@ Unary :: struct {
 	operand: ^Expr,
 }
 
+// The arithmetic operators and the comparisons also apply to a Float and
+// an Int, or two Floats, as Kaitai's runtimes apply them: the Int is made
+// a Float, and the result is a Float as IEEE 754 gives it, with no error,
+// for a division by zero too.
 Binary_Op :: enum {
 	Mul, // *
-	Div, // /, rounding toward negative infinity
-	Mod, // %, with the sign of the divisor
+	Div, // /, of Ints rounding toward negative infinity
+	Mod, // %, with the sign of the divisor; Ints only
 	Add, // +, which also joins two strings
 	Sub, // -
 	Shl, // <<
@@ -123,7 +134,7 @@ Index :: struct {
 }
 
 // [a, b, ...]: an Array of the items, which resolution makes all of one
-// type, item_type, an Int, Bool, String or Bytes; one of integer literals
+// type, item_type, an Int, Float, Bool, String or Bytes; one of integer literals
 // from 0 to 255 is a Bytes_Literal instead, as in Kaitai. Each evaluation
 // makes the array in the tree's arena.
 Array_Literal :: struct {
@@ -227,7 +238,8 @@ To_S :: struct {
 
 // .to_i of a String: the decimal integer it is, with an optional sign;
 // Invalid_Number when it is not one, Integer_Overflow when it does not fit.
-// Of a Bool: 1 or 0.
+// Of a Bool: 1 or 0. Of a Float: its integer part, rounded toward zero;
+// Integer_Overflow when it does not fit, or is not a number.
 To_I :: struct {
 	operand: ^Expr,
 }
