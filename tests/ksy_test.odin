@@ -1676,6 +1676,79 @@ t[0].later[0] = 9
 	expect_dump(t, "first of empty", ksy_dump(t, src, no_flag), "error: Index_Out_Of_Range at 6 in t[0].first_of_empty[0]")
 }
 
+// A repeat is an array however its count is written, as in Kaitai, also of
+// one element, whose expressions have _index: a literal 1, 1 + 0, and a
+// count read from the input as 1, beside counts of 0 and 2.
+@(test)
+ksy_repeat_of_one :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: n
+    type: u1
+  - id: lit
+    type: u1
+    repeat: expr
+    repeat-expr: 1
+  - id: lit_size
+    size: lit.size
+  - id: folded
+    type: u1
+    repeat: expr
+    repeat-expr: 1 + 0
+  - id: dyn
+    type: u1
+    repeat: expr
+    repeat-expr: n
+  - id: two
+    type: u1
+    repeat: expr
+    repeat-expr: 2
+  - id: sizes
+    size: folded.size + dyn.size + two.size
+  - id: indexed
+    size: _index + 2
+    repeat: expr
+    repeat-expr: 1
+  - id: one_item
+    type: item
+    repeat: expr
+    repeat-expr: 1
+  - id: item_ref
+    size: one_item[0].v + one_item.size
+  - id: valid_indexed
+    type: u1
+    repeat: expr
+    repeat-expr: 1
+    valid:
+      expr: _ == lit[0] + _index
+  - id: none
+    type: u1
+    repeat: expr
+    repeat-expr: 0
+  - id: none_size
+    size: none.size + 1
+types:
+  item:
+    seq:
+      - id: v
+        type: u1
+`
+	input := []byte{1, 7, 'A', 8, 9, 10, 11, 'B', 'B', 'B', 'B', 'C', 'C', 2, 'D', 'D', 'D', 7, 'E'}
+	expect_dump(t, "repeat of one", ksy_dump(t, src, input), `t[0].n[0] = 1
+t[0].lit[0] = 7
+t[0].lit_size[0] = <1 bytes> 41
+t[0].folded[0] = 8
+t[0].dyn[0] = 9
+t[0].two[0] = 10
+t[0].two[1] = 11
+t[0].sizes[0] = <4 bytes> 42 42 42 42
+t[0].indexed[0] = <2 bytes> 43 43
+t[0].one_item[0].v[0] = 2
+t[0].item_ref[0] = <3 bytes> 44 44 44
+t[0].valid_indexed[0] = 7
+t[0].none_size[0] = <1 bytes> 45
+`)
+}
+
 // size, terminator and size-eos on a switch-on field: the case chosen is
 // read from the substream, whose unread bytes are skipped. With no case
 // for the value, as the official compiler does, a field with a length has

@@ -300,11 +300,11 @@ An instance without `pos` is read where its stream is: it is marked `at_stream_p
 
    **`parent`.** On a user type (`compile_parent`), it must resolve to an `Instance` that is not `_root`: `_parent`, `_parent._parent` and so on, whose `up` becomes `parent_up`, which the cases of a `switch-on` take too. Any other is `Unsupported`.
 5. **Counts (`compile_count`):**
-   - `repeat: expr` with a literal becomes `Fixed_Count`, and with any other expression `Rule_Count`.
+   - `repeat: expr` with a literal becomes `Fixed_Count` with `repeat` set, and with any other expression `Rule_Count`.
    - `repeat: eos` becomes `Eos_Count`, and `repeat: until` becomes `Until_Count`.
    - `-peek` becomes `Marker_Count`.
    - `-while-peek` and `-until-peek` become `Repeat_Count`.
-   - With none of these, the count is `Fixed_Count{1}`.
+   - With none of these, the count is `Fixed_Count{n = 1}`, without `repeat`.
 6. **Length.** `size` becomes a `Fixed_Length` for a literal, else a `Rule_Length`, compiled with `in_repeat` set when the field can have more than one element; `size-eos` becomes `Eos_Length`.
 7. **Terminator (`compile_terminator`).** `terminator`, or `strz`'s 0, with `consume`, `include` and `eos-error`, becomes a `Terminator`. `pad-right` applies only with a length, and `consume` and `eos-error` only without one.
 
@@ -391,14 +391,14 @@ The resolver stores a field's slot in its `Field_Ref` when it resolves the name,
 
 | Variant | Elements read |
 |---|---|
-| `Fixed_Count{n}` | `n` |
+| `Fixed_Count{n, repeat}` | `n`; `repeat` when the schema repeats the field, so that it is an array even of one element |
 | `Rule_Count{expr}` | The value of an `Int` expression. Negative is `Invalid_Length`. |
 | `Marker_Count{markers}` | 1 when every marker (an integer at an offset from the current position) matches the input, else 0. A marker that cannot be read does not match. Nothing is consumed. |
 | `Repeat_Count{type, value, until, order}` | While (`until` false) or until (`until` true) the integer at the current position equals `value`. It is peeked, never consumed. With `until`, reaching the end of the input first is an error. Each element must consume input. |
 | `Eos_Count` | Until the end of the stream, counting bits left over. Each element must consume input. |
 | `Until_Count{expr}` | Until `expr`, evaluated with `_` set to the element just read and `_index` to the count of elements read, is true. Each element but the last must consume input. |
 
-`is_single(node)` is true for a `Fixed_Count` of 1 and for a `Marker_Count`: fields read at most once. An expression that refers to such a field gets its value rather than an array.
+`is_single(node)` is true for a `Fixed_Count` of 1 without `repeat` and for a `Marker_Count`: fields read at most once. An expression that refers to such a field gets its value rather than an array. A repeat is an array however its count is written, as in Kaitai, and its expressions have `_index`: `repeat-expr: 1` is a `Fixed_Count` of 1 with `repeat`. The decoder keeps a count of 1, repeated or not, in the slot's cell (§7.4), so the flag changes the type of the field's expressions, not how it is stored.
 
 `Length` is `Fixed_Length{n}`, `Rule_Length{expr}` or `Eos_Length` (the rest of the stream). A computed length that is negative is `Invalid_Length`.
 

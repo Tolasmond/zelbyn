@@ -464,7 +464,7 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 	name := display_name(c, get(root, "meta"), top.name) or_return
 	node := new_node(c, name, top.name)
 	node.type = .Set
-	node.count = mdata.Fixed_Count{1}
+	node.count = mdata.Fixed_Count{n = 1}
 
 	ff.name = node.name
 	ff.root = node
@@ -535,7 +535,7 @@ root_arg_sets :: proc(c: ^Compiler, top: ^Type_Def) -> (arg_sets: []^mdata.Node,
 		if len(user.params) > 0 do return nil, fail(c, .Unsupported, p.id, "param %s: its type %s has params, which nothing can give on the top-level type of the schema compiled", p.id.text, p.type_name)
 		set := new_node(c, p.id.text, p.id.text)
 		set.type = .Set
-		set.count = mdata.Fixed_Count{1}
+		set.count = mdata.Fixed_Count{n = 1}
 		// a type of this schema too has no _root there (chain_of)
 		if user.parent != nil && user.schema == c.schema do append(&c.rootless, set)
 		compile_type(c, user, set, {}) or_return
@@ -1107,7 +1107,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 			claim_id(c, &ids, p.id.text, p.id) or_return
 			params[i] = new_node(c, p.id.text, p.id.text)
 			params[i].type = p.type
-			params[i].count = mdata.Fixed_Count{1}
+			params[i].count = mdata.Fixed_Count{n = 1}
 			params[i].is_param = true
 			// its value is the instance its argument gives, of a set of its
 			// type compiled elsewhere, whose members it has
@@ -2019,7 +2019,7 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 		call: Call
 		type_name, call = split_call(c, e.value, id, type_name) or_return
 		case_node := new_node(c, node.name, node.ref_name)
-		case_node.count = mdata.Fixed_Count{1}
+		case_node.count = mdata.Fixed_Count{n = 1}
 		case_node.parent_up = node.parent_up
 		user_type := "" // for casts
 
@@ -2106,12 +2106,12 @@ compile_count :: proc(c: ^Compiler, attr: ^yml.Node, id: string, scope: expr.Sco
 		e := compile_expr(c, repeat_expr, "repeat-expr", scope, .Int) or_return
 		if lit, is_literal := e.variant.(mdata.Int_Literal); is_literal {
 			if lit.value < 0 do return nil, fail(c, .Invalid, repeat_expr, "%s: repeat-expr is negative", id)
-			return mdata.Fixed_Count{lit.value}, true
+			return mdata.Fixed_Count{n = lit.value, repeat = true}, true
 		}
 		return mdata.Rule_Count{expr = e}, true
 	}
 
-	if peek_key == nil do return mdata.Fixed_Count{1}, true
+	if peek_key == nil do return mdata.Fixed_Count{n = 1}, true
 
 	value := get(attr, peek_key.text)
 	bytes := byte_list(c, value, peek_key.text) or_return
