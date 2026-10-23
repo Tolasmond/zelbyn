@@ -7,10 +7,10 @@ How to build and run gnrcrdr, what it writes, and the subset of Kaitai Struct it
 Requires Odin `dev-2026-10` or newer. Build and run from the repository root:
 
 ```
-odin build .
+odin build . -out:build/gnrcrdr
 ```
 
-This produces `gnrcrdr.exe` on Windows and `gnrcrdr.bin` on Linux. There are no other dependencies.
+This produces `build/gnrcrdr`, or `build\gnrcrdr.exe` on Windows; `build/` holds only build output, which git ignores. There are no other dependencies.
 
 ## Running
 
@@ -21,10 +21,10 @@ gnrcrdr <schema.ksy> <file> [--dump tree|json] [--offsets] [--import-path dirs] 
 Decodes `<file>` with the Kaitai Struct schema and writes the decoded tree to stdout. For example:
 
 ```
-./gnrcrdr.bin formats/gif.ksy data/855.gif
-./gnrcrdr.bin formats/gif.ksy data/855.gif --dump json
-./gnrcrdr.bin formats/gif89a.ksy data/855.gif
-./gnrcrdr.bin ../kaitai_struct_formats/common/bcd.ksy number.bin --param num_digits=6 --param bits_per_digit=4 --param is_le=false
+build/gnrcrdr formats/gif.ksy data/855.gif
+build/gnrcrdr formats/gif.ksy data/855.gif --dump json
+build/gnrcrdr formats/gif89a.ksy data/855.gif
+build/gnrcrdr ../kaitai_struct_formats/common/bcd.ksy number.bin --param num_digits=6 --param bits_per_digit=4 --param is_le=false
 ```
 
 When the schema's top-level type has `params`, `--param name=value` gives the argument of each: an integer (decimal, or with `0x`, `0o` or `0b`), `true` or `false`, bytes in hex (`0a1b`), also for a user type, whose instance the decoder reads from them, or a `str`'s text as it is.

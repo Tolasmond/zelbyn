@@ -14,7 +14,7 @@ odin test tests -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_
 odin test tests -o:speed -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_LEVEL=warning
 ```
 
-Debug builds (`odin build . -debug`) run under a tracking allocator and exit 1 if anything leaks or is freed twice.
+Debug builds (`odin build . -debug -out:build/gnrcrdr`) run under a tracking allocator and exit 1 if anything leaks or is freed twice.
 
 ## Golden dumps
 
