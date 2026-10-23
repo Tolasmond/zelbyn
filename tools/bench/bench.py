@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Measures gnrcrdr cold, one fresh process per measurement.
+"""Measures zelbyn cold, one fresh process per measurement.
 
     python3 tools/bench/bench.py [--runs N] [--schema S] [--spans] [--cpp BIN] [file ...]
 
-Run from the repository root; needs Odin. Builds gnrcrdr and the one-shot
+Run from the repository root; needs Odin. Builds zelbyn and the one-shot
 program in tools/bench with -o:speed, then runs each of these RUNS times
 (default 200) per file, each time in a new process, interleaving files and
 programs:
@@ -11,7 +11,7 @@ programs:
 - the one-shot program, which compiles the schema, reads the file, decodes
   it and writes its JSON dump to memory, timing each phase, and counts the
   page faults taken during the decode;
-- the CLI, `gnrcrdr <schema> <file> --dump json`, with its output discarded,
+- the CLI, `zelbyn <schema> <file> --dump json`, with its output discarded,
   timed from spawn to exit (with --spans, `--offsets`, the text dump with
   each value's offset, instead);
 - the one-shot program with --start-only, which exits at once: the fixed
@@ -57,7 +57,7 @@ def median(rows, name):
 
 
 def main():
-    p = argparse.ArgumentParser(description='Measures gnrcrdr cold, one fresh process per measurement.')
+    p = argparse.ArgumentParser(description='Measures zelbyn cold, one fresh process per measurement.')
     p.add_argument('files', nargs='*')
     p.add_argument('--runs', type=int, default=200)
     p.add_argument('--schema', default='formats/gif.ksy')
@@ -67,7 +67,7 @@ def main():
     files = args.files or sorted(f for f in glob.glob('data/*') if f.lower().endswith('.gif'))
 
     with tempfile.TemporaryDirectory() as tmp:
-        cli, oneshot = os.path.join(tmp, 'gnrcrdr' + EXE), os.path.join(tmp, 'bench_oneshot' + EXE)
+        cli, oneshot = os.path.join(tmp, 'zelbyn' + EXE), os.path.join(tmp, 'bench_oneshot' + EXE)
         subprocess.run(['odin', 'build', '.', '-o:speed', '-out:' + cli], check=True)
         subprocess.run(['odin', 'build', 'tools/bench', '-o:speed', '-out:' + oneshot], check=True)
 

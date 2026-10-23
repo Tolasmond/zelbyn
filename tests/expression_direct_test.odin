@@ -1,8 +1,8 @@
 package tests
 
-import dmp "../gnrcrdr/dump"
-import ksy "../gnrcrdr/ksy"
-import mdat "../gnrcrdr/metadata"
+import dmp "../zelbyn/dump"
+import ksy "../zelbyn/ksy"
+import mdat "../zelbyn/metadata"
 import "core:fmt"
 import "core:strings"
 import "core:testing"

@@ -1,9 +1,9 @@
 package tests
 
-import dmp "../gnrcrdr/dump"
-import fld "../gnrcrdr/field"
-import ksy "../gnrcrdr/ksy"
-import mdat "../gnrcrdr/metadata"
+import dmp "../zelbyn/dump"
+import fld "../zelbyn/field"
+import ksy "../zelbyn/ksy"
+import mdat "../zelbyn/metadata"
 import "core:encoding/json"
 import "core:strings"
 import "core:testing"

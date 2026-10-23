@@ -1,6 +1,6 @@
-# Developing gnrcrdr
+# Developing zelbyn
 
-The checks a change must pass, the golden dumps, the benchmark, and the tools that compare gnrcrdr with the official Kaitai Struct runtime and with libyaml. Commands are run from the repository root. The design is described in [arch.md](arch.md).
+The checks a change must pass, the golden dumps, the benchmark, and the tools that compare zelbyn with the official Kaitai Struct runtime and with libyaml. Commands are run from the repository root. The design is described in [arch.md](arch.md).
 
 ## Checks and tests
 
@@ -14,7 +14,7 @@ odin test tests -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_
 odin test tests -o:speed -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_LEVEL=warning
 ```
 
-Debug builds (`odin build . -debug -out:build/gnrcrdr`) run under a tracking allocator and exit 1 if anything leaks or is freed twice.
+Debug builds (`odin build . -debug -out:build/zelbyn`) run under a tracking allocator and exit 1 if anything leaks or is freed twice.
 
 ## Golden dumps
 
@@ -27,7 +27,7 @@ git diff --stat tests/golden
 
 ## Benchmark
 
-gnrcrdr is measured the way a terminal tool runs: cold, in a fresh process for every measurement, with nothing shared between runs. `tools/bench/bench.py` builds gnrcrdr and the one-shot program in `tools/bench` with `-o:speed`, then runs them 200 times per sample, interleaving samples and programs:
+zelbyn is measured the way a terminal tool runs: cold, in a fresh process for every measurement, with nothing shared between runs. `tools/bench/bench.py` builds zelbyn and the one-shot program in `tools/bench` with `-o:speed`, then runs them 200 times per sample, interleaving samples and programs:
 
 ```
 python3 tools/bench/bench.py
@@ -36,7 +36,7 @@ python3 tools/bench/bench.py
 For each file it prints medians of:
 - the input size, the tree size (the bytes the tree's arena handed out), and the page faults taken during the decode (not counted on Windows);
 - the time to compile the schema, read the file, decode it and write the JSON dump to memory, each timed inside one process;
-- the whole-process time of `gnrcrdr <schema> <file> --dump json`, with its output discarded.
+- the whole-process time of `zelbyn <schema> <file> --dump json`, with its output discarded.
 
 It also prints the time to start a process that exits at once, which is part of every whole-process time. Options: `--runs N`, `--schema S` (default `formats/gif.ksy`), `--spans` (decode with spans, and time the CLI with `--offsets` instead of `--dump json`), and the files (default the samples in `data/`).
 
@@ -44,7 +44,7 @@ Run it before and after a change meant to make decoding faster or the tree small
 
 ### Kaitai Struct C++ reference
 
-With `--cpp`, the benchmark also runs the official Kaitai Struct C++ runtime, with the parser the official compiler generates from the same schema. It prints the C++ decode time and page faults, the ratio of gnrcrdr's decode time to the C++ one, and the C++ whole-process time (reading and decoding, with no output). Build the reference once. It needs Node.js, PyYAML, a C++11 compiler (`$CXX`, default `g++`) and a clone of the runtime at tag 0.11, kept outside this repository:
+With `--cpp`, the benchmark also runs the official Kaitai Struct C++ runtime, with the parser the official compiler generates from the same schema. It prints the C++ decode time and page faults, the ratio of zelbyn's decode time to the C++ one, and the C++ whole-process time (reading and decoding, with no output). Build the reference once. It needs Node.js, PyYAML, a C++11 compiler (`$CXX`, default `g++`) and a clone of the runtime at tag 0.11, kept outside this repository:
 
 ```
 npm ci --prefix tools/kaitai_compare
@@ -53,11 +53,11 @@ python3 tools/bench/cpp/build.py ../kaitai_struct_cpp_stl_runtime
 python3 tools/bench/bench.py --cpp tools/bench/cpp/build/oneshot_cpp
 ```
 
-The generated parser and the binary go to `tools/bench/cpp/build/`, which is not committed. The C++ decode builds a `kaitai::kstream` on the file's bytes and parses it. Strings are kept as bytes, as gnrcrdr keeps them, and on Linux libstdc++ is linked statically. To benchmark another schema, rebuild the reference with `--schema`.
+The generated parser and the binary go to `tools/bench/cpp/build/`, which is not committed. The C++ decode builds a `kaitai::kstream` on the file's bytes and parses it. Strings are kept as bytes, as zelbyn keeps them, and on Linux libstdc++ is linked statically. To benchmark another schema, rebuild the reference with `--schema`.
 
 ## Kaitai runtime check
 
-`tools/kaitai_compare/compare.py` decodes files with a `.ksy` schema both in gnrcrdr and with the official Kaitai Struct compiler and JavaScript runtime, and compares the results value by value. It needs Node.js and PyYAML, and the compiler and runtime, pinned in `tools/kaitai_compare/package.json`:
+`tools/kaitai_compare/compare.py` decodes files with a `.ksy` schema both in zelbyn and with the official Kaitai Struct compiler and JavaScript runtime, and compares the results value by value. It needs Node.js and PyYAML, and the compiler and runtime, pinned in `tools/kaitai_compare/package.json`:
 
 ```
 npm ci --prefix tools/kaitai_compare
@@ -69,7 +69,7 @@ python3 tools/kaitai_compare/compare.py --param num_digits=6 --param bits_per_di
 
 A `--param` of a user type is given to the runtime as an instance of the type that its constructor makes from the bytes.
 
-Both decodes are brought to one shape, every field an array of its values, and compared field by field. Parse instances are compared as fields; fields with no values are left out on both sides, as are value instances and params. Names are compared by their ids (an attribute without one by `_unnamed` and its index), so gnrcrdr's `-orig-id` names are mapped back to them, and integers beyond 2^53, which the JavaScript runtime holds as doubles, are compared as doubles. Floats are compared as numbers, as the runtime writes one with an integer value as an integer, and an `f4`, which gnrcrdr writes with the shortest digits that give it, equals the double the runtime widens it to. The runtime reads some negative `s8` values wrongly, as its XOR of the low word is a signed 32-bit one. The JavaScript runtime (0.11.0) moves past a terminator with `include: true` once more than the C++ runtime and gnrcrdr do, so a schema that uses it can differ after it. It decodes strings with `TextDecoder`, which removes a byte-order mark at the start of a UTF-16 string, decodes ISO-8859-1 as windows-1252, and has neither UTF-32 nor IBM437, so strings in those can differ or fail there; its `.length` counts UTF-16 units. The script reads the schemas the schema imports, and gives them to both decoders. With `--offsets` it compares offsets instead of values: those of gnrcrdr's `--offsets` dump, and those the runtime records in debug mode, for every value that is not a set instance. The script exits 1 if any file differs or fails to decode. Run it when the decoder, the `.ksy` compiler or `formats/gif.ksy` changes.
+Both decodes are brought to one shape, every field an array of its values, and compared field by field. Parse instances are compared as fields; fields with no values are left out on both sides, as are value instances and params. Names are compared by their ids (an attribute without one by `_unnamed` and its index), so zelbyn's `-orig-id` names are mapped back to them, and integers beyond 2^53, which the JavaScript runtime holds as doubles, are compared as doubles. Floats are compared as numbers, as the runtime writes one with an integer value as an integer, and an `f4`, which zelbyn writes with the shortest digits that give it, equals the double the runtime widens it to. The runtime reads some negative `s8` values wrongly, as its XOR of the low word is a signed 32-bit one. The JavaScript runtime (0.11.0) moves past a terminator with `include: true` once more than the C++ runtime and zelbyn do, so a schema that uses it can differ after it. It decodes strings with `TextDecoder`, which removes a byte-order mark at the start of a UTF-16 string, decodes ISO-8859-1 as windows-1252, and has neither UTF-32 nor IBM437, so strings in those can differ or fail there; its `.length` counts UTF-16 units. The script reads the schemas the schema imports, and gives them to both decoders. With `--offsets` it compares offsets instead of values: those of zelbyn's `--offsets` dump, and those the runtime records in debug mode, for every value that is not a set instance. The script exits 1 if any file differs or fails to decode. Run it when the decoder, the `.ksy` compiler or `formats/gif.ksy` changes.
 
 ## Corpus check
 
@@ -86,11 +86,11 @@ The record names the commit of kaitai_struct_formats it was made at, and the clo
 
 ## YAML corpus check
 
-`gnrcrdr/yaml` parses the subset of YAML that `.ksy` files use. `tools/yaml_corpus/compare.py` checks it against libyaml on every `.ksy` file in a directory, normally a clone of [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) kept outside this repository. It needs PyYAML built with libyaml (on Arch, `python-yaml`):
+`zelbyn/yaml` parses the subset of YAML that `.ksy` files use. `tools/yaml_corpus/compare.py` checks it against libyaml on every `.ksy` file in a directory, normally a clone of [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) kept outside this repository. It needs PyYAML built with libyaml (on Arch, `python-yaml`):
 
 ```
 git clone --depth 1 https://github.com/kaitai-io/kaitai_struct_formats ../kaitai_struct_formats
 python3 tools/yaml_corpus/compare.py ../kaitai_struct_formats
 ```
 
-Every file must give the same node tree from both parsers (kinds, scalar styles and text, and every line and column), or be rejected by gnrcrdr as outside the subset (anchors, aliases, tags, merge keys, complex keys, directives, multi-document streams, duplicate keys), or be rejected by both. The script exits 1 if any file differs. Run it when the parser changes.
+Every file must give the same node tree from both parsers (kinds, scalar styles and text, and every line and column), or be rejected by zelbyn as outside the subset (anchors, aliases, tags, merge keys, complex keys, directives, multi-document streams, duplicate keys), or be rejected by both. The script exits 1 if any file differs. Run it when the parser changes.

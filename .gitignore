@@ -1,8 +1,8 @@
-gnrcrdr.exe
-gnrcrdr.pdb
-gnrcrdr.raddbgi
+zelbyn.exe
+zelbyn.pdb
+zelbyn.raddbgi
 core/
-gnrcrdr.bin
+zelbyn.bin
 *.sublime-workspace
 tests.bin
 tests.exe

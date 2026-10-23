@@ -1,5 +1,5 @@
 // One cold measurement of the official Kaitai Struct C++ runtime, as
-// tools/bench/main.odin is of gnrcrdr (decision record §10.2). build.py
+// tools/bench/main.odin is of zelbyn (decision record §10.2). build.py
 // compiles it with the parser that the official compiler generates from a
 // .ksy schema; bench.py runs it in a fresh process for every measurement.
 //
@@ -9,7 +9,7 @@
 // and parses it: that is the decode. Prints one line of name=value pairs:
 // read_us, decode_us, and faults, the page faults taken during the decode
 // (-1 where getrusage is not available). The parsed object is never freed,
-// as gnrcrdr's tree is not.
+// as zelbyn's tree is not.
 #include KS_HEADER
 
 #include <chrono>

@@ -1,4 +1,4 @@
-# GIF89a, ported field for field from the SQLite schema gnrcrdr used before
+# GIF89a, ported field for field from the SQLite schema zelbyn used before
 # .ksy (format 1 of data/Gif89aMetadata.sqlite3, removed in step 7). Each
 # field keeps its SQLite name in -orig-id, so the dumps match the SQLite
 # schema's byte for byte. The SQLite schema's look-ahead markers and
