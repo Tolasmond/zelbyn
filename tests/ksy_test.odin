@@ -1753,7 +1753,8 @@ t[0].none_size[0] = <1 bytes> 45
 // A value instance that reads a repeated field keeps the value it had when
 // first used, as Kaitai keeps every value instance's, though the field
 // grows after: in the valid of the field's elements, in their size, in its
-// repeat-until, and reached through another value instance.
+// repeat-until, and reached through another value instance. One whose value
+// is the field's array keeps the array, which grows.
 @(test)
 ksy_value_instance_kept :: proc(t: ^testing.T) {
 	Case :: struct {
@@ -1799,6 +1800,22 @@ instances:
   me: {value: _root}
   more_seen: {value: more.size}
 `, {7, 8}, "t[0].more[0] = 7\nt[0].more[1] = 8\n"},
+		// the array itself is kept as the field's, which grows, as Kaitai
+		// keeps a reference to it, directly, through another value instance
+		// and through ?:, while its size, a value of its own, is kept
+		{"array", HEAD + `seq:
+  - id: items
+    type: u1
+    repeat: expr
+    repeat-expr: 3
+    valid:
+      expr: saved.size == _index + 1 and again.size == _index + 1 and pick.size == _index + 1 and count == 1
+instances:
+  saved: {value: items}
+  again: {value: saved}
+  pick: {value: 'saved.size > 0 ? items : [300, 300, 300, 300]'}
+  count: {value: saved.size}
+`, {1, 2, 3}, "t[0].items[0] = 1\nt[0].items[1] = 2\nt[0].items[2] = 3\n"},
 	}
 	for c in cases do expect_dump(t, c.name, ksy_dump(t, c.src, c.input), c.want)
 }
