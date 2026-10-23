@@ -42,11 +42,13 @@ import "core:strings"
 //     and switch-on over an integer, a boolean or a string, also with size,
 //     size-eos or terminator, whose cases are user types or any of those
 //     types
-//   - value instances, with if and enum, of integers, booleans, strings,
-//     byte arrays, set instances and arrays, over their type, its _io, and
-//     through _parent and _root those enclosing it, and parse instances:
-//     instances with pos, io (_io or the _io of a set instance) and the keys
-//     of an attribute
+//   - value instances, with if and enum, of integers, floats, booleans,
+//     strings, byte arrays, set instances and arrays, over their type, its
+//     _io, and through _parent and _root those enclosing it, and parse
+//     instances: instances with pos, io (_io or the _io of a set instance)
+//     and the keys of an attribute
+//   - float literals and float fields in expressions, with + - * / and the
+//     comparisons, also with integers
 //   - casts, .as<t>, to an integer type and, of a switch-on field, to the
 //     user type of a case, and array literals, [a, b]
 //   - params of integer types, bool and bytes, in types and at the top
@@ -57,11 +59,12 @@ import "core:strings"
 //
 // Not supported yet (Unsupported): other encodings, instances without pos or
 // value, params of other types (str, user types, struct, io, any) and on the
-// top-level type of the schema compiled, valid on a float, min and max on a
-// type other than an integer, an endian that is a switch-on, imports in a
-// type, and in a type that contains itself, the members of the sets
-// enclosing it, other than through the schema's _root, and an instance that
-// refers to itself through a field of its type.
+// top-level type of the schema compiled, % of a float, array literals of
+// arrays, valid on a float, min and max on a type other than an integer, an
+// endian that is a switch-on, imports in a type, and in a type that contains
+// itself, the members of the sets enclosing it, other than through the
+// schema's _root, and an instance that refers to itself through a field of
+// its type.
 
 Error_Kind :: enum {
 	None,
@@ -1082,7 +1085,7 @@ note_escapes :: proc(c: ^Compiler, n: ^yml.Node, what: string, e: ^mdata.Expr, s
 		note_escapes(c, n, what, x.operand, scope)
 	case mdata.Array_Literal:
 		for item in x.items do note_escapes(c, n, what, item, scope)
-	case mdata.Int_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element:
+	case mdata.Int_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal, mdata.Io_Pos, mdata.Io_Size, mdata.Io_Eof, mdata.Repeat_Index, mdata.Repeat_Element:
 	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast:
 		panic("note_escapes: unresolved expression")
 	}
@@ -1334,9 +1337,9 @@ compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Inst
 	}
 	e := compile_expr(c, value, "value", scope, .Unresolved) or_return
 	#partial switch e.type {
-	case .Int, .Bool, .String, .Bytes, .Struct, .Array:
+	case .Int, .Float, .Bool, .String, .Bytes, .Struct, .Array:
 	case:
-		return fail(c, .Unsupported, value, "value instance %s: only integer, boolean, string, byte array, set and array values are supported, not %s", inst.name, expr.type_name(e.type))
+		return fail(c, .Unsupported, value, "value instance %s: only integer, float, boolean, string, byte array, set and array values are supported, not %s", inst.name, expr.type_name(e.type))
 	}
 	if n := get(src.spec, "enum"); n != nil {
 		if e.type != .Int do return fail(c, .Invalid, get_key(src.spec, "enum"), "value instance %s: enum applies only to integer values", inst.name)

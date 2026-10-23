@@ -199,6 +199,8 @@ type_name :: proc(t: mdata.Expr_Type) -> string {
 		return "an unresolved expression"
 	case .Int:
 		return "an integer"
+	case .Float:
+		return "a float"
 	case .Bool:
 		return "a boolean"
 	case .Bytes:
@@ -222,6 +224,8 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 	switch x in e.variant {
 	case mdata.Int_Literal:
 		e.type = .Int
+	case mdata.Float_Literal:
+		e.type = .Float
 	case mdata.Bool_Literal:
 		e.type = .Bool
 	case mdata.String_Literal:
@@ -229,6 +233,7 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 	case mdata.Unary:
 		resolve(r, x.operand) or_return
 		want: mdata.Expr_Type = x.op == .Not ? .Bool : .Int
+		if x.op == .Neg && x.operand.type == .Float do want = .Float
 		expect(r, x.operand, want) or_return
 		e.type = want
 	case mdata.Binary:
@@ -240,7 +245,7 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 		resolve(r, x.then) or_return
 		resolve(r, x.otherwise) or_return
 		expect(r, x.cond, .Bool) or_return
-		if x.then.type != .Int && x.then.type != .Bool && x.then.type != .String && x.then.type != .Stream do return fail(r, .Unsupported, x.then.offset, "?: on %s is not supported", type_name(x.then.type))
+		if x.then.type != .Int && x.then.type != .Float && x.then.type != .Bool && x.then.type != .String && x.then.type != .Stream do return fail(r, .Unsupported, x.then.offset, "?: on %s is not supported", type_name(x.then.type))
 		expect(r, x.otherwise, x.then.type) or_return
 		e.type = x.then.type
 	case mdata.Index:
@@ -305,18 +310,31 @@ binary_type :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Binary) -> (t: mdata.
 			expect(r, x.right, .String) or_return
 			return .String, true
 		}
+		if is_float(r, x) or_return do return .Float, true
 		expect(r, x.left, .Int) or_return
 		expect(r, x.right, .Int) or_return
 		return .Int, true
-	case .Mul, .Div, .Mod, .Sub, .Shl, .Shr, .And, .Xor, .Or:
+	case .Mul, .Div, .Sub:
+		if is_float(r, x) or_return do return .Float, true
+		expect(r, x.left, .Int) or_return
+		expect(r, x.right, .Int) or_return
+		return .Int, true
+	case .Mod:
+		if x.left.type == .Float || x.right.type == .Float do return .Unresolved, fail(r, .Unsupported, e.offset, "%% of a float is not supported")
+		expect(r, x.left, .Int) or_return
+		expect(r, x.right, .Int) or_return
+		return .Int, true
+	case .Shl, .Shr, .And, .Xor, .Or:
 		expect(r, x.left, .Int) or_return
 		expect(r, x.right, .Int) or_return
 		return .Int, true
 	case .Lt, .Le, .Gt, .Ge:
+		if is_float(r, x) or_return do return .Bool, true
 		if x.left.type != .String && x.left.type != .Bytes do expect(r, x.left, .Int) or_return
 		expect(r, x.right, x.left.type) or_return
 		return .Bool, true
 	case .Eq, .Ne:
+		if is_float(r, x) or_return do return .Bool, true
 		if x.left.type != .Int && x.left.type != .Bool && x.left.type != .String && x.left.type != .Bytes {
 			return .Unresolved, fail(r, .Unsupported, e.offset, "comparing %s is not supported", type_name(x.left.type))
 		}
@@ -328,6 +346,17 @@ binary_type :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Binary) -> (t: mdata.
 		return .Bool, true
 	}
 	return .Unresolved, false
+}
+
+// True when x, an arithmetic operation or a comparison, is on a Float and
+// a number, an Int or a Float, which the decoder makes a Float first.
+@(private = "file")
+is_float :: proc(r: ^Resolver, x: mdata.Binary) -> (float: bool, ok: bool) {
+	if x.left.type != .Float && x.right.type != .Float do return false, true
+	for side in ([]^mdata.Expr{x.left, x.right}) {
+		if side.type != .Int && side.type != .Float do return false, fail(r, .Invalid, side.offset, "expected a number, found %s", type_name(side.type))
+	}
+	return true, true
 }
 
 @(private = "file")
@@ -452,11 +481,13 @@ value_type :: proc(r: ^Resolver, e: ^mdata.Expr, field: ^mdata.Node, name: strin
 		return .String, true
 	case .Bool:
 		return .Bool, true
+	case .Float32, .Float64:
+		return .Float, true
 	case .Set:
 		if field.switch_on != nil do return switch_type(r, e, field, name)
 		return .Struct, true
 	}
-	return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a %v; only integer, boolean, blob, string and set fields can be used in expressions", name, field.type)
+	panic("value_type: a field of no type")
 }
 
 // The type of one value of field, a switch-on: the type of the values of
@@ -511,7 +542,8 @@ array_item_type :: proc(r: ^Resolver, e: ^mdata.Expr, array: ^mdata.Expr) -> (t:
 
 // [a, b, ...]: integer literals from 0 to 255 make a Bytes_Literal, as in
 // Kaitai; other items make an Array of their type, which must be one of
-// Int, Bool, String and Bytes, the same for all.
+// Int, Float, Bool, String and Bytes, the same for all, but that among
+// floats an integer literal is made a float literal.
 @(private = "file")
 resolve_array_literal :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Array_Literal) -> bool {
 	if len(x.items) == 0 do return fail(r, .Invalid, e.offset, "an array literal cannot be empty; its type would be unknown")
@@ -530,10 +562,19 @@ resolve_array_literal :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Array_Liter
 	}
 
 	t := x.items[0].type
+	for item in x.items {
+		if item.type == .Float do t = .Float
+	}
 	#partial switch t {
-	case .Int, .Bool, .String, .Bytes:
+	case .Int, .Float, .Bool, .String, .Bytes:
 	case:
-		return fail(r, .Unsupported, x.items[0].offset, "an array literal of %s is not supported; only of integers, booleans, strings and byte arrays", type_name(t))
+		return fail(r, .Unsupported, x.items[0].offset, "an array literal of %s is not supported; only of integers, floats, booleans, strings and byte arrays", type_name(t))
+	}
+	for item in x.items {
+		if lit, is_int := item.variant.(mdata.Int_Literal); is_int && t == .Float {
+			item.variant = mdata.Float_Literal{f64(lit.value)}
+			item.type = .Float
+		}
 	}
 	for item in x.items[1:] {
 		if item.type != t do return fail(r, .Invalid, item.offset, "the items of an array literal must have one type: %s, not %s", type_name(t), type_name(item.type))
@@ -659,7 +700,7 @@ resolve_member :: proc(r: ^Resolver, e: ^mdata.Expr, m: mdata.Member) -> bool {
 			e.type = .Int
 			return true
 		}
-	case .Bool:
+	case .Bool, .Float:
 		if m.name == "to_i" {
 			e.variant = mdata.To_I{operand}
 			e.type = .Int

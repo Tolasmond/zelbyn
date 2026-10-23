@@ -5,14 +5,16 @@ import dat "../data"
 import fld "../field"
 import mdata "../metadata"
 import "base:intrinsics"
+import "core:math"
 import "core:slice"
 import "core:unicode/utf8"
 
-// The value of an expression, by its type: Int, Bool, Bytes, String, Array
-// and Struct in that order.
+// The value of an expression, by its type: Int, Float, Bool, Bytes, String,
+// Array and Struct in that order.
 @(private)
 Eval_Value :: union {
 	int,
+	f64,
 	bool,
 	[]byte,
 	string,
@@ -71,13 +73,15 @@ eval_value :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (value: fld.Valu
 	return tree_value(v), .None
 }
 
-// v, an Int, Bool, String or Bytes value, as a value of the tree: an Int is
-// an i64.
+// v, an Int, Float, Bool, String or Bytes value, as a value of the tree: an
+// Int is an i64.
 @(private = "file")
 tree_value :: proc(v: Eval_Value) -> fld.Value {
 	#partial switch x in v {
 	case int:
 		return i64(x)
+	case f64:
+		return x
 	case bool:
 		return x
 	case string:
@@ -85,7 +89,7 @@ tree_value :: proc(v: Eval_Value) -> fld.Value {
 	case []byte:
 		return x
 	}
-	panic("tree_value: not an Int, Bool, String or Bytes value")
+	panic("tree_value: not an Int, Float, Bool, String or Bytes value")
 }
 
 // operand[index], when operand is an array literal, directly or as the
@@ -190,6 +194,8 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 	switch x in e.variant {
 	case mdata.Int_Literal:
 		return x.value, .None
+	case mdata.Float_Literal:
+		return x.value, .None
 	case mdata.Bool_Literal:
 		return x.value, .None
 	case mdata.String_Literal:
@@ -216,7 +222,12 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		return int_to_string(d, operand.(int)), .None
 	case mdata.To_I:
 		operand := eval(d, x.operand, ctx) or_return
-		if b, is_bool := operand.(bool); is_bool do return int(b), .None
+		#partial switch o in operand {
+		case bool:
+			return int(o), .None
+		case f64:
+			return float_to_int(o)
+		}
 		return string_to_int(operand.(string))
 	case mdata.Array_Method:
 		operand := eval(d, x.operand, ctx) or_return
@@ -225,6 +236,7 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		operand := eval(d, x.operand, ctx) or_return
 		switch x.op {
 		case .Neg:
+			if f, is_float := operand.(f64); is_float do return -f, .None
 			n := operand.(int)
 			if n == min(int) do return nil, .Integer_Overflow
 			return -n, .None
@@ -460,8 +472,10 @@ single_value :: proc(value: fld.Value) -> (Eval_Value, dat.Read_Error) {
 		return v, .None
 	case ^fld.Instance:
 		return v, .None
-	case f32, f64:
-		// the resolver rejects references to these
+	case f32:
+		return f64(v), .None
+	case f64:
+		return v, .None
 	}
 	panic("eval: a field value of an unsupported type")
 }
@@ -520,9 +534,9 @@ eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval
 	right := eval(d, x.right, ctx) or_return
 
 	// integers first: they are what the decoder evaluates per element
-	a, is_int := left.(int)
-	if !is_int do return eval_binary_other(d, x.op, left, right), .None
-	b := right.(int)
+	a, a_is_int := left.(int)
+	b, b_is_int := right.(int)
+	if !a_is_int || !b_is_int do return eval_binary_other(d, x.op, left, right), .None
 	n: int
 	overflow: bool
 	switch x.op {
@@ -573,9 +587,36 @@ eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval
 	return n, .None
 }
 
-// x op y for two strings or two booleans.
+// x op y for two strings, two booleans, or two numbers of which one is a
+// float.
 @(private = "file")
 eval_binary_other :: proc(d: ^Decoder, op: mdata.Binary_Op, x, y: Eval_Value) -> Eval_Value {
+	if l, is_number := as_float(x); is_number {
+		r, _ := as_float(y)
+		#partial switch op {
+		case .Mul:
+			return l * r
+		case .Div:
+			return l / r
+		case .Add:
+			return l + r
+		case .Sub:
+			return l - r
+		case .Eq:
+			return l == r
+		case .Ne:
+			return l != r
+		case .Lt:
+			return l < r
+		case .Le:
+			return l <= r
+		case .Gt:
+			return l > r
+		case .Ge:
+			return l >= r
+		}
+		panic("eval: invalid operator on floats")
+	}
 	// byte arrays compare byte by byte, as strings do
 	if l, is_bytes := x.([]byte); is_bytes do return eval_binary_other(d, op, string(l), string(y.([]byte)))
 	if l, is_bool := x.(bool); is_bool {
@@ -610,6 +651,28 @@ eval_binary_other :: proc(d: ^Decoder, op: mdata.Binary_Op, x, y: Eval_Value) ->
 		return l >= r
 	}
 	panic("eval: invalid operator on strings")
+}
+
+// v as a float, when it is a number.
+@(private = "file")
+as_float :: proc(v: Eval_Value) -> (f: f64, is_number: bool) {
+	#partial switch x in v {
+	case int:
+		return f64(x), true
+	case f64:
+		return x, true
+	}
+	return
+}
+
+// The integer part of f, rounded toward zero: Integer_Overflow when it does
+// not fit an int, or f is not a number.
+@(private = "file", require_results)
+float_to_int :: proc(f: f64) -> (v: Eval_Value, err: dat.Read_Error) {
+	t := math.trunc(f)
+	// -2^63 fits, 2^63 does not; NaN fails both
+	if !(t >= -9223372036854775808.0 && t < 9223372036854775808.0) do return nil, .Integer_Overflow
+	return int(t), .None
 }
 
 // The decimal digits of n, with a - when it is negative, in the tree's

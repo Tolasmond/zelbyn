@@ -1,6 +1,7 @@
 package expression
 
 import mdata "../metadata"
+import "core:strconv"
 import "core:strings"
 
 // e as text, with every unary, binary and ?: operation parenthesized, so
@@ -54,6 +55,14 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 	switch x in e.variant {
 	case mdata.Int_Literal:
 		strings.write_int(b, x.value)
+	case mdata.Float_Literal:
+		// the shortest digits that give the value, always with a . or an
+		// exponent, so that it reads back as a float
+		buf: [32]byte
+		text := strconv.write_float(buf[:], x.value, 'g', -1, 64)
+		if text[0] == '+' do text = text[1:]
+		strings.write_string(b, text)
+		if !strings.contains_any(text, ".e") do strings.write_string(b, ".0")
 	case mdata.Bool_Literal:
 		strings.write_string(b, x.value ? "true" : "false")
 	case mdata.String_Literal:
