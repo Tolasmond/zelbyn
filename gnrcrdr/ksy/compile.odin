@@ -23,8 +23,8 @@ import "core:strings"
 // Supported:
 //   - meta: id, endian, bit-endian, encoding, ks-version (checked against
 //     KS_VERSION), imports, and title, application, file-extension, xref,
-//     license and tags (ignored); seq, types, instances, enums and doc,
-//     doc-ref
+//     license and tags (ignored); seq, types, instances, enums, doc,
+//     doc-ref and to-string (parsed, and otherwise ignored)
 //   - meta in a type, with the same keys but imports, whose endian,
 //     bit-endian and encoding apply in it and the types declared in it
 //   - imported schemas, whose top-level types are used by their meta id,
@@ -353,13 +353,10 @@ META_KEYS :: Keys {
 }
 
 @(private = "file")
-TYPE_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "doc-ref", "params"}
+TYPE_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "doc-ref", "params", "to-string"}
 
 @(private = "file")
-TOP_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "doc-ref", "params"}
-
-@(private = "file")
-TYPE_UNSUPPORTED :: []string{"to-string"}
+TOP_ALLOWED :: []string{"meta", "seq", "types", "instances", "enums", "doc", "doc-ref", "params", "to-string"}
 
 @(private = "file")
 ATTR_ALLOWED :: []string{"id", "type", "size", "contents", "if", "enum", "valid", "repeat", "repeat-expr", "repeat-until", "encoding", "doc", "doc-ref", "size-eos", "terminator", "consume", "include", "eos-error", "pad-right"}
@@ -453,7 +450,7 @@ compile_schema :: proc(c: ^Compiler, root: ^yml.Node, ff: ^mdata.File_Format) ->
 @(private = "file")
 load_schema :: proc(c: ^Compiler, root: ^yml.Node) -> (top: ^Type_Def, ok: bool) {
 	expect_map(c, root, "a schema") or_return
-	check_keys(c, root, {what = "the top level", allowed = TOP_ALLOWED, unsupported = TYPE_UNSUPPORTED}) or_return
+	check_keys(c, root, {what = "the top level", allowed = TOP_ALLOWED}) or_return
 
 	meta := get(root, "meta")
 	if meta == nil do return nil, fail(c, .Invalid, root, "the schema has no meta")
@@ -663,11 +660,14 @@ build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_De
 	if parent != nil {
 		if spec.kind != .Map do return nil, fail(c, .Invalid, spec, "type %s must be a mapping", name)
 		// -orig-id on a type documents its original name; nothing shows it
-		check_keys(c, spec, {what = "type %s", name = name, allowed = TYPE_ALLOWED, unsupported = TYPE_UNSUPPORTED, extensions = {"-orig-id"}}) or_return
+		check_keys(c, spec, {what = "type %s", name = name, allowed = TYPE_ALLOWED, extensions = {"-orig-id"}}) or_return
 		td.meta = parent.meta
 		if meta := get(spec, "meta"); meta != nil {
 			td.meta = type_meta(c, name, meta, parent.meta) or_return
 		}
+	}
+	if n := get(spec, "to-string"); n != nil {
+		check_to_string(c, n) or_return
 	}
 
 	if seq := get(spec, "seq"); seq != nil {
@@ -729,6 +729,18 @@ type_meta :: proc(c: ^Compiler, name: string, meta: ^yml.Node, inherited: Meta) 
 	}
 	if k := get_key(meta, "imports"); k != nil do return {}, fail(c, .Unsupported, k, "type %s: imports in a type are not supported, only in the schema's meta", name)
 	return meta_of(c, meta, inherited)
+}
+
+// to-string, which in Kaitai defines how a type's instances are shown, and
+// which nothing gnrcrdr writes shows: it is parsed, so that a schema that
+// is not valid Kaitai, or is outside the subset, is rejected, but not
+// resolved, as the official compiler does not resolve its names either.
+@(private = "file")
+check_to_string :: proc(c: ^Compiler, n: ^yml.Node) -> bool {
+	text := expect_scalar(c, n, "to-string") or_return
+	_, err := expr.parse(text, c.scratch)
+	if err.kind != .None do return expr_error(c, n, "to-string", err, 0)
+	return true
 }
 
 @(private = "file")

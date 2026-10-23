@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 132 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 138 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -145,16 +145,16 @@ ERR	media/wav.ksy	Unsupported	media/wav.ksy:76:11	chunk: a type of another type 
 OK	network/bitcoin_transaction.ksy
 OK	network/dime_message.ksy
 OK	network/dns_packet.ksy
-ERR	network/ethernet_frame.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
+OK	network/ethernet_frame.ksy
 OK	network/hccap.ksy
 OK	network/hccapx.ksy
 OK	network/icmp_packet.ksy
-ERR	network/ipv4_packet.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
-ERR	network/ipv6_packet.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
-ERR	network/microsoft_network_monitor_v2.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
-ERR	network/packet_ppi.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
+OK	network/ipv4_packet.ksy
+OK	network/ipv6_packet.ksy
+OK	network/microsoft_network_monitor_v2.ksy
+OK	network/packet_ppi.ksy
 ERR	network/pcap.ksy	Unsupported	network/pcap.ksy:35:9	endian: switch-on is not supported
-ERR	network/protocol_body.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
+ERR	network/protocol_body.ksy	Unsupported	network/protocol_body.ksy:25:1	params on the top-level type are not supported, except in an imported schema
 ERR	network/rtcp_payload.ksy	Unsupported	network/rtcp_payload.ksy:158:7	instance packet_status: an instance without pos or value is not supported
 OK	network/rtp_packet.ksy
 OK	network/rtpdump.ksy
@@ -163,7 +163,7 @@ OK	network/some_ip/some_ip_container.ksy
 OK	network/some_ip/some_ip_sd.ksy
 OK	network/some_ip/some_ip_sd_entries.ksy
 OK	network/some_ip/some_ip_sd_options.ksy
-ERR	network/tcp_segment.ksy	Unsupported	network/tcp_segment.ksy:53:5	type flags: to-string is not supported
+OK	network/tcp_segment.ksy
 OK	network/tls_client_hello.ksy
 OK	network/udp_datagram.ksy
 OK	network/websocket.ksy
