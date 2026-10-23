@@ -258,6 +258,14 @@ EVAL_CASES := [?]Eval_Case {
 	{text = "[1, 2].as<bytes>.size", want = "2"},
 	{text = "[a + 251].as<bytes>.size", err = .Integer_Overflow},
 	{text = "[0.5, 2.5][a - 4]", want = "2.5"},
+
+	// an integer among floats is a float, wherever it is
+	{text = "[a, 1.5][0].to_i", want = "5"},
+	{text = "[a, 1.5][0] / 2", want = "2.5"},
+	{text = "[1.5, a][1] / 2", want = "2.5"},
+	{text = "[0.5, 2, a][a - 3] / 2", want = "2.5"},
+	{text = "[a, 0.5].first / 2 + [0.5, a].last / 2", want = "5.0"},
+	{text = "[18446744073709551615, 0.5][0] > 1.0e19", want = "true"},
 }
 
 @(test)

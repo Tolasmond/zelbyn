@@ -190,7 +190,7 @@ The resolved variants are:
 | `Repeat_Element{node}` | `_` in `repeat-until` |
 | `Value_Ref{base, instance}` | A value instance of the instance `base` |
 | `Bytes_Literal{value}` | An array literal of integer literals from 0 to 255, a byte array, as in Kaitai |
-| `Array_Literal{items, item_type}` | Any other array literal, an `Array` of items of one type, `Int`, `Float`, `Bool`, `String` or `Bytes`, an integer literal among floats being made a `Float_Literal`, or `Array`, array literals whose items have one type (`resolve_array_literal`) |
+| `Array_Literal{items, item_type}` | Any other array literal, an `Array` of items of one type, `Int`, `Float`, `Bool`, `String` or `Bytes`, an integer among floats being made a float, a literal a `Float_Literal` and any other `e + 0.0` (`as_float`), or `Array`, array literals whose items have one type (`resolve_array_literal`) |
 | `Switch_Cast{operand, type_name, node, choices}` | `x.as<t>` of a `switch-on` field read once, to the user type of some of its cases: the instance, as `node`, the first of those cases' sets; `choices` are their indexes, as `Instance.choice` records them |
 
 Type rules:
