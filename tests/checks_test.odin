@@ -82,7 +82,7 @@ decode_checks :: proc(t: ^testing.T) {
 		a := arn.arena_allocator(&ff.arena)
 
 		f := plan_node("f", c.type, a)
-		f.count = mdat.Fixed_Count{c.count}
+		f.count = mdat.Fixed_Count{n = c.count}
 		f.valid = c.valid
 		if c.type == .String || c.type == .Blob do f.length = mdat.Fixed_Length{c.length}
 		ff.root = plan_node("r", .Set, a, f)
@@ -107,7 +107,7 @@ make_bits_plan :: proc(ff: ^mdat.File_Format) -> (p: ^mdat.Node) {
 	a := arn.arena_allocator(&ff.arena)
 
 	p = plan_node("p", .Int8, a)
-	p.count = mdat.Fixed_Count{2}
+	p.count = mdat.Fixed_Count{n = 2}
 	p.bits = slice.clone([]mdat.Bit_Field{{name = "lo", type = .UInt8, low = 0, high = 3}, {name = "hi", type = .Int32, low = 4, high = 7}}, a)
 
 	w := plan_node("w", .UInt64, a)

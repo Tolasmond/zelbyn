@@ -115,8 +115,12 @@ Count :: union {
 	Until_Count,
 }
 
+// n elements. repeat is true when the schema repeats the field (a literal
+// repeat-expr), which makes it an array even of one element, as in Kaitai;
+// a field read once without a repeat is a count of 1 without it.
 Fixed_Count :: struct {
-	n: int,
+	n:      int,
+	repeat: bool,
 }
 
 // The value of expr, an Int expression.
