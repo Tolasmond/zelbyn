@@ -785,8 +785,8 @@ first_item :: proc(array: ^mdata.Expr) -> ^mdata.Expr {
 // [a, b, ...]: integer literals from 0 to 255 make a Bytes_Literal, as in
 // Kaitai; other items make an Array of their type, which must be one of
 // Int, Float, Bool, String and Bytes, the same for all, but that among
-// floats an integer literal is made a float literal, or array literals
-// whose items are all of one type.
+// floats an integer is made a float (as_float), as in Kaitai, or array
+// literals whose items are all of one type.
 @(private = "file")
 resolve_array_literal :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Array_Literal) -> bool {
 	if len(x.items) == 0 do return fail(r, .Invalid, e.offset, "an array literal cannot be empty; its type would be unknown")
@@ -819,13 +819,9 @@ resolve_array_literal :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Array_Liter
 	case:
 		return fail(r, .Unsupported, x.items[0].offset, "an array literal of %s is not supported; only of integers, floats, booleans, strings, byte arrays and arrays", type_name(t))
 	}
+	// the first item, too, may differ from t, which a later float decides
 	for item in x.items {
-		if lit, is_int := item.variant.(mdata.Int_Literal); is_int && t == .Float {
-			item.variant = mdata.Float_Literal{f64(lit.value)}
-			item.type = .Float
-		}
-	}
-	for item in x.items[1:] {
+		if item.type == .Int && t == .Float do as_float(r, item)
 		if item.type != t do return fail(r, .Invalid, item.offset, "the items of an array literal must have one type: %s, not %s", type_name(t), type_name(item.type))
 	}
 	e.variant = mdata.Array_Literal{x.items, t}
