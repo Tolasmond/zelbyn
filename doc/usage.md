@@ -101,7 +101,7 @@ error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]
 
 ## Schemas
 
-`.ksy` schemas are read with zelbyn's own YAML parser, which accepts the YAML that `.ksy` files use and rejects anchors, aliases, tags, merge keys, complex keys, multi-document streams and duplicate keys. The compiler supports this subset of Kaitai Struct, and rejects everything else, naming the key and its location:
+`.ksy` schemas are read with zelbyn's own YAML parser, which accepts the YAML that `.ksy` files use and rejects anchors, aliases, tags, merge keys, complex keys, multi-document streams and duplicate keys. A schema is UTF-8; raw control characters other than tab and line breaks are an error, as in libyaml, though escapes such as `\x01` in a double-quoted string are allowed. The compiler supports this subset of Kaitai Struct, and rejects everything else, naming the key and its location:
 
 | Area | Supported |
 |---|---|
