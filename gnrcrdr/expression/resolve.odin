@@ -11,9 +11,9 @@ import "core:mem"
 Scope :: struct {
 	types:     []^mdata.Node,
 	own_root:  bool,        // types[0] is the top level of an imported schema, its _root, but not the root of the decoded tree
+	no_root:   bool,        // types[0] is a type declared in a schema other than the one it is used from, which has no _root there, as in Kaitai
 	in_repeat: bool,        // the expression is evaluated for each element of a repeated field, so _index is defined
 	element:   ^mdata.Node, // repeat-until and valid: the field whose element _ is; nil elsewhere
-	enums:     []Enum,      // the enums enum constants may name; the first with a name is used
 	instance:  ^mdata.Value_Instance, // in a value instance's expression, the instance, marked cached when it uses _io.pos or _io.eof
 
 	// Called when an expression refers to a value instance whose expr is
@@ -30,6 +30,11 @@ Scope :: struct {
 	// called name, as set's type names it. On failure it returns the error,
 	// whose offset the resolver sets. When nil, these are an error.
 	size_of: proc(data: rawptr, set: ^mdata.Node, name: string, of_type: bool) -> (bits: int, err: Error),
+
+	// The enum called name, a name or a path (a::b::e), as set's type
+	// names it, for enum constants; nil when there is none. When nil, no
+	// enum is.
+	find_enum: proc(data: rawptr, set: ^mdata.Node, name: string) -> ^Enum,
 
 	// Whether sets a and b are of the same type, for ?: on sets. When nil,
 	// they are not.
@@ -308,18 +313,17 @@ resolve :: proc(r: ^Resolver, e: ^mdata.Expr) -> bool {
 
 @(private = "file")
 resolve_enum_constant :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Enum_Constant) -> bool {
-	for en in r.scope.enums {
-		if en.name != x.enum_name do continue
-		for v in en.values {
-			if v.name == x.value_name {
-				e.variant = mdata.Int_Literal{v.value}
-				e.type = .Int
-				return true
-			}
+	en: ^Enum
+	if r.scope.find_enum != nil do en = r.scope.find_enum(r.scope.data, r.scope.types[len(r.scope.types) - 1], x.enum_name)
+	if en == nil do return fail(r, .Invalid, e.offset, "no enum %s", x.enum_name)
+	for v in en.values {
+		if v.name == x.value_name {
+			e.variant = mdata.Int_Literal{v.value}
+			e.type = .Int
+			return true
 		}
-		return fail(r, .Invalid, e.offset, "enum %s has no value %s", x.enum_name, x.value_name)
 	}
-	return fail(r, .Invalid, e.offset, "no enum %s", x.enum_name)
+	return fail(r, .Invalid, e.offset, "enum %s has no value %s", x.enum_name, x.value_name)
 }
 
 @(private = "file")
@@ -408,6 +412,7 @@ resolve_name :: proc(r: ^Resolver, e: ^mdata.Expr, name: string) -> bool {
 
 	switch name {
 	case "_root":
+		if r.scope.no_root do return fail(r, .Invalid, e.offset, "_root: %s is of a type of another schema, which has no _root here, as in Kaitai", types[0].ref_name)
 		if r.scope.own_root {
 			e.variant = mdata.Instance{up = len(types) - 1, node = types[0], imported_root = true}
 		} else {

@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 183 of 190 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 185 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -37,7 +37,7 @@ OK	executable/dos_mz.ksy
 ERR	executable/elf.ksy	Unsupported	executable/elf.ksy:1150:13	instance first_aux: parent is not supported
 OK	executable/java_class.ksy
 OK	executable/mach_o.ksy
-ERR	executable/mach_o_fat.ksy	Unsupported	executable/mach_o_fat.ksy:33:15	cpu_type: an enum of another type (mach_o::cpu_type) is not supported
+OK	executable/mach_o_fat.ksy
 OK	executable/microsoft_pe.ksy
 OK	executable/python_pyc_27.ksy
 OK	executable/swf.ksy
@@ -141,7 +141,7 @@ OK	media/stl.ksy
 OK	media/tracker_modules/fasttracker_xm_module.ksy
 OK	media/tracker_modules/s3m.ksy
 OK	media/vp8_duck_ivf.ksy
-ERR	media/wav.ksy	Unsupported	media/wav.ksy:76:11	chunk: a type of another type (riff::chunk) is not supported
+OK	media/wav.ksy
 OK	network/bitcoin_transaction.ksy
 OK	network/dime_message.ksy
 OK	network/dns_packet.ksy

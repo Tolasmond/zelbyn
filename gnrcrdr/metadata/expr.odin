@@ -172,7 +172,8 @@ Member :: struct {
 	name:    string,
 }
 
-// enum_name::value_name
+// enum_name::value_name, where enum_name can be a path of types to the
+// enum (a::b::e)
 Enum_Constant :: struct {
 	enum_name, value_name: string,
 }

@@ -152,7 +152,9 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    if: a == 1\n", .Invalid, 7, 9, "if: a cannot be used in its own if or repeat-expr"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    enum: e\n", .Invalid, 7, 11, "a: no enum e"},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    enum: e\nenums:\n  e:\n    1: x\n", .Invalid, 7, 5, "a: enum applies only to integer types"},
-	{HEAD + "seq:\n  - id: a\n    type: u1\n    enum: s::e\n", .Unsupported, 7, 11, "an enum of another type (s::e) is not supported"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    enum: s::e\n", .Invalid, 7, 11, "a: no enum s::e"},
+	{HEAD + "seq:\n  - id: a\n    type: u1\n    enum: s::e\ntypes:\n  s:\n    enums:\n      f:\n        1: x\n", .Invalid, 7, 11, "a: no enum s::e"},
+	{HEAD + "seq:\n  - id: a\n    size: 's::e::y'\ntypes:\n  s:\n    enums:\n      e:\n        1: x\n", .Invalid, 6, 12, "enum s::e has no value y"},
 
 	// switch-on
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n", .Invalid, 7, 7, "a: switch-on needs cases"},
@@ -212,7 +214,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    size: _sizeof\n  - id: b\n    type: u1\n", .Invalid, 6, 11, "size: t has no fixed size: a has none"},
 	{HEAD + "seq:\n  - id: a\n    size: sizeof<nope>\n", .Invalid, 6, 11, "size: unknown type nope"},
 	{HEAD + "seq:\n  - id: a\n    size: sizeof<str>\n", .Invalid, 6, 11, "size: str has no fixed size"},
-	{HEAD + "seq:\n  - id: a\n    size: sizeof<s::x>\n", .Unsupported, 6, 11, "size: a type of another type (s::x) is not supported"},
+	{HEAD + "seq:\n  - id: a\n    size: sizeof<s::x>\n", .Invalid, 6, 11, "size: unknown type s::x"},
+	{HEAD + "seq:\n  - id: a\n    type: s::x\ntypes:\n  s: {}\n", .Invalid, 6, 11, "a: unknown type s::x"},
 	{HEAD + "seq:\n  - id: a\n    size: nope._sizeof\n", .Invalid, 6, 16, "size: t has no field nope"},
 	{HEAD + "seq:\n  - id: n\n    type: u1\n    repeat: expr\n    repeat-expr: 2\n  - id: a\n    size: n._sizeof\n", .Unsupported, 10, 13, "size: n is repeated; _sizeof of a repeated attribute is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: v._sizeof\ninstances:\n  v:\n    value: 1\n", .Invalid, 6, 13, "size: v is a value instance, which has no _sizeof"},
@@ -1048,6 +1051,20 @@ main[0].word[0].w[0] = 4660
 main[0].le[0] = 4660
 `)
 
+	// types and enums of other types, by path; one of another schema keeps
+	// its meta
+	input = {2, 0x34, 0x12, 1, 0, 2, 0xaa, 0xbb, 7, 0xcc, 0xdd, 0xee, 0xff, 0x11}
+	expect_dump(t, "paths", ksy_file_dump(t, "tests/schemas/imports/paths.ksy", nil, input), `paths[0].o[0].kind[0] = 2
+paths[0].o[0].in[0].v[0] = 4660
+paths[0].i[0].v[0] = 1
+paths[0].k[0] = 2
+paths[0].skipped[0] = <2 bytes> aa bb
+paths[0].local[0].p[0] = 7
+paths[0].by_enum[0] = <1 bytes> cc
+paths[0].by_param[0] = <2 bytes> dd ee
+paths[0].by_root[0] = <2 bytes> ff 11
+`)
+
 	// an error in an imported schema names its file
 	Case :: struct {
 		path:         string,
@@ -1062,6 +1079,8 @@ main[0].le[0] = 4660
 		{DIR + "errors/broken_import.ksy", .Invalid, DIR + "errors/broken.ksy", 5, 11, "a: unknown type nope"},
 		{DIR + "errors/bad_yaml_import.ksy", .Syntax, DIR + "errors/bad_yaml.ksy", 2, 1, "unterminated flow collection"},
 		{DIR + "errors/orphan.ksy", .Invalid, DIR + "errors/orphan_lib.ksy", 7, 9, "if: _parent: o has no enclosing set here"},
+		{DIR + "errors/parentless.ksy", .Invalid, DIR + "errors/parentless_lib.ksy", 14, 13, "if: _parent: o has no enclosing set here"},
+		{DIR + "errors/rootless.ksy", .Invalid, DIR + "errors/rootless_lib.ksy", 20, 17, "if: _root: o is of a type of another schema, which has no _root here"},
 		{DIR + "errors/twins.ksy", .Invalid, DIR + "errors/twins.ksy", 5, 7, "imports: two schemas have the id tag"},
 	}
 	for c in cases {
