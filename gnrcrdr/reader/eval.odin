@@ -283,6 +283,7 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 			if len(d.frames) == 0 do return nil, .Absent_Field
 			return d.frames[0].instance, .None
 		}
+		if x.imported_root && ctx.self == nil do return imported_root(d, x.node)
 		return ancestor(d, ctx, x.up)
 	case mdata.Field_Ref:
 		base := eval(d, x.base, ctx) or_return
@@ -371,6 +372,19 @@ ancestor :: proc(d: ^Decoder, ctx: Eval_Context, up: int) -> (instance: ^fld.Ins
 	}
 	if up == 0 do return ctx.self, .None
 	return enclosing(d, ctx.base, ctx.caller^, up)
+}
+
+// The instance being decoded of set, the top-level type of an imported
+// schema, which that schema's _root is: the frame read as set, found at any
+// depth, as inside a set reused for its own type (Node.recursive) a fixed
+// number of levels out would not be. Only one frame is read as set, as a
+// set of the type inside it is another node.
+@(private = "file", require_results)
+imported_root :: proc(d: ^Decoder, set: ^mdata.Node) -> (instance: ^fld.Instance, err: dat.Read_Error) {
+	for f in d.frames {
+		if f.set == set || (set.order_switch != nil && f.set == set.order_switch.big) do return f.instance, .None
+	}
+	return nil, .Absent_Field
 }
 
 // The instance up levels above the one that e, a Struct expression

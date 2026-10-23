@@ -2138,11 +2138,11 @@ cycle_a[0].b[0].m[0] = 2
 cycle_a[0].b[0].a[0].n[0] = 3
 cycle_a[0].b[0].a[0].b[0].m[0] = 0
 `)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
-	err := ksy.read_file_format(DIR + "imported_root.ksy", &ff)
-	defer ksy.destroy_error(&err)
-	testing.expectf(t, err.kind == .Unsupported && err.path == DIR + "chain.ksy" && err.line == 8 && err.column == 9 && strings.contains(err.message, "type chain contains itself"), "imported _root: %v at %s:%v:%v: %s", err.kind, err.path, err.line, err.column, err.message)
+	// in a type that contains itself, an imported schema's _root is its
+	// outermost instance at every depth, as in Kaitai: next is read while
+	// the outermost n is not 0, until the input ends
+	expect_dump(t, "imported _root, 0", ksy_file_dump(t, DIR + "imported_root.ksy", nil, {0, 7}), "imported_root[0].c[0].n[0] = 0\n")
+	expect_dump(t, "imported _root, 1", ksy_file_dump(t, DIR + "imported_root.ksy", nil, {1, 0}), "error: Unexpected_EOF at 2 in imported_root[0].c[0].next[0].next[0].n[0]")
 }
 
 // Set instances nest at most reader.MAX_DEPTH deep, and through parse
