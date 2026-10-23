@@ -298,14 +298,8 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		if x.imported_root && ctx.self == nil do return imported_root(d, x.node)
 		return ancestor(d, ctx, x.up)
 	case mdata.Field_Ref:
-		base := eval(d, x.base, ctx) or_return
-		instance := base.(^fld.Instance)
-		values := instance.slots[x.slot]
-		if x.node.pos != nil && raw_data(values) == nil {
-			if d.spans do read_parse_instance(d, instance, x.node, x.slot, true) or_return
-			else do read_parse_instance(d, instance, x.node, x.slot, false) or_return
-			values = instance.slots[x.slot]
-		}
+		slot := field_slot(d, x, ctx) or_return
+		values := slot^
 		if e.type == .Array do return values[:], .None
 		if len(values) == 0 do return nil, .Absent_Field
 		return single_value(values[0])
@@ -335,15 +329,9 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		if ctx.element == nil do return nil, .Absent_Field
 		return single_value(ctx.element)
 	case mdata.Value_Ref:
-		base := eval(d, x.base, ctx) or_return
-		caller := ctx
-		self := Eval_Context{index = -1, self = base.(^fld.Instance), base = x.base, caller = &caller}
-		if x.instance.cached do return eval_cached(d, x.instance, self)
-		if x.instance.cond != nil {
-			cond := eval(d, x.instance.cond, self) or_return
-			if !cond.(bool) do return nil, .Absent_Field
-		}
-		return eval(d, x.instance.expr, self)
+		kept := eval_value_ref(d, x, ctx) or_return
+		if kept.slot != nil do return kept.slot^, .None
+		return kept.value, .None
 	case mdata.Bytes_Literal:
 		// in the tree's arena, which may keep it, as an argument
 		bytes := arn.arena_make(d.arena, byte, len(x.value))
@@ -508,21 +496,73 @@ stream_reader :: proc(d: ^Decoder, stream: ^mdata.Expr, ctx: Eval_Context) -> (r
 	panic("stream_reader: not a Stream expression")
 }
 
+// The slot of x's field in the instance its base gives, the field read
+// first when it is a parse instance that has not been.
+@(private = "file", require_results)
+field_slot :: #force_inline proc(d: ^Decoder, x: mdata.Field_Ref, ctx: Eval_Context) -> (slot: ^[]fld.Value, err: dat.Read_Error) {
+	base := eval(d, x.base, ctx) or_return
+	instance := base.(^fld.Instance)
+	if x.node.pos != nil && raw_data(instance.slots[x.slot]) == nil {
+		if d.spans do read_parse_instance(d, instance, x.node, x.slot, true) or_return
+		else do read_parse_instance(d, instance, x.node, x.slot, false) or_return
+	}
+	return &instance.slots[x.slot], .None
+}
+
+// The value of the value instance x refers to, for the instance its base
+// gives, as eval_kept gives it: kept from its first evaluation when it is
+// cached.
+@(private = "file", require_results)
+eval_value_ref :: proc(d: ^Decoder, x: mdata.Value_Ref, ctx: Eval_Context) -> (v: Kept_Value, err: dat.Read_Error) {
+	base := eval(d, x.base, ctx) or_return
+	caller := ctx
+	self := Eval_Context{index = -1, self = base.(^fld.Instance), base = x.base, caller = &caller}
+	if x.instance.cached do return eval_cached(d, x.instance, self)
+	if x.instance.cond != nil {
+		cond := eval(d, x.instance.cond, self) or_return
+		if !cond.(bool) do return {}, .Absent_Field
+	}
+	return eval_kept(d, x.instance.expr, self)
+}
+
 // Evaluates value instance inst, which is cached, in self, its context: the
 // value it had when first evaluated, when it had one.
 @(private = "file", require_results)
-eval_cached :: proc(d: ^Decoder, inst: ^mdata.Value_Instance, self: Eval_Context) -> (v: Eval_Value, err: dat.Read_Error) {
+eval_cached :: proc(d: ^Decoder, inst: ^mdata.Value_Instance, self: Eval_Context) -> (v: Kept_Value, err: dat.Read_Error) {
 	key := Cached{self.self, inst}
 	if cached, found := d.cache[key]; found do return cached, .None
 	if inst.cond != nil {
 		cond := eval(d, inst.cond, self) or_return
-		if !cond.(bool) do return nil, .Absent_Field
+		if !cond.(bool) do return {}, .Absent_Field
 	}
-	v = eval(d, inst.expr, self) or_return
+	v = eval_kept(d, inst.expr, self) or_return
 	// as in Kaitai, a value instance that has no value is evaluated again
-	if d.cache == nil do d.cache = make(map[Cached]Eval_Value, d.allocator)
+	if d.cache == nil do d.cache = make(map[Cached]Kept_Value, d.allocator)
 	d.cache[key] = v
 	return v, .None
+}
+
+// The value of e as a value instance keeps it: an Array that is the values
+// of a field, directly or through ?: or another value instance, as the slot
+// that holds them, so that it is the field's array also once the field has
+// grown, as Kaitai keeps a reference to it; anything else as its value,
+// such as the field's .size, which keeps the size it had.
+@(private = "file", require_results)
+eval_kept :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Kept_Value, err: dat.Read_Error) {
+	if e.type == .Array {
+		#partial switch x in e.variant {
+		case mdata.Field_Ref:
+			slot := field_slot(d, x, ctx) or_return
+			return {slot = slot}, .None
+		case mdata.Ternary:
+			cond := eval(d, x.cond, ctx) or_return
+			return eval_kept(d, cond.(bool) ? x.then : x.otherwise, ctx)
+		case mdata.Value_Ref:
+			return eval_value_ref(d, x, ctx)
+		}
+	}
+	value := eval(d, e, ctx) or_return
+	return {value = value}, .None
 }
 
 // The value of a field read once, as its expression type.
