@@ -171,8 +171,11 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    consume: false\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n", .Invalid, 6, 5, "a: consume applies only with terminator or strz"},
 	{HEAD + "  encoding: ASCII\nseq:\n  - id: a\n    size: 2\n    consume: false\n    type:\n      switch-on: 1\n      cases:\n        1: strz\n", .Invalid, 8, 5, "a: consume does not apply with a size"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: nope\n", .Invalid, 9, 12, "a: unknown type nope"},
-	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        n: s\ntypes:\n  s: {}\n", .Unsupported, 11, 9, "a case must be an integer or an enum constant"},
+	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        n: s\ntypes:\n  s: {}\n", .Unsupported, 11, 9, "a case must be an integer from -2^63 to 2^63 - 1 or an enum constant"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n        0x1: s\ntypes:\n  s: {}\n", .Invalid, 10, 9, "a: case 1 is already given (line 9, column 9)"},
+	{HEAD + "seq:\n  - id: a\n    type: s1\n    enum: e\n  - id: b\n    type:\n      switch-on: a\n      cases:\n        e::m: u1\n        -1: u1\nenums:\n  e:\n    -1: m\n", .Invalid, 13, 9, "b: case -1 is already given (line 12, column 9)"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        9223372036854775808: u1\n", .Unsupported, 9, 9, "a: a case must be an integer from -2^63 to 2^63 - 1 or an enum constant"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        -9223372036854775809: u1\n", .Unsupported, 9, 9, "a: a case must be an integer from -2^63 to 2^63 - 1 or an enum constant"},
 	{HEAD + "  encoding: ASCII\nseq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n        2: strz\n  - id: b\n    size: a\n", .Unsupported, 13, 11, "size: a is a switch-on field whose values can be an integer or a string"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n    size: 2\n  - id: b\n    size: a\n", .Unsupported, 12, 11, "size: a is a switch-on field whose values can be a byte array or an integer"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        _: s\n  - id: b\n    size: a.c\ntypes:\n  s:\n    seq:\n      - id: c\n        type: u1\n", .Unsupported, 11, 11, "size: a is a switch-on field whose cases are user types; it cannot be used in expressions"},
@@ -1748,6 +1751,100 @@ t[0].item_ref[0] = <3 bytes> 44 44 44
 t[0].valid_indexed[0] = 7
 t[0].none_size[0] = <1 bytes> 45
 `)
+}
+
+// Negative integer cases, written directly, as enum constants, and at the
+// edges of an s8, choose as positive ones do.
+@(test)
+ksy_negative_cases :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: lit
+    type:
+      switch-on: -1
+      cases:
+        -1: u1
+  - id: signs
+    type: s1
+    enum: sign
+    repeat: expr
+    repeat-expr: 2
+  - id: by_enum
+    type:
+      switch-on: signs[_index]
+      cases:
+        sign::minus: u1
+        sign::plus: u2
+    repeat: expr
+    repeat-expr: 2
+  - id: recs
+    type: rec
+    repeat: expr
+    repeat-expr: 5
+types:
+  rec:
+    seq:
+      - id: k
+        type: s8
+      - id: v
+        type:
+          switch-on: k
+          cases:
+            -1: u1
+            -0x80: u2
+            -9223372036854775808: s1
+            9223372036854775807: s2
+enums:
+  sign:
+    -1: minus
+    1: plus
+`
+	input := []byte{
+		1,
+		0xff, 1, 2, 3, 4,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 5,
+		0x80, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 6, 0,
+		0, 0, 0, 0, 0, 0, 0, 0x80, 0xf9,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f, 0xf8, 0xff,
+		1, 0, 0, 0, 0, 0, 0, 0,
+	}
+	expect_dump(t, "negative cases", ksy_dump(t, src, input), `t[0].lit[0] = 1
+t[0].signs[0] = -1
+t[0].signs[1] = 1
+t[0].by_enum[0] = 2
+t[0].by_enum[1] = 1027
+t[0].recs[0].k[0] = -1
+t[0].recs[0].v[0] = 5
+t[0].recs[1].k[0] = -128
+t[0].recs[1].v[0] = 6
+t[0].recs[2].k[0] = -9223372036854775808
+t[0].recs[2].v[0] = -7
+t[0].recs[3].k[0] = 9223372036854775807
+t[0].recs[3].v[0] = -8
+t[0].recs[4].k[0] = 1
+`)
+}
+
+// A valid bound written as a constant is taken as evaluating it gives, as
+// the same bound in valid's expr is: one with a negation outside the
+// integers, from -2^63 to 2^64 - 1, fails with Integer_Overflow, though
+// the value it ends with is within them.
+@(test)
+ksy_valid_constant_bounds :: proc(t: ^testing.T) {
+	Case :: struct {
+		bound: string,
+		input: []byte,
+		want:  string,
+	}
+	cases := [?]Case {
+		{"-(-18446744073709551615)", {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, "error: Integer_Overflow at 0 in t[0].n[0]"},
+		{"-(-9223372036854775808)", {0, 0, 0, 0, 0, 0, 0, 0x80}, "t[0].n[0] = 9223372036854775808\n"},
+	}
+	for c in cases {
+		as_value := fmt.tprintf("%sseq:\n  - id: n\n    type: u8\n    valid: %s\n", HEAD, c.bound)
+		as_expr := fmt.tprintf("%sseq:\n  - id: n\n    type: u8\n    valid:\n      expr: _ == %s\n", HEAD, c.bound)
+		expect_dump(t, c.bound, ksy_dump(t, as_value, c.input), c.want)
+		expect_dump(t, c.bound, ksy_dump(t, as_expr, c.input), c.want)
+	}
 }
 
 // A value instance that reads a repeated field keeps the value it had when
