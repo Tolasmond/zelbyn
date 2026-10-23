@@ -164,6 +164,10 @@ write :: proc(b: ^strings.Builder, e: ^mdata.Expr) {
 		strings.write_byte(b, ')')
 	case mdata.To_Bytes:
 		write_cast(b, x.operand, "bytes")
+	case mdata.Root_Arg:
+		strings.write_string(b, "<argument ")
+		strings.write_int(b, x.index)
+		strings.write_byte(b, '>')
 	case mdata.Switch_Cast:
 		write_cast(b, x.operand, x.type_name)
 	case mdata.Instance:

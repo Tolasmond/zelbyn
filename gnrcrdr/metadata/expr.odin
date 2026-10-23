@@ -63,6 +63,7 @@ Expr_Variant :: union {
 	Decode,
 	Substring,
 	To_Bytes,
+	Root_Arg,
 }
 
 Int_Literal :: struct {
@@ -226,6 +227,13 @@ Substring :: struct {
 // fit in a byte, else Integer_Overflow.
 To_Bytes :: struct {
 	operand: ^Expr,
+}
+
+// The argument given to the decoder (reader.read's args) for param index
+// of the top-level type of the schema decoded: the root's args are these,
+// as nothing in the schema gives them.
+Root_Arg :: struct {
+	index: int,
 }
 
 // The set instance being decoded (up = 0), one of its enclosing instances

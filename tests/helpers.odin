@@ -51,8 +51,8 @@ Decoded :: struct {
 
 // d must be zero or destroyed. Decoded embeds an arena, so it is filled in
 // place and never returned by value (see §3.3).
-decode_bytes :: proc(ff: ^mdat.File_Format, data: []byte, d: ^Decoded, spans := false) {
-	d.consumed, d.err = rdr.read_from_bytes(data, ff, &d.tree, spans)
+decode_bytes :: proc(ff: ^mdat.File_Format, data: []byte, d: ^Decoded, spans := false, args: []fld.Value = nil) {
+	d.consumed, d.err = rdr.read_from_bytes(data, ff, &d.tree, spans, args)
 }
 
 decode_file :: proc(ff: ^mdat.File_Format, path: string, d: ^Decoded, spans := false) {

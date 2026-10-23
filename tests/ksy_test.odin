@@ -38,7 +38,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    size: 2\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n    process: zlib\n", .Unsupported, 11, 5, "a: process on a switch-on with a case that is not a user type is not supported"},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    io: _root._io\n", .Unsupported, 7, 5, "attribute a: io is not supported"},
 	{HEAD + "seq:\n  - id: a\n    type: u1\n    sizee: 1\n", .Invalid, 7, 5, `attribute a: unknown key "sizee"`},
-	{HEAD + "params:\n  - id: p\n    type: u1\n", .Unsupported, 4, 1, "params on the top-level type are not supported, except in an imported schema"},
+	{HEAD + "params:\n  - id: p\n    type: s\ntypes:\n  s: {}\n", .Unsupported, 5, 9, "param p: a param of a user type on the top-level type of the schema compiled is not supported"},
 	{HEAD + "sequence: []\n", .Invalid, 4, 1, `the top level: unknown key "sequence"`},
 	{"meta:\n  id: t\n  imports: a\n", .Invalid, 3, 12, "imports must be a sequence"},
 	{"meta:\n  id: t\n  imports: ['']\n", .Invalid, 3, 13, "imports: an import is empty"},
@@ -318,10 +318,10 @@ ksy_file_dump :: proc(t: ^testing.T, path: string, import_paths: []string, input
 
 // Decodes input with ff and returns its text dump, as ksy_dump does.
 @(private = "file")
-dump_decoded :: proc(t: ^testing.T, ff: ^mdat.File_Format, input: []byte) -> string {
+dump_decoded :: proc(t: ^testing.T, ff: ^mdat.File_Format, input: []byte, args: []fld.Value = nil) -> string {
 	d: Decoded
 	defer destroy_decoded(&d)
-	decode_bytes(ff, input, &d)
+	decode_bytes(ff, input, &d, args = args)
 	if d.err.kind != .None do return fmt.tprintf("error: %v at %v in %s", d.err.kind, d.err.offset, d.err.path)
 
 	b := strings.builder_make(context.temp_allocator)
@@ -3001,6 +3001,49 @@ t[0].bodies[1].data[0] = <4 bytes> cc dd ee ff
 t[0].bodies[1].more[0] = <4 bytes> 11 22 33 44
 t[0].sw[0].data[0] = <4 bytes> 55 66 77 88
 `)
+
+	// the params of the top-level type of the schema decoded take the
+	// arguments given to the decoder, one of each param's type, which the
+	// tree copies
+	top := HEAD + `params:
+  - id: n
+    type: u1
+  - id: twice
+    type: bool
+  - id: tag
+    type: bytes
+  - id: name
+    type: str
+seq:
+  - id: a
+    size: 'n * (twice ? 2 : 1)'
+  - id: b
+    size: tag.size
+    if: name == "x"
+`
+	{
+		ff: mdat.File_Format
+		defer mdat.destroy_file_format(&ff)
+		err := ksy.compile(top, &ff)
+		defer ksy.destroy_error(&err)
+		if testing.expectf(t, err.kind == .None, "compile: %s", err.message) {
+			tag := []byte{1, 2, 3}
+			expect_dump(t, "top-level params", dump_decoded(t, &ff, {1, 2, 3, 4, 5, 6, 7}, {i64(2), true, tag, "x"}), "t[0].a[0] = <4 bytes> 01 02 03 04\nt[0].b[0] = <3 bytes> 05 06 07\n")
+			expect_dump(t, "top-level params, other", dump_decoded(t, &ff, {1, 2, 3}, {i64(1), false, tag, "y"}), "t[0].a[0] = <1 bytes> 01\n")
+			expect_dump(t, "top-level params, none", dump_decoded(t, &ff, {1}), "error: Invalid_Arguments at 0 in ")
+			expect_dump(t, "top-level params, wrong type", dump_decoded(t, &ff, {1}, {i64(1), i64(1), tag, "y"}), "error: Invalid_Arguments at 0 in ")
+		}
+	}
+	{
+		// arguments for a schema whose top-level type has no params
+		ff: mdat.File_Format
+		defer mdat.destroy_file_format(&ff)
+		err := ksy.compile(HEAD + "seq:\n  - id: a\n    type: u1\n", &ff)
+		defer ksy.destroy_error(&err)
+		if testing.expectf(t, err.kind == .None, "compile: %s", err.message) {
+			expect_dump(t, "arguments without params", dump_decoded(t, &ff, {1}, {i64(1)}), "error: Invalid_Arguments at 0 in ")
+		}
+	}
 
 	// the top-level type of an imported schema can have params
 	expect_dump(t, "imported params", ksy_file_dump(t, "tests/schemas/params/main.ksy", nil, {2, 5, 6, 7}), `main[0].n[0] = 2

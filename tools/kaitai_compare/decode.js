@@ -1,11 +1,13 @@
 // Decodes files with the official Kaitai Struct compiler and JavaScript
 // runtime, for compare.py:
 //
-//     node decode.js <schema.json> [--imports <imports.json>] [--offsets] <file>...
+//     node decode.js <schema.json> [--imports <imports.json>] [--params <json>] [--offsets] <file>...
 //
 // schema.json is a .ksy file converted to JSON. imports.json maps each
 // import, as the compiler asks for it ("rel:" or "abs:" and its name, with
-// no / at the start of an absolute one), to its schema. For each file, prints one
+// no / at the start of an absolute one), to its schema. --params gives the
+// arguments of the params of the top-level type, as a JSON array, with
+// byte arrays as arrays of integers. For each file, prints one
 // line of JSON in the shape of gnrcrdr's --dump json: a set instance is an
 // object of its seq fields in read order, then its parse instances
 // (instances with pos), each an array of its values (one for a field read
@@ -140,11 +142,16 @@ async function main() {
     imports = JSON.parse(fs.readFileSync(args[1], "utf8"));
     args.splice(0, 2);
   }
+  let params = [];
+  if (args[0] === "--params") {
+    params = JSON.parse(args[1]).map((v) => (Array.isArray(v) ? new Uint8Array(v) : v));
+    args.splice(0, 2);
+  }
   const withOffsets = args[0] === "--offsets";
   if (withOffsets) args.shift();
   const files = args;
   if (!schemaPath || files.length === 0) {
-    console.error("usage: node decode.js <schema.json> [--imports <imports.json>] [--offsets] <file>...");
+    console.error("usage: node decode.js <schema.json> [--imports <imports.json>] [--params <json>] [--offsets] <file>...");
     process.exit(2);
   }
 
@@ -177,7 +184,7 @@ async function main() {
 
   for (const file of files) {
     try {
-      const root = new Root(new KaitaiStream(fs.readFileSync(file)));
+      const root = new Root(new KaitaiStream(fs.readFileSync(file)), null, null, ...params);
       if (withOffsets) {
         // in debug mode, the constructor does not read
         root._read();
