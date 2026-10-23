@@ -38,8 +38,9 @@ import "core:strings"
 //     with size, size-eos or terminator, strz (in ENCODINGS), user types (with size,
 //     size-eos or terminator, read from a substream; also inside
 //     themselves, and the schema's top-level type, by its meta id), and
-//     switch-on, also with size, size-eos or terminator, whose cases are
-//     user types or any of those types
+//     switch-on over an integer, a boolean or a string, also with size,
+//     size-eos or terminator, whose cases are user types or any of those
+//     types
 //   - value instances, with if and enum, over their type and through
 //     _parent and _root those enclosing it, and parse instances: instances
 //     with pos, io (_io or the _io of a set instance) and the keys of an
@@ -1481,6 +1482,7 @@ compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata
 	if _, is_until := node.count.(mdata.Until_Count); is_until {
 		until_scope := scope
 		until_scope.element = node
+		until_scope.in_repeat = true
 		node.count = mdata.Until_Count{compile_expr(c, get(attr, "repeat-until"), "repeat-until", until_scope, .Bool) or_return}
 	}
 	return true
@@ -1542,8 +1544,10 @@ chain_with :: proc(c: ^Compiler, types: []^mdata.Node, node: ^mdata.Node) -> []^
 // field of that type. As the official compiler does, a string has node's
 // length, terminator and pad-right, and the other types have none, so
 // that their values are read whatever node's length. ends is as for
-// builtin_type. switch-on is an integer or a string; a case value is an
-// integer or enum constant, or a string literal, or _ for the default.
+// builtin_type. switch-on is an integer, a boolean or a string; a case
+// value is an integer or enum constant, true or false, or a string literal,
+// or _ for the default. An element that no case chooses has no value, so a
+// repeated field can have fewer values than elements, as in Kaitai.
 @(private = "file")
 compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: string, ends: bool, node: ^mdata.Node, scope: expr.Scope) -> bool {
 	keys := SWITCH_KEYS
@@ -1558,20 +1562,19 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 	sw := new(mdata.Switch, c.allocator)
 	sw.on = compile_expr(c, on, "switch-on", scope, .Unresolved) or_return
 	by_text := sw.on.type == .String
-	if !by_text && sw.on.type != .Int {
-		return fail(c, .Unsupported, on, "%s: switch-on over %s is not supported; only over an integer or a string", id, expr.type_name(sw.on.type))
+	if !by_text && sw.on.type != .Int && sw.on.type != .Bool {
+		return fail(c, .Unsupported, on, "%s: switch-on over %s is not supported; only over an integer, a boolean or a string", id, expr.type_name(sw.on.type))
 	}
 
 	list := make([dynamic]mdata.Switch_Case, c.allocator)
 	seen := make(map[int]^yml.Node, c.scratch)
 	seen_text := make(map[string]^yml.Node, c.scratch)
-	default_key: ^yml.Node
 	for e in cases.entries {
 		is_default := e.key.text == "_" && e.key.style == .Plain
 		value: int
 		text: string
 		if is_default {
-			default_key = e.key
+			// _ has no value to compare
 		} else if by_text {
 			key := compile_expr(c, e.key, "a case", scope, .String) or_return
 			lit, is_literal := key.variant.(mdata.String_Literal)
@@ -1579,6 +1582,14 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 			text = lit.value
 			if prev, dup := seen_text[text]; dup do return fail(c, .Invalid, e.key, "%s: case %s is already given (line %v, column %v)", id, e.key.text, prev.line, prev.column)
 			seen_text[text] = e.key
+		} else if sw.on.type == .Bool {
+			// the value of a boolean case is 0 or 1, as the decoder compares it
+			key := compile_expr(c, e.key, "a case", scope, .Bool) or_return
+			lit, is_literal := key.variant.(mdata.Bool_Literal)
+			if !is_literal do return fail(c, .Unsupported, e.key, "%s: a case must be true or false", id)
+			value = int(lit.value)
+			if prev, dup := seen[value]; dup do return fail(c, .Invalid, e.key, "%s: case %s is already given (line %v, column %v)", id, e.key.text, prev.line, prev.column)
+			seen[value] = e.key
 		} else {
 			key := compile_expr(c, e.key, "a case", scope, .Int) or_return
 			lit, is_literal := key.variant.(mdata.Int_Literal)
@@ -1623,12 +1634,6 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 		}
 	}
 	sw.cases = list[:]
-
-	// with a length, an element that no case chooses is its bytes, so every
-	// element has a value
-	if default_key == nil && !mdata.is_single(node) && node.length == nil {
-		return fail(c, .Unsupported, on, "%s: a repeated switch-on without a _ case, size or size-eos is not supported", id)
-	}
 	node.switch_on = sw
 	return true
 }

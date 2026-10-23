@@ -77,8 +77,15 @@ function offsets(obj, path, pos, root, out) {
     if (v === undefined || v === null) continue;
     const debug = obj._debug[key] || obj._debug["_m_" + key];
     const values = Array.isArray(v) ? v : [v];
+    // the records of an array are by element, also of a repeated switch-on
+    // whose elements no case chose, which read nothing and add no value
+    let records = Array.isArray(v) ? debug.arr : null;
+    if (records && records.length > v.length) {
+      const read = records.filter((r) => r.end > r.start);
+      if (read.length === v.length) records = read;
+    }
     values.forEach((x, i) => {
-      const d = Array.isArray(v) ? debug.arr[i] : debug;
+      const d = records ? records[i] : debug;
       const p = path + "." + key + "[" + i + "]";
       // a parse instance with io is read in another stream, which is not a
       // copy

@@ -416,7 +416,8 @@ resolve_field :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, name: str
 	if field.count == nil do return fail(r, .Invalid, e.offset, "%s cannot be used in its own if or repeat-expr; it has no value there", name)
 
 	if !mdata.is_single(field) {
-		if field.switch_on != nil do return fail(r, .Unsupported, e.offset, "%s is a switch-on field; it cannot be used in expressions", name)
+		// the type of its values is checked as an Array's is used
+		if field.switch_on != nil do value_type(r, e, field, name) or_return
 		e.type = .Array
 	} else {
 		e.type = value_type(r, e, field, name) or_return
@@ -439,10 +440,32 @@ value_type :: proc(r: ^Resolver, e: ^mdata.Expr, field: ^mdata.Node, name: strin
 	case .Bool:
 		return .Bool, true
 	case .Set:
-		if field.switch_on != nil do return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a switch-on field; it cannot be used in expressions", name)
+		if field.switch_on != nil do return switch_type(r, e, field, name)
 		return .Struct, true
 	}
 	return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a %v; only integer, boolean, blob, string and set fields can be used in expressions", name, field.type)
+}
+
+// The type of one value of field, a switch-on: the type of the values of
+// every case, and with a length and no _ case, of the bytes that an
+// element no case chooses has. Cases of other types, as in Kaitai, give a
+// value of no type that expressions can use but as a whole, which gnrcrdr
+// does not support. Nor does it support cases of user types, which in
+// Kaitai have fields only when they are all the same type.
+@(private = "file")
+switch_type :: proc(r: ^Resolver, e: ^mdata.Expr, field: ^mdata.Node, name: string) -> (t: mdata.Expr_Type, ok: bool) {
+	sw := field.switch_on
+	t = sw.default == nil && field.length != nil ? .Bytes : .Unresolved
+	for i in -1 ..< len(sw.cases) {
+		node := i < 0 ? sw.default : sw.cases[i].node
+		if node == nil do continue
+		if node.type == .Set do return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a switch-on field whose cases are user types; it cannot be used in expressions", name)
+		u := value_type(r, e, node, name) or_return
+		if t != .Unresolved && u != t do return .Unresolved, fail(r, .Unsupported, e.offset, "%s is a switch-on field whose values can be %s or %s; it cannot be used in expressions", name, type_name(t), type_name(u))
+		t = u
+	}
+	if t == .Unresolved do return .Unresolved, fail(r, .Invalid, e.offset, "%s is a switch-on field with no cases; it has no value", name)
+	return t, true
 }
 
 @(private = "file")

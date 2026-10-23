@@ -217,10 +217,19 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, $SPANS: bool) -> d
 		for i := 0;; i += 1 {
 			start, start_bits := d.r.pos, dat.bit_pos(&d.r)
 			reserve_growing(d, s, i + 1, SPANS)
+			n := len(s.slots[0])
 			read_element(d, s, node, i, SPANS) or_return
 
+			// _ is the element just read; an element of a switch-on that chose
+			// no case added none, and _ then has no value
 			values := s.slots[0]
-			done, err := eval_bool(d, c.expr, element = values[len(values) - 1])
+			done: bool
+			err: dat.Read_Error
+			if len(values) > n {
+				done, err = eval_bool(d, c.expr, i, values[n])
+			} else {
+				done, err = eval_bool(d, c.expr, i, nil)
+			}
 			if err != .None do return fail(d, err, d.r.pos)
 			if done do return .None
 
@@ -285,12 +294,14 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 	start := d.r.pos
 
 	if node.type == .Set {
+		n := len(s.slots[0])
 		read_instance(d, s, node, index, SPANS) or_return
-		// a switch-on that chooses no set reads nothing
-		read := len(s.slots[0]) > index
+		// a switch-on that chooses no case adds no value, so in a repeat the
+		// elements before may have added fewer values than index
+		read := len(s.slots[0]) > n
 		when SPANS do if read do set_span(d, s, 0, start)
 		if node.valid != nil && read {
-			if e := check_valid(d, s.slots[0][index], node.valid, index); e != .None do return fail(d, e, start)
+			if e := check_valid(d, s.slots[0][n], node.valid, index); e != .None do return fail(d, e, start)
 		}
 		pop(&d.path)
 		return .None
@@ -343,7 +354,16 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPA
 				}
 			}
 		} else {
-			on, err := eval_int(d, sw.on, index)
+			// a Bool is chosen by its value as 0 or 1
+			on: int
+			err: dat.Read_Error
+			if sw.on.type == .Bool {
+				b: bool
+				b, err = eval_bool(d, sw.on, index)
+				on = int(b)
+			} else {
+				on, err = eval_int(d, sw.on, index)
+			}
 			if err != .None do return fail(d, err, d.r.pos)
 			for c, i in sw.cases {
 				if c.value == on {

@@ -142,7 +142,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n", .Invalid, 7, 7, "a: switch-on needs cases"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      cases: {}\n", .Invalid, 7, 7, "a: a type mapping needs switch-on"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases: {}\n      default: x\n", .Invalid, 9, 7, `a: type: unknown key "default"`},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1 == 1\n      cases: {}\n", .Unsupported, 7, 18, "a: switch-on over a boolean is not supported"},
+	{HEAD + "seq:\n  - id: b\n    size: 1\n  - id: a\n    type:\n      switch-on: b\n      cases: {}\n", .Unsupported, 9, 18, "a: switch-on over a byte array is not supported; only over an integer, a boolean or a string"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1 == 1\n      cases:\n        1 == 1: u1\n", .Unsupported, 9, 9, "a: a case must be true or false"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: str\n", .Invalid, 9, 12, "a: str needs size, size-eos or terminator"},
 	{"meta:\n  id: t\nseq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u2\n", .Invalid, 8, 12, "a: u2 needs le or be, or meta endian"},
 	{HEAD + "seq:\n  - id: a\n    size: 1\n    type:\n      switch-on: 1\n      cases:\n        1: strz\n", .Invalid, 10, 12, "a: a case of type strz needs meta encoding"},
@@ -152,8 +153,9 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: nope\n", .Invalid, 9, 12, "a: unknown type nope"},
 	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        n: s\ntypes:\n  s: {}\n", .Unsupported, 11, 9, "a case must be an integer or an enum constant"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n        0x1: s\ntypes:\n  s: {}\n", .Invalid, 10, 9, "a: case 1 is already given (line 9, column 9)"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n    repeat: expr\n    repeat-expr: 2\ntypes:\n  s: {}\n", .Unsupported, 7, 18, "a repeated switch-on without a _ case, size or size-eos is not supported"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        _: s\n  - id: b\n    size: a.c\ntypes:\n  s:\n    seq:\n      - id: c\n        type: u1\n", .Unsupported, 11, 11, "size: a is a switch-on field; it cannot be used in expressions"},
+	{HEAD + "  encoding: ASCII\nseq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n        2: strz\n  - id: b\n    size: a\n", .Unsupported, 13, 11, "size: a is a switch-on field whose values can be an integer or a string"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n    size: 2\n  - id: b\n    size: a\n", .Unsupported, 12, 11, "size: a is a switch-on field whose values can be a byte array or an integer"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        _: s\n  - id: b\n    size: a.c\ntypes:\n  s:\n    seq:\n      - id: c\n        type: u1\n", .Unsupported, 11, 11, "size: a is a switch-on field whose cases are user types; it cannot be used in expressions"},
 
 	// instances: value instances and parse instances
 	{HEAD + "instances:\n  x:\n    doc: d\n", .Unsupported, 5, 3, "instance x: an instance without pos or value is not supported"},
@@ -1494,6 +1496,99 @@ types:
 	wrong := slice.clone(input, context.temp_allocator)
 	wrong[9] = 0xaa
 	expect_dump(t, "valid on text", ksy_dump(t, src, wrong), "error: Not_Equal at 8 in t[0].be[0]")
+}
+
+// switch-on, as the official compiler reads it: a repeated one without a _
+// case or a length adds no value for an element that no case chooses, so
+// it can have fewer values than elements, whose _index still counts every
+// element (nums, recs, picks); one over a boolean chooses by true and false
+// (by_flag); and a field whose cases all have values of one type can be
+// used in expressions, as that type (sized, tail). In repeat-until, an
+// element that no case chose leaves _ with no value, and each element but
+// the last must still consume input.
+@(test)
+ksy_switch_on_limits :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: flag
+    type: u1
+  - id: kinds
+    type: u1
+    repeat: expr
+    repeat-expr: 4
+  - id: nums
+    type:
+      switch-on: kinds[_index]
+      cases:
+        1: u1
+        2: u2
+    repeat: expr
+    repeat-expr: 4
+  - id: recs
+    type:
+      switch-on: kinds[_index]
+      cases:
+        1: rec
+    repeat: expr
+    repeat-expr: 4
+  - id: by_flag
+    type:
+      switch-on: flag == 1
+      cases:
+        true: u2
+        false: u1
+  - id: sized
+    size: by_flag
+  - id: picks
+    type:
+      switch-on: _index
+      cases:
+        0: u1
+        1: b4
+    repeat: until
+    repeat-until: _index == 2
+  - id: tail
+    size: 'nums.size + nums[1] % 4 + (by_flag > 2 ? 1 : 0)'
+types:
+  rec:
+    seq:
+      - id: v
+        type: u1
+`
+	expect_dump(t, "flag set", ksy_dump(t, src, {0x01, 0x01, 0x09, 0x02, 0x01, 0x11, 0x34, 0x12, 0x22, 0xa1, 0xa2, 0x03, 0x00, 0xe0, 0xe1, 0xe2, 0x07, 0xf5, 0x51, 0x52, 0x53, 0x54}), `t[0].flag[0] = 1
+t[0].kinds[0] = 1
+t[0].kinds[1] = 9
+t[0].kinds[2] = 2
+t[0].kinds[3] = 1
+t[0].nums[0] = 17
+t[0].nums[1] = 4660
+t[0].nums[2] = 34
+t[0].recs[0].v[0] = 161
+t[0].recs[1].v[0] = 162
+t[0].by_flag[0] = 3
+t[0].sized[0] = <3 bytes> e0 e1 e2
+t[0].picks[0] = 7
+t[0].picks[1] = 15
+t[0].tail[0] = <4 bytes> 51 52 53 54
+`)
+	expect_dump(t, "flag clear", ksy_dump(t, src, {0x00, 0x09, 0x02, 0x09, 0x01, 0x01, 0x02, 0x05, 0x99, 0x02, 0xc0, 0xc1, 0x07, 0x35, 0x61, 0x62, 0x63}), `t[0].flag[0] = 0
+t[0].kinds[0] = 9
+t[0].kinds[1] = 2
+t[0].kinds[2] = 9
+t[0].kinds[3] = 1
+t[0].nums[0] = 513
+t[0].nums[1] = 5
+t[0].recs[0].v[0] = 153
+t[0].by_flag[0] = 2
+t[0].sized[0] = <2 bytes> c0 c1
+t[0].picks[0] = 7
+t[0].picks[1] = 3
+t[0].tail[0] = <3 bytes> 61 62 63
+`)
+
+	until := HEAD + "seq:\n  - id: xs\n    type:\n      switch-on: _index\n      cases:\n        0: u1\n    repeat: until\n    repeat-until: _ == 0\n"
+	expect_dump(t, "_ of no case", ksy_dump(t, until, {5, 6}), "error: Absent_Field at 1 in t[0]")
+	stuck := HEAD + "seq:\n  - id: xs\n    type:\n      switch-on: _index\n      cases:\n        1: u1\n    repeat: until\n    repeat-until: _index == 3\n"
+	expect_dump(t, "no progress", ksy_dump(t, stuck, {5, 6}), "error: No_Progress at 0 in t[0].xs[0]")
 }
 
 // io on parse instances: each is read at its pos in the stream io gives,
