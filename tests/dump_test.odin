@@ -68,7 +68,7 @@ dump_text_855 :: proc(t: ^testing.T) {
 }
 
 @(test)
-dump_write_value :: proc(t: ^testing.T) {
+field_write_value :: proc(t: ^testing.T) {
 	seventeen: [17]byte
 	for &x, i in seventeen do x = byte(i)
 
@@ -89,7 +89,7 @@ dump_write_value :: proc(t: ^testing.T) {
 	for c in cases {
 		b := strings.builder_make()
 		defer strings.builder_destroy(&b)
-		err := dmp.write_value(strings.to_writer(&b), c.v)
+		err := fld.write_value(strings.to_writer(&b), c.v)
 		testing.expectf(t, err == .None, "write_value(%v): %v", c.v, err)
 		testing.expect_value(t, strings.to_string(b), c.want)
 	}
