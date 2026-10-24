@@ -2021,13 +2021,15 @@ instances:
 
 // Each value instance that refers to others is evaluated once for its set
 // instance, so a chain in which each refers to the one before twice takes
-// as many evaluations as it has links, rather than doubling with each.
+// as many evaluations as it has links, rather than doubling with each: 31
+// links, the longest a field can use (expression.MAX_CHAIN), would take
+// 2^31 evaluations otherwise.
 @(test)
 ksy_value_instance_chain :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	LINKS :: 40
+	LINKS :: 31
 	b := strings.builder_make(context.temp_allocator)
-	strings.write_string(&b, HEAD + "seq:\n  - id: n\n    type: u1\n  - id: data\n    size: v40 >> 40\ninstances:\n  v0: {value: n}\n")
+	strings.write_string(&b, HEAD + "seq:\n  - id: n\n    type: u1\n  - id: data\n    size: v31 >> 31\ninstances:\n  v0: {value: n}\n")
 	for i in 1 ..= LINKS do fmt.sbprintf(&b, "  v%d: {{value: v%d + v%d}}\n", i, i - 1, i - 1)
 	expect_dump(t, "chain", ksy_dump(t, strings.to_string(b), {1, 'D'}), "t[0].n[0] = 1\nt[0].data[0] = <1 bytes> 44\n")
 }

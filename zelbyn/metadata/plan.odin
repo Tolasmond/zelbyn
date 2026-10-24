@@ -355,6 +355,9 @@ Value_Instance :: struct {
 	// stream is read: the decoder evaluates it once for each set instance,
 	// when it is first used, as Kaitai evaluates every value instance
 	cached: bool,
+	// the most value instances in a row that its expressions use, through
+	// the ones they use: 0 when they use none, at most expression.MAX_CHAIN
+	chain:  int,
 }
 
 // Bits low through high (inclusive; 0 is the least significant) of an

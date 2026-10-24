@@ -24,6 +24,14 @@ all_zero :: proc(b: []byte) -> bool {
 	return true
 }
 
+// arena_make, which a test expects to succeed.
+@(private = "file")
+must_make :: proc(t: ^testing.T, a: ^arn.Arena, $T: typeid, n: int, loc := #caller_location) -> []T {
+	values, err := arn.arena_make(a, T, n)
+	testing.expectf(t, err == nil, "arena_make: %v", err, loc = loc)
+	return values
+}
+
 @(private = "file")
 Wide :: struct #align (16) {
 	x: u8,
@@ -38,18 +46,18 @@ layout_arena_alignment :: proc(t: ^testing.T) {
 	defer arn.arena_destroy(&a)
 
 	for round in 0 ..< 3 {
-		b := arn.arena_make(&a, u8, 3)
+		b := must_make(t, &a, u8, 3)
 		testing.expect(t, all_zero(b))
-		h := arn.arena_make(&a, u16, 1)
+		h := must_make(t, &a, u16, 1)
 		testing.expectf(t, aligned(raw_data(h), align_of(u16)), "round %v: u16 at %p", round, raw_data(h))
-		_ = arn.arena_make(&a, u8, 1)
-		q := arn.arena_make(&a, u64, 2)
+		_, _ = arn.arena_make(&a, u8, 1)
+		q := must_make(t, &a, u64, 2)
 		testing.expectf(t, aligned(raw_data(q), align_of(u64)), "round %v: u64 at %p", round, raw_data(q))
-		_ = arn.arena_make(&a, u8, 1)
-		w := arn.arena_make(&a, Wide, 1)
+		_, _ = arn.arena_make(&a, u8, 1)
+		w := must_make(t, &a, Wide, 1)
 		testing.expectf(t, aligned(raw_data(w), 16), "round %v: a 16-aligned struct at %p", round, raw_data(w))
 		testing.expect(t, all_zero(mem.slice_to_bytes(w)))
-		v := arn.arena_make(&a, fld.Value, 2)
+		v := must_make(t, &a, fld.Value, 2)
 		testing.expectf(t, aligned(raw_data(v), align_of(fld.Value)), "round %v: Value at %p", round, raw_data(v))
 	}
 
@@ -132,26 +140,26 @@ layout_arena_rollover :: proc(t: ^testing.T) {
 	FIRST :: 64 * mem.Kilobyte
 	arn.arena_init(&a, FIRST)
 
-	first := arn.arena_make(&a, u8, 40 * mem.Kilobyte)
+	first := must_make(t, &a, u8, 40 * mem.Kilobyte)
 	for &x, i in first do x = byte(i)
 	b1 := a.block
 	testing.expectf(t, b1 != nil && b1.reserved >= FIRST && b1.prev == nil, "first block: %v", b1.reserved)
 	testing.expect_value(t, a.block_size, uint(2 * FIRST))
 
-	second := arn.arena_make(&a, u8, 40 * mem.Kilobyte)
+	second := must_make(t, &a, u8, 40 * mem.Kilobyte)
 	b2 := a.block
 	testing.expectf(t, b2 != b1 && b2.prev == b1 && b2.reserved >= 2 * FIRST, "second block: %v", b2.reserved)
 	testing.expect_value(t, a.block_size, uint(4 * FIRST))
 
 	// one larger than the target, 256 KB: its own size
-	large := arn.arena_make(&a, u8, mem.Megabyte)
+	large := must_make(t, &a, u8, mem.Megabyte)
 	b3 := a.block
 	testing.expectf(t, b3.prev == b2 && b3.reserved >= mem.Megabyte, "large block: %v", b3.reserved)
 	testing.expect_value(t, a.block_size, uint(8 * FIRST))
 
 	// the next is the target, 512 KB, smaller than the large one
 	rest := int(b3.reserved - b3.used)
-	_ = arn.arena_make(&a, u8, rest + 1)
+	_, _ = arn.arena_make(&a, u8, rest + 1)
 	b4 := a.block
 	testing.expectf(t, b4.prev == b3 && b4.reserved >= 8 * FIRST && b4.reserved < b3.reserved, "after the large block: %v, the large one %v", b4.reserved, b3.reserved)
 
@@ -180,9 +188,9 @@ layout_instance_slots :: proc(t: ^testing.T) {
 			instance: ^fld.Instance
 			cells: []fld.Value
 			if spans {
-				instance, cells = fld.make_instance(&a, n, 2, true)
+				instance, cells, _ = fld.make_instance(&a, n, 2, true)
 			} else {
-				instance, cells = fld.make_instance(&a, n, 2, false)
+				instance, cells, _ = fld.make_instance(&a, n, 2, false)
 			}
 			span_size := spans ? size_of(fld.Span) : 0
 			testing.expect_value(t, int(arn.arena_used(&a) - used), size_of(fld.Instance) + n * (size_of([]fld.Value) + size_of(fld.Value) + span_size))

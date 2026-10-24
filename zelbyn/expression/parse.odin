@@ -123,11 +123,32 @@ Token :: struct {
 
 @(private = "file")
 Parser :: struct {
-	text:      string,
-	pos:       int, // of the next token
-	tok:       Token,
-	allocator: mem.Allocator,
-	err:       Error,
+	text:       string,
+	pos:        int, // of the next token
+	tok:        Token,
+	allocator:  mem.Allocator,
+	err:        Error,
+	last_depth: int, // the depth of the expression parsed last, which its caller reads (nested)
+	recursion:  int, // the parse_exprs being parsed inside each other, at most MAX_DEPTH: parentheses make none of the tree's depth
+}
+
+// The deepest that an expression's tree nests: three times the deepest of
+// the corpus (21), and few enough that resolving, evaluating and printing
+// it, which recurse once a level, cannot use the stack up: resolving one
+// this deep takes some 330 KB in a debug build, 120 KB in one with
+// -o:speed. A deeper one is Unsupported, as is a chain of operators that
+// deep (1 + 1 + ...), which the parser builds without recursing, and
+// operands and parentheses nested that deep, through which it recurses
+// (-(-(...)) is two levels for each -).
+MAX_DEPTH :: 64
+
+// Records depth as the depth of the expression just parsed; false, after an
+// Unsupported error, when it is deeper than MAX_DEPTH.
+@(private = "file")
+nested :: proc(p: ^Parser, depth: int, offset: int) -> bool {
+	p.last_depth = depth
+	if depth <= MAX_DEPTH do return true
+	return fail(p, .Unsupported, offset, "expressions nested more than %v deep are not supported", MAX_DEPTH)
 }
 
 // Records the first error; always returns false.
@@ -529,7 +550,11 @@ new_expr :: proc(p: ^Parser, offset: int, variant: mdata.Expr_Variant) -> ^mdata
 // An expression whose operators all bind at least as tightly as min_bp.
 @(private = "file")
 parse_expr :: proc(p: ^Parser, min_bp: int) -> (left: ^mdata.Expr, ok: bool) {
+	p.recursion += 1
+	defer p.recursion -= 1
+	if p.recursion > MAX_DEPTH do return nil, fail(p, .Unsupported, p.tok.offset, "expressions nested more than %v deep are not supported", MAX_DEPTH)
 	left = parse_prefix(p, min_bp) or_return
+	depth := p.last_depth
 
 	for {
 		if p.tok.kind == .Question {
@@ -537,10 +562,13 @@ parse_expr :: proc(p: ^Parser, min_bp: int) -> (left: ^mdata.Expr, ok: bool) {
 			offset := p.tok.offset
 			next(p) or_return
 			then := parse_expr(p, 0) or_return
+			then_depth := p.last_depth
 			if p.tok.kind != .Colon do return nil, fail(p, .Syntax, p.tok.offset, "expected : in ?:, found %s", describe(p.tok))
 			next(p) or_return
 			otherwise := parse_expr(p, BP_TERNARY) or_return
 			left = new_expr(p, offset, mdata.Ternary{left, then, otherwise})
+			depth = max(depth, then_depth, p.last_depth) + 1
+			nested(p, depth, offset) or_return
 			continue
 		}
 
@@ -551,6 +579,8 @@ parse_expr :: proc(p: ^Parser, min_bp: int) -> (left: ^mdata.Expr, ok: bool) {
 		next(p) or_return
 		right := parse_expr(p, op.bp + 1) or_return
 		left = new_expr(p, offset, mdata.Binary{op.op, left, right})
+		depth = max(depth, p.last_depth) + 1
+		nested(p, depth, offset) or_return
 
 		if op.bp == BP_COMPARE {
 			if next_op, chained := infix(p); chained && next_op.bp == BP_COMPARE {
@@ -559,6 +589,7 @@ parse_expr :: proc(p: ^Parser, min_bp: int) -> (left: ^mdata.Expr, ok: bool) {
 		}
 	}
 
+	p.last_depth = depth
 	return left, true
 }
 
@@ -587,6 +618,7 @@ parse_prefix :: proc(p: ^Parser, min_bp: int) -> (e: ^mdata.Expr, ok: bool) {
 
 	next(p) or_return
 	operand := parse_expr(p, bp) or_return
+	nested(p, p.last_depth + 1, offset) or_return
 	return new_expr(p, offset, mdata.Unary{op, operand}), true
 }
 
@@ -594,6 +626,7 @@ parse_prefix :: proc(p: ^Parser, min_bp: int) -> (e: ^mdata.Expr, ok: bool) {
 @(private = "file")
 parse_primary :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 	e = parse_atom(p) or_return
+	depth := p.last_depth
 
 	for {
 		#partial switch p.tok.kind {
@@ -602,6 +635,8 @@ parse_primary :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 			if p.tok.kind != .Ident do return nil, fail(p, .Syntax, p.tok.offset, "expected a name after ., found %s", describe(p.tok))
 			name := p.tok
 			next(p) or_return
+			depth += 1
+			nested(p, depth, name.offset) or_return
 			if name.text == "as" && p.tok.kind == .Lt {
 				type_name := parse_type_name(p, ".as") or_return
 				e = new_expr(p, name.offset, mdata.Cast{e, type_name})
@@ -611,8 +646,12 @@ parse_primary :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 		case .L_Paren:
 			m, is_member := e.variant.(mdata.Member)
 			if !is_member do return nil, fail(p, .Syntax, p.tok.offset, "only a method, .name(...), can be called")
+			offset := p.tok.offset
 			args := parse_args(p) or_return
 			e.variant = mdata.Call{m.operand, m.name, args}
+			// the call replaces the member, whose depth counts its operand
+			depth = max(depth, p.last_depth + 1)
+			nested(p, depth, offset) or_return
 		case .L_Bracket:
 			offset := p.tok.offset
 			next(p) or_return
@@ -620,20 +659,26 @@ parse_primary :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 			if p.tok.kind != .R_Bracket do return nil, fail(p, .Syntax, p.tok.offset, "expected ], found %s", describe(p.tok))
 			next(p) or_return
 			e = new_expr(p, offset, mdata.Index{e, index})
+			depth = max(depth, p.last_depth) + 1
+			nested(p, depth, offset) or_return
 		case:
+			p.last_depth = depth
 			return e, true
 		}
 	}
 }
 
 // The arguments of a call, at its (: expressions separated by commas, up to
-// the ).
+// the ). p.last_depth is then that of the deepest argument, 0 with none.
 @(private = "file")
 parse_args :: proc(p: ^Parser) -> (args: []^mdata.Expr, ok: bool) {
 	next(p) or_return
 	list := make([dynamic]^mdata.Expr, p.allocator)
+	depth := 0
+	defer p.last_depth = depth
 	for p.tok.kind != .R_Paren {
 		append(&list, parse_expr(p, 0) or_return)
+		depth = max(depth, p.last_depth)
 		if p.tok.kind == .R_Paren do break
 		if p.tok.kind != .Comma do return nil, fail(p, .Syntax, p.tok.offset, "expected , or ), found %s", describe(p.tok))
 		next(p) or_return
@@ -648,6 +693,8 @@ KEYWORDS :: [?]string{"and", "or", "not"}
 @(private = "file")
 parse_atom :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 	t := p.tok
+	// a leaf, which the cases that are not change
+	p.last_depth = 1
 
 	#partial switch t.kind {
 	case .Int:
@@ -709,13 +756,16 @@ parse_array_literal :: proc(p: ^Parser) -> (e: ^mdata.Expr, ok: bool) {
 	offset := p.tok.offset
 	next(p) or_return
 	items := make([dynamic]^mdata.Expr, p.allocator)
+	depth := 0
 	for p.tok.kind != .R_Bracket {
 		append(&items, parse_expr(p, 0) or_return)
+		depth = max(depth, p.last_depth)
 		if p.tok.kind == .R_Bracket do break
 		if p.tok.kind != .Comma do return nil, fail(p, .Syntax, p.tok.offset, "expected , or ] in an array literal, found %s", describe(p.tok))
 		next(p) or_return
 	}
 	next(p) or_return
+	nested(p, depth + 1, offset) or_return
 	return new_expr(p, offset, mdata.Array_Literal{items = items[:]}), true
 }
 

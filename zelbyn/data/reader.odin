@@ -29,6 +29,8 @@ Read_Error :: enum {
 	Undecided_Endianness,  // the endian switch-on of a type matches none of its cases (Kaitai's UndecidedEndiannessError)
 	Decompression_Failed,  // the bytes of a field with process: zlib are not a valid zlib stream
 	Invalid_Arguments,     // the arguments given for the params of the schema's top-level type are not one of each param's type
+	Memory_Limit,          // the tree's memory reached its limit (reader.Limits.max_memory), or the system's
+	Step_Limit,            // the decode took more steps than its limit (reader.Limits.max_steps)
 }
 
 // Bounds-checked cursor over a byte slice. Every read either succeeds and

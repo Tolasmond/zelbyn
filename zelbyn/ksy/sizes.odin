@@ -8,10 +8,24 @@ import "core:fmt"
 import "core:strings"
 
 // The size in bits of the attribute or parse instance name of set, or of
-// set's type, or with of_type, of the type name (expr.Scope.size_of).
+// set's type, or with of_type, of the type name (expr.Scope.size_of);
+// Unsupported when it is found through types nested more than MAX_NESTING
+// deep.
 @(private)
 size_of_callback :: proc(data: rawptr, set: ^mdata.Node, name: string, of_type: bool) -> (bits: int, err: expr.Error) {
 	c := (^Compiler)(data)
+	bits, err = size_of(c, set, name, of_type)
+	if c.too_deep {
+		c.too_deep = false
+		delete(err.message)
+		return 0, size_error(.Unsupported, "%s: types nested more than %v deep are not supported", name == "" ? set.ref_name : name, MAX_NESTING)
+	}
+	return
+}
+
+// The work of size_of_callback.
+@(private = "file")
+size_of :: proc(c: ^Compiler, set: ^mdata.Node, name: string, of_type: bool) -> (bits: int, err: expr.Error) {
 	td: ^Type_Def
 	for st in c.type_defs {
 		if st.set == mdata.members(set) {
@@ -80,6 +94,13 @@ unsized_error :: proc(what, unsized: string) -> expr.Error {
 // attribute has no fixed size, unsized is its path from td (a or a.b).
 @(private = "file")
 type_bits :: proc(c: ^Compiler, td: ^Type_Def) -> (bits: int, unsized: string) {
+	// size_of_callback reports it
+	c.nesting += 1
+	defer c.nesting -= 1
+	if c.nesting > MAX_NESTING {
+		c.too_deep = true
+		return 0, td.name
+	}
 	assert(!td.sizing, "type_bits: a type that contains itself")
 	td.sizing = true
 	defer td.sizing = false

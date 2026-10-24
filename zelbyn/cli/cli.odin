@@ -22,6 +22,8 @@ Options :: struct {
 	dump:        string `usage:"Output form: tree or json (default tree)."`,
 	offsets:     bool `usage:"With --dump tree: end each line with the value's offset in the file (@0x1A2B)."`,
 	import_path: string `args:"name=import-path" usage:"Directories that absolute imports (/a/b) are found in, separated by ':' (';' on Windows)."`,
+	max_memory:  string `args:"name=max-memory" usage:"The memory the decoded tree may take, beyond the file: bytes, or with K, M or G (default 1G); 0 for no limit."`,
+	max_steps:   string `args:"name=max-steps" usage:"The steps the decode may take: elements, instances and value-instance evaluations (default 100000000); 0 for no limit."`,
 }
 
 // --param, which parse_args takes out of the command line before
@@ -40,7 +42,7 @@ Dump_Kind :: enum {
 // in params. When ok is false the program should exit with exit_code: 0
 // after --help (usage on stdout), 2 on a usage error (message and usage on
 // stderr).
-parse_args :: proc(args: []string, stdout, stderr: io.Writer) -> (opts: Options, dump: Dump_Kind, params: []string, exit_code: int, ok: bool) {
+parse_args :: proc(args: []string, stdout, stderr: io.Writer) -> (opts: Options, dump: Dump_Kind, params: []string, limits: rdr.Limits, exit_code: int, ok: bool) {
 	opts = Options{dump = "tree"}
 	program := filepath.base(args[0])
 
@@ -52,7 +54,7 @@ parse_args :: proc(args: []string, stdout, stderr: io.Writer) -> (opts: Options,
 			if i + 1 == len(args) {
 				fmt.wprintln(stderr, "error: --param needs name=value")
 				write_usage(stderr, program)
-				return opts, dump, nil, 2, false
+				return opts, dump, nil, limits, 2, false
 			}
 			i += 1
 			append(&given, args[i])
@@ -68,11 +70,11 @@ parse_args :: proc(args: []string, stdout, stderr: io.Writer) -> (opts: Options,
 		print_flags_error(stdout, stderr, err, program)
 		if _, is_help := err.(flags.Help_Request); is_help {
 			fmt.wprintln(stdout, PARAM_USAGE)
-			return opts, dump, params, 0, false
+			return opts, dump, params, limits, 0, false
 		}
 
 		write_usage(stderr, program)
-		return opts, dump, params, 2, false
+		return opts, dump, params, limits, 2, false
 	}
 
 	switch opts.dump {
@@ -83,15 +85,35 @@ parse_args :: proc(args: []string, stdout, stderr: io.Writer) -> (opts: Options,
 	case:
 		fmt.wprintfln(stderr, "error: --dump must be tree or json, not %q", opts.dump)
 		write_usage(stderr, program)
-		return opts, dump, params, 2, false
+		return opts, dump, params, limits, 2, false
 	}
 	if opts.offsets && dump != .Tree {
 		fmt.wprintln(stderr, "error: --offsets applies only to --dump tree")
 		write_usage(stderr, program)
-		return opts, dump, params, 2, false
+		return opts, dump, params, limits, 2, false
 	}
 
-	return opts, dump, params, 0, true
+	limits = rdr.DEFAULT_LIMITS
+	if opts.max_memory != "" {
+		n, is_size := size_value(opts.max_memory)
+		if !is_size {
+			fmt.wprintfln(stderr, "error: --max-memory must be bytes, or with K, M or G, not %q", opts.max_memory)
+			write_usage(stderr, program)
+			return opts, dump, params, limits, 2, false
+		}
+		limits.max_memory = n
+	}
+	if opts.max_steps != "" {
+		n, is_count := strconv.parse_int(opts.max_steps, 10)
+		if !is_count || n < 0 {
+			fmt.wprintfln(stderr, "error: --max-steps must be a count, not %q", opts.max_steps)
+			write_usage(stderr, program)
+			return opts, dump, params, limits, 2, false
+		}
+		limits.max_steps = n
+	}
+
+	return opts, dump, params, limits, 0, true
 }
 
 // Writes err, from flags.parse, as flags.print_errors does, but to stderr,
@@ -122,9 +144,9 @@ write_usage :: proc(w: io.Writer, program: string) {
 // 0 on success and after --help, 1 when the format cannot be loaded or the
 // file read or decoded, or the output written, and 2 on a usage error.
 execute :: proc(args: []string, stdout, stderr: io.Writer) -> (exit_code: int) {
-	opts, dump, params, usage_exit, ok := parse_args(args, stdout, stderr)
+	opts, dump, params, limits, usage_exit, ok := parse_args(args, stdout, stderr)
 	if !ok do return usage_exit
-	return run(opts.schema, opts.file, opts.import_path, dump, opts.offsets, params, stdout, stderr)
+	return run(opts.schema, opts.file, opts.import_path, dump, opts.offsets, params, limits, stdout, stderr)
 }
 
 // Loads the format from schema_path, with absolute imports found in the
@@ -135,7 +157,7 @@ execute :: proc(args: []string, stdout, stderr: io.Writer) -> (exit_code: int) {
 // the params of the schema's top-level type, as name=value. Returns 0 on
 // success, 1 on a load, parse or output error, and 2 when params do not
 // give one argument for each param.
-run :: proc(schema_path: string, file_path: string, import_path: string, dump: Dump_Kind, offsets: bool, params: []string, stdout, stderr: io.Writer) -> int {
+run :: proc(schema_path: string, file_path: string, import_path: string, dump: Dump_Kind, offsets: bool, params: []string, limits: rdr.Limits, stdout, stderr: io.Writer) -> int {
 	file_format: mdata.File_Format
 	defer mdata.destroy_file_format(&file_format)
 
@@ -149,7 +171,7 @@ run :: proc(schema_path: string, file_path: string, import_path: string, dump: D
 	// the tree may be partially filled after a parse error; free it either way
 	defer fld.destroy_value_tree(&tree)
 
-	_, parse_err := rdr.read(file_path, &file_format, &tree, spans = offsets, args = args)
+	_, parse_err := rdr.read(file_path, &file_format, &tree, spans = offsets, args = args, limits = limits)
 	defer rdr.destroy_parse_error(&parse_err)
 
 	if parse_err.kind == .File_Read_Failed {
@@ -243,6 +265,29 @@ root_args :: proc(root: ^mdata.Node, params: []string, stderr: io.Writer) -> (ar
 		}
 	}
 	return args, true
+}
+
+// The bytes that text gives, a count of them with an optional K, M or G
+// (2^10, 2^20 or 2^30); ok is false for anything else, or one beyond an
+// int.
+size_value :: proc(text: string) -> (n: int, ok: bool) {
+	digits, unit := text, 1
+	if len(text) > 0 {
+		switch text[len(text) - 1] {
+		case 'K', 'k':
+			unit = 1 << 10
+		case 'M', 'm':
+			unit = 1 << 20
+		case 'G', 'g':
+			unit = 1 << 30
+		}
+		if unit != 1 do digits = text[:len(text) - 1]
+	}
+	if len(digits) == 0 do return
+	for c in digits do if c < '0' || c > '9' do return
+	count := strconv.parse_int(digits, 10) or_return
+	if count > max(int) / unit do return
+	return count * unit, true
 }
 
 // The bytes that text gives as pairs of hex digits, in

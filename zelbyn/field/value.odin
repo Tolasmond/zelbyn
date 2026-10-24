@@ -1,6 +1,7 @@
 package field
 
 import arn "../arena"
+import "core:mem"
 
 // One value of a field. An array, []Value, is never in a tree: it is an
 // item of an array literal of arrays, the value of an expression.
@@ -47,10 +48,12 @@ Instance :: struct {
 DEFAULT_CASE :: -1
 
 // Allocates an instance with n slots, all empty, in one block of a, and
-// returns it with its n cells, and with SPANS their spans. Inlined: the
-// decoder calls it from two places (with and without spans), and a call
-// for every instance costs 3% more decode instructions.
-make_instance :: #force_inline proc(a: ^arn.Arena, n: int, choice: int, $SPANS: bool) -> (instance: ^Instance, cells: []Value) {
+// returns it with its n cells, and with SPANS their spans; err is the
+// arena's when it could not (arena_make). Inlined: the decoder calls it
+// from two places (with and without spans), and a call for every instance
+// costs 3% more decode instructions.
+@(require_results)
+make_instance :: #force_inline proc(a: ^arn.Arena, n: int, choice: int, $SPANS: bool) -> (instance: ^Instance, cells: []Value, err: mem.Allocator_Error) {
 	// Instance, slots, Value and Span all have the alignment of a pointer
 	#assert(align_of(Instance) == align_of(rawptr) && align_of([]Value) == align_of(rawptr) && align_of(Value) == align_of(rawptr))
 	#assert(align_of(Span) == align_of(rawptr) && size_of(Span) % size_of(rawptr) == 0)
@@ -59,7 +62,8 @@ make_instance :: #force_inline proc(a: ^arn.Arena, n: int, choice: int, $SPANS: 
 	HEADER_WORDS :: size_of(Instance) / size_of(rawptr)
 	cell_words := CELL_WORDS
 	when SPANS do cell_words += size_of(Span) / size_of(rawptr)
-	words := raw_data(arn.arena_make(a, rawptr, HEADER_WORDS + n * (SLOT_WORDS + cell_words)))
+	block := arn.arena_make(a, rawptr, HEADER_WORDS + n * (SLOT_WORDS + cell_words)) or_return
+	words := raw_data(block)
 	instance = (^Instance)(words)
 	slots := ([^][]Value)(&words[HEADER_WORDS])
 	instance.slots = slots[:n]
