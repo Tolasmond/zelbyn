@@ -1,12 +1,12 @@
-package tests
+package limits
 
-import arn "../zelbyn/arena"
-import expr "../zelbyn/expression"
-import fld "../zelbyn/field"
-import ksy "../zelbyn/ksy"
-import mdata "../zelbyn/metadata"
-import rdr "../zelbyn/reader"
-import yml "../zelbyn/yaml"
+import arn "../../zelbyn/arena"
+import expr "../../zelbyn/expression"
+import fld "../../zelbyn/field"
+import ksy "../../zelbyn/ksy"
+import mdata "../../zelbyn/metadata"
+import rdr "../../zelbyn/reader"
+import yml "../../zelbyn/yaml"
 import "core:fmt"
 import "core:os"
 import "core:strings"
