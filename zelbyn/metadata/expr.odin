@@ -1,5 +1,8 @@
 package metadata
 
+import dat "../data"
+import "base:intrinsics"
+
 // A node of a parsed expression (doc/arch.md, "expression: parsing,
 // resolution and direct forms", and in the plan, "Checks and expressions").
 // The parser (package expression) gives every node a syntax variant; resolving the expression replaces the
@@ -133,6 +136,73 @@ Binary_Op :: enum {
 Binary :: struct {
 	op:          Binary_Op,
 	left, right: ^Expr,
+}
+
+// The integers an Int expression has: from min(int) to max(u64), exactly.
+// The evaluator holds one as an int, or above max(int), as a u64. Every
+// integer of a schema has this range: a literal (Big_Literal above
+// max(int)), a constant that the compiler folds (expression.constant), a
+// switch-on case and the value it is compared with, and the result of each
+// integer operation, which fails with Integer_Overflow beyond it. A size,
+// count, offset or index must also fit an int, and an enum's values, as in
+// the official compiler, and a valid bound the type of its field.
+INT_MIN :: i128(min(int))
+INT_MAX :: i128(max(u64))
+
+// a op b, of two integers in the range of INT_MIN to INT_MAX, as every
+// integer operation is defined, by the evaluator and by the compiler when
+// it folds a constant: / and % round toward negative infinity, as in
+// Python and so Kaitai's Python runtime; a division by zero, a shift by a
+// negative amount or by 64 or more, and a result outside the range fail.
+// op is an arithmetic or bitwise operator, not a comparison.
+int_binary :: proc(op: Binary_Op, a, b: i128) -> (n: i128, err: dat.Read_Error) {
+	overflow: bool
+	#partial switch op {
+	case .Mul:
+		n, overflow = intrinsics.overflow_mul(a, b)
+	case .Add:
+		n = a + b
+	case .Sub:
+		n = a - b
+	case .Div:
+		if b == 0 do return 0, .Division_By_Zero
+		n = a / b
+		if a % b != 0 && (a < 0) != (b < 0) do n -= 1
+	case .Mod:
+		if b == 0 do return 0, .Division_By_Zero
+		n = b == -1 ? 0 : a %% b
+	case .Shl:
+		if b < 0 || b > 63 do return 0, .Invalid_Shift
+		// below 2^64 shifted by at most 63, within an i128
+		n = a << uint(b)
+	case .Shr:
+		if b < 0 || b > 63 do return 0, .Invalid_Shift
+		n = a >> uint(b)
+	case .And:
+		n = a & b
+	case .Xor:
+		n = a ~ b
+	case .Or:
+		n = a | b
+	case:
+		panic("int_binary: not an arithmetic or bitwise operator")
+	}
+	if overflow || n < INT_MIN || n > INT_MAX do return 0, .Integer_Overflow
+	return n, .None
+}
+
+// op a, -a or ~a, of an integer in the range, as int_binary is defined.
+int_unary :: proc(op: Unary_Op, a: i128) -> (n: i128, err: dat.Read_Error) {
+	#partial switch op {
+	case .Neg:
+		n = -a
+	case .Bit_Not:
+		n = ~a
+	case:
+		panic("int_unary: not - or ~")
+	}
+	if n < INT_MIN || n > INT_MAX do return 0, .Integer_Overflow
+	return n, .None
 }
 
 Ternary :: struct {

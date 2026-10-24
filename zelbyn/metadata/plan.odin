@@ -251,7 +251,7 @@ DEFAULT_CASE :: fld.DEFAULT_CASE
 // value for a Switch whose on is an Int, or a Bool as 0 or 1; text for one
 // whose on is a String.
 Switch_Case :: struct {
-	value: int,
+	value: i128, // within mdata.INT_MIN to INT_MAX
 	text:  string,
 	node:  ^Node,
 	type:  string, // the name of node's user type, for casts (Switch_Cast); "" for any other type

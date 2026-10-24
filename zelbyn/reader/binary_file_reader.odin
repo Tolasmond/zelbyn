@@ -444,15 +444,16 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPA
 				}
 			}
 		} else {
-			// a Bool is chosen by its value as 0 or 1
-			on: int
+			// a Bool is chosen by its value as 0 or 1, an Int by its value in
+			// full, which can be above max(int)
+			on: i128
 			err: dat.Read_Error
 			if sw.on.type == .Bool {
 				b: bool
 				b, err = eval_bool(d, sw.on, index)
-				on = int(b)
+				on = i128(int(b))
 			} else {
-				on, err = eval_int(d, sw.on, index)
+				on, err = eval_wide(d, sw.on, index)
 			}
 			if err != .None do return fail(d, err, d.r.pos)
 			for c, i in sw.cases {

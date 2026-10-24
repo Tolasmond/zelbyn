@@ -123,58 +123,38 @@ direct_form :: proc(e: ^mdata.Expr) -> mdata.Direct {
 }
 
 // The value of e, a parsed or resolved expression, when it is made of
-// integer literals and the integer operators; ok is false for any other,
-// when the decoder would fail on it (division by zero, an invalid shift),
-// and when its value or a step towards it does not fit an int, which the
-// decoder evaluates exactly up to max(u64).
+// integer literals and the integer operators, as the decoder would give it
+// (mdata.int_binary and int_unary, each step within min(int) to max(u64));
+// ok is false for any other, and when the decoder would fail on it
+// (division by zero, an invalid shift, a result beyond those integers).
+// The size and count it gives must also fit an int: a value outside one is
+// not ok.
 constant :: proc(e: ^mdata.Expr) -> (v: int, ok: bool) {
+	n := constant_wide(e) or_return
+	if n < i128(min(int)) || n > i128(max(int)) do return
+	return int(n), true
+}
+
+@(private = "file")
+constant_wide :: proc(e: ^mdata.Expr) -> (n: i128, ok: bool) {
 	#partial switch x in e.variant {
 	case mdata.Int_Literal:
-		return x.value, true
+		return i128(x.value), true
+	case mdata.Big_Literal:
+		return i128(x.value), true
 	case mdata.Unary:
-		n := constant(x.operand) or_return
-		#partial switch x.op {
-		case .Neg:
-			if n == min(int) do return
-			return -n, true
-		case .Bit_Not:
-			return ~n, true
-		}
+		if x.op == .Not do return
+		v, err := mdata.int_unary(x.op, constant_wide(x.operand) or_return)
+		return v, err == .None
 	case mdata.Binary:
-		a := constant(x.left) or_return
-		b := constant(x.right) or_return
-		overflow := false
 		#partial switch x.op {
-		case .Mul:
-			v, overflow = intrinsics.overflow_mul(a, b)
-		case .Add:
-			v, overflow = intrinsics.overflow_add(a, b)
-		case .Sub:
-			v, overflow = intrinsics.overflow_sub(a, b)
-		case .Div:
-			if b == 0 || (a == min(int) && b == -1) do return
-			v = a / b
-			if a % b != 0 && (a < 0) != (b < 0) do v -= 1
-		case .Mod:
-			if b == 0 do return
-			v = b == -1 ? 0 : a %% b
-		case .Shl:
-			if b < 0 || b > 63 do return
-			v = a << uint(b)
-			overflow = v >> uint(b) != a
-		case .Shr:
-			if b < 0 || b > 63 do return
-			v = a >> uint(b)
-		case .And:
-			v = a & b
-		case .Xor:
-			v = a ~ b
-		case .Or:
-			v = a | b
-		case:
+		case .Eq, .Ne, .Lt, .Le, .Gt, .Ge, .Logical_And, .Logical_Or:
 			return
 		}
-		return v, !overflow
+		a := constant_wide(x.left) or_return
+		b := constant_wide(x.right) or_return
+		v, err := mdata.int_binary(x.op, a, b)
+		return v, err == .None
 	}
 	return
 }
