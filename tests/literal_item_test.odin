@@ -207,3 +207,38 @@ literal_item_only_of_constants :: proc(t: ^testing.T) {
 		mdat.destroy_file_format(&ff)
 	}
 }
+
+// A negated integer literal among floats, in an array literal or a ?:,
+// is made a float as the evaluator would negate it, in i128: -min(int),
+// an enum constant's value, is 2^63, and -0 is 0.0, not -0.0, which the
+// differential test above cannot tell, as both of its plans are resolved
+// alike. Each check is a valid on a byte of the input.
+@(test)
+literal_item_negated_floats :: proc(t: ^testing.T) {
+	checks := [?]string {
+		"[-e::min_value, 0.5][0] == 9223372036854775808.0",
+		"(true ? -e::min_value : 0.5) == 9223372036854775808.0",
+		"(true ? -e::min_value : 0.5) > 0",
+		"[-e::min_value, 0.5][0] > 0",
+		"1 / [-0, 0.5][0] > 0",
+		"1 / (true ? -0 : 0.5) > 0",
+		"[-5, 0.5][0] == -5.0",
+		"(false ? 0.5 : -5) == -5.0",
+	}
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, "meta:\n  id: l\nenums:\n  e:\n    -9223372036854775808: min_value\nseq:\n")
+	for c, i in checks do fmt.sbprintf(&b, "  - id: c%v\n    type: u1\n    valid:\n      expr: '%s'\n", i, c)
+
+	ff: mdat.File_Format
+	defer mdat.destroy_file_format(&ff)
+	err := ksy.compile(strings.to_string(b), &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "%v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
+
+	input: [len(checks)]byte
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, input[:], &d)
+	failed := d.err.kind == .None ? "" : checks[d.err.offset]
+	testing.expectf(t, d.err.kind == .None, "%v in %s: %s", d.err.kind, d.err.path, failed)
+}

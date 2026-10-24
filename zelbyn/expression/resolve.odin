@@ -394,9 +394,11 @@ binary_type :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Binary) -> (t: mdata.
 // float, else e + 0.0, which the decoder evaluates as a float.
 @(private = "file")
 as_float :: proc(r: ^Resolver, e: ^mdata.Expr) {
-	negated: Maybe(int)
+	// in i128, as the evaluator negates, so that -min(int), an enum
+	// constant's value, is 2^63
+	negated: Maybe(i128)
 	if neg, is_neg := e.variant.(mdata.Unary); is_neg && neg.op == .Neg {
-		if lit, is_literal := neg.operand.variant.(mdata.Int_Literal); is_literal do negated = -lit.value
+		if lit, is_literal := neg.operand.variant.(mdata.Int_Literal); is_literal do negated = -i128(lit.value)
 	}
 	if lit, is_literal := e.variant.(mdata.Int_Literal); is_literal {
 		e.variant = mdata.Float_Literal{f64(lit.value)}
