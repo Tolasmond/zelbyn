@@ -10,6 +10,7 @@ tools/kaitai_compare), and are skipped without node_modules.
 
 import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -103,6 +104,35 @@ SCOPED_VALUES = {
     'd': [{'kind': [1], 'f': [9]}],
 }
 
+# f4 and f8 fields, repeated and in a switch-on with a case of each, which
+# FLOATS_INPUT reads as f4, then f8.
+FLOATS = """meta:
+  id: floats
+  endian: le
+seq:
+  - id: single
+    type: f4
+    repeat: expr
+    repeat-expr: 2
+  - id: double
+    type: f8
+  - id: kinds
+    type: u1
+    repeat: expr
+    repeat-expr: 2
+  - id: either
+    type:
+      switch-on: kinds[_index]
+      cases:
+        1: f4
+        2: f8
+    repeat: expr
+    repeat-expr: 2
+"""
+
+FLOATS_INPUT = (struct.pack('<ff', 0.1, 1e-3) + struct.pack('<d', 0.1) + bytes([1, 2])
+                + struct.pack('<f', 0.3) + struct.pack('<d', 0.3))
+
 # The JavaScript runtime moves one byte too far past a terminator with
 # include: true and consume, so after t the decoders differ.
 DIFFERING = """meta:
@@ -141,6 +171,35 @@ class Helpers(unittest.TestCase):
         with self.assertRaises(ValueError):
             json.loads('{"f": [1], "f": [2]}', object_pairs_hook=compare.merge_fields)
 
+    def test_float_precision(self):
+        """The same numbers, as an f4 and as an f8: only an f4 is equal when
+        zelbyn's rounds to the runtime's as an f4."""
+        cases = [
+            # zelbyn's shortest digits of an f4, and the double it widens to
+            (0.1, 0.10000000149011612),
+            (0.3, 0.30000001192092896),
+            # doubles that differ, but round to one f4
+            (1.0000000001, 1.0),
+        ]
+        for ours, theirs in cases:
+            with self.subTest(ours=ours, theirs=theirs):
+                compare.first_difference.values = 0
+                self.assertIsNone(compare.first_difference(ours, theirs, 'r.x[0]', {'r.x[0]'}))
+                self.assertEqual(compare.first_difference(ours, theirs, 'r.x[0]'), ('r.x[0]', ours, theirs))
+                # f4 marks only its own path
+                self.assertEqual(compare.first_difference(ours, theirs, 'r.x[0]', {'r.x[1]'}), ('r.x[0]', ours, theirs))
+        # equal doubles, and an integer value the runtime writes as an integer
+        for ours, theirs in [(0.1, 0.1), (1.0, 1), (2.5e300, 2.5e300)]:
+            self.assertIsNone(compare.first_difference(ours, theirs, 'r.x[0]'))
+            self.assertIsNone(compare.first_difference(ours, theirs, 'r.x[0]', {'r.x[0]'}))
+        # beyond an f4, nothing rounds to it
+        self.assertIsNotNone(compare.first_difference(1e300, 1e300 * (1 + 2**-40), 'r.x[0]', {'r.x[0]'}))
+        # in set instances, by path
+        a = {'s': [{'f': [0.1, 0.1]}]}
+        b = {'s': [{'f': [0.10000000149011612, 0.10000000149011612]}]}
+        self.assertIsNone(compare.first_difference(a, b, 'r', {'r.s[0].f[0]', 'r.s[0].f[1]'}))
+        self.assertEqual(compare.first_difference(a, b, 'r', {'r.s[0].f[0]'}), ('r.s[0].f[1]', 0.1, 0.10000000149011612))
+
     def test_dump_offsets(self):
         text = 'Scoped Root[0].a[0].p[0] = 1 @0x00000000\nScoped Root[0].b[0].p[0] = 3 @0x00000002\n'
         self.assertEqual(compare.dump_offsets(text), {'Scoped Root[0].a[0].p[0]': 0, 'Scoped Root[0].b[0].p[0]': 2})
@@ -171,6 +230,23 @@ class Decodes(unittest.TestCase):
         out = subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema, self.write('in.bin', SCOPED_INPUT)],
                              capture_output=True, text=True, check=True).stdout
         self.assertEqual(compare.present(json.loads(out)['value']), SCOPED_VALUES)
+
+    def test_decode_js_f4(self):
+        """decode.js gives the paths of the floats read as f4s, by what was
+        read: the case of a switch-on with both."""
+        import yaml
+        schema = self.write('s.json', json.dumps(yaml.safe_load(FLOATS)))
+        out = json.loads(subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema, self.write('in.bin', FLOATS_INPUT)],
+                                        capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(out['f4'], ['floats.single[0]', 'floats.single[1]', 'floats.either[0]'])
+        self.assertEqual(out['value']['double'], [0.1])
+        self.assertEqual(out['value']['either'], [0.30000001192092896, 0.3])
+
+    def test_floats_agree(self):
+        for flags in ([], ['--offsets']):
+            r = self.compare(FLOATS, FLOATS_INPUT, *flags)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn('1 files: 1 agree', r.stdout)
 
     def test_scoped_names_agree(self):
         for flags in ([], ['--offsets']):

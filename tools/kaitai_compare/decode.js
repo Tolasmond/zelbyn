@@ -9,9 +9,11 @@
 // arguments of the params of the top-level type, as a JSON array, with
 // byte arrays as arrays of integers, and the argument of a param of a user
 // type as {"type": its name, "bytes": an array of integers}, from which it
-// is made. For each file, prints one line of JSON, {"value": v}, or for a
-// file that fails to decode, {"error": "..."}. v is in the shape of
-// zelbyn's --dump json: a set instance is an
+// is made. For each file, prints one line of JSON, {"value": v, "f4": [...]},
+// or for a file that fails to decode, {"error": "..."}. f4 lists the paths
+// (root.field[i].field[j]...) of the floats read as f4s, by the width of
+// their debug records, as the schema is always compiled in debug mode. v is
+// in the shape of zelbyn's --dump json: a set instance is an
 // object of its seq fields in read order, then its parse instances
 // (instances with pos), each an array of its values (one for a field read
 // once), with byte arrays as lowercase hex. The runtime reads a parse
@@ -26,7 +28,7 @@
 // so the objects that hold fields have no prototype, and the envelope
 // keeps a field named error apart from an error.
 //
-// With --offsets, the schema is compiled in debug mode, and v maps
+// With --offsets, v maps
 // the path of every value that is not a set instance, as zelbyn's text
 // dump writes it (root[0].field[i]..., the root by its meta -orig-id or
 // id), to the offset in the file that the runtime's debug record gives it:
@@ -60,10 +62,18 @@ function displayName(spec, id) {
   return typeof orig === "string" && orig !== "" ? orig : id;
 }
 
+// Whether an attribute of type type, a type name or a switch-on, can have
+// float values: f4 or f8, in either byte order, or a switch-on with a case
+// of one.
+function isFloat(type) {
+  if (typeof type === "string") return /^f[48](le|be)?$/.test(type.trim());
+  return typeof type === "object" && type !== null && Object.values(type.cases || {}).some(isFloat);
+}
+
 // The members of each generated class: the names its fields have in
-// zelbyn's dump, by their names in the class (names), and the names in the
-// class of its parse instances, of those of them with io, and of its
-// params. They are those of the spec the class was generated from, found
+// zelbyn's dump, by their names in the class (names), those of them that
+// can have float values (floats), and the names in the class of its parse
+// instances, of those of them with io, and of its params. They are those of the spec the class was generated from, found
 // by the class itself, as nested and imported types can share a name.
 const CLASSES = new Map();
 
@@ -71,13 +81,16 @@ const CLASSES = new Map();
 // types declared in spec, which are properties of cls.
 function addClass(cls, spec) {
   if (typeof cls !== "function") throw new Error("no generated class for a type of " + JSON.stringify(Object.keys(spec)));
-  const m = { names: new Map(), parseInstances: [], withIo: new Set(), params: new Set() };
+  const m = { names: new Map(), floats: new Set(), parseInstances: [], withIo: new Set(), params: new Set() };
   (spec.seq || []).forEach((a, i) => {
-    m.names.set(a.id === undefined ? "_unnamed" + i : lowerCamel(a.id), a.id === undefined ? "_unnamed" + i : displayName(a, a.id));
+    const key = a.id === undefined ? "_unnamed" + i : lowerCamel(a.id);
+    m.names.set(key, a.id === undefined ? "_unnamed" + i : displayName(a, a.id));
+    if (isFloat(a.type)) m.floats.add(key);
   });
   for (const [id, inst] of Object.entries(spec.instances || {})) {
     if (inst.value !== undefined) continue;
     m.names.set(lowerCamel(id), displayName(inst, id));
+    if (isFloat(inst.type)) m.floats.add(lowerCamel(id));
     m.parseInstances.push(lowerCamel(id));
     if (inst.io !== undefined) m.withIo.add(lowerCamel(id));
   }
@@ -110,7 +123,6 @@ const UNNAMED = /^_unnamed\d+$/;
 
 function value(v) {
   if (v instanceof Uint8Array) return Buffer.from(v).toString("hex");
-  if (typeof v === "object" && v !== null) return instance(v);
   return v;
 }
 
@@ -125,6 +137,20 @@ function inInput(io, root) {
 
 // Adds the offset of every value of obj, whose stream starts at offset pos
 // in the file, to out, by its path. root is the root of the tree.
+// The debug record of each value of member key of obj, whose values are
+// v, in order.
+function records(obj, key, v) {
+  const debug = obj._debug[key] || obj._debug["_m_" + key];
+  if (!Array.isArray(v)) return [debug];
+  // the records of an array are by element, also of a repeated switch-on
+  // whose elements no case chose, which read nothing and add no value
+  if (debug.arr.length > v.length) {
+    const read = debug.arr.filter((r) => r.end > r.start);
+    if (read.length === v.length) return read;
+  }
+  return debug.arr;
+}
+
 function offsets(obj, path, pos, root, out) {
   const m = membersOf(obj);
   const base = root._io.byteOffset;
@@ -132,17 +158,10 @@ function offsets(obj, path, pos, root, out) {
   for (const key of keys.concat(m.parseInstances)) {
     const v = obj[key];
     if (v === undefined || v === null) continue;
-    const debug = obj._debug[key] || obj._debug["_m_" + key];
     const values = Array.isArray(v) ? v : [v];
-    // the records of an array are by element, also of a repeated switch-on
-    // whose elements no case chose, which read nothing and add no value
-    let records = Array.isArray(v) ? debug.arr : null;
-    if (records && records.length > v.length) {
-      const read = records.filter((r) => r.end > r.start);
-      if (read.length === v.length) records = read;
-    }
+    const rs = records(obj, key, v);
     values.forEach((x, i) => {
-      const d = records ? records[i] : debug;
+      const d = rs[i];
       const p = path + "." + shown(m, key) + "[" + i + "]";
       // a parse instance with io is read in another stream, which is not a
       // copy
@@ -170,18 +189,31 @@ function put(out, name, values) {
   if (!(name in out) || values.length > 0) out[name] = values;
 }
 
-function instance(obj) {
+// obj, a set instance at path (as compare.py's first_difference writes
+// paths: the root's name, then .name[i] for each value), in the shape of
+// zelbyn's --dump json, with the path of every value that was read as an
+// f4 added to f4. A float field's values are f4 or f8 as the runtime read
+// them, 4 or 8 bytes by their debug records, which also tells the cases of
+// a switch-on with both (minecraft_nbt.ksy's tag::float and tag::double).
+function instance(obj, path, f4) {
   const m = membersOf(obj);
   const out = Object.create(null);
-  for (const key of Object.keys(obj)) {
-    const v = obj[key];
-    if ((key.startsWith("_") && !UNNAMED.test(key)) || m.params.has(key) || v === undefined || v === null) continue;
-    put(out, shown(m, key), Array.isArray(v) ? v.map(value) : [value(v)]);
-  }
-  for (const key of m.parseInstances) {
+  const keys = Object.keys(obj).filter((k) => !(k.startsWith("_") && !UNNAMED.test(k)) && !m.params.has(k));
+  for (const key of keys.concat(m.parseInstances)) {
     const v = obj[key];
     if (v === undefined || v === null) continue;
-    put(out, shown(m, key), Array.isArray(v) ? v.map(value) : [value(v)]);
+    const name = shown(m, key);
+    const values = Array.isArray(v) ? v : [v];
+    const rs = m.floats.has(key) ? records(obj, key, v) : null;
+    put(out, name, values.map((x, i) => {
+      const p = path + "." + name + "[" + i + "]";
+      if (rs && typeof x === "number") {
+        const width = rs.length === values.length ? rs[i].end - rs[i].start : -1;
+        if (width !== 4 && width !== 8) throw new Error("no f4 or f8 read for the float at " + p);
+        if (width === 4) f4.push(p);
+      }
+      return typeof x === "object" && x !== null && !(x instanceof Uint8Array) ? instance(x, p, f4) : value(x);
+    }));
   }
   return out;
 }
@@ -214,7 +246,9 @@ async function main() {
       return spec ? Promise.resolve(spec) : Promise.reject(new Error("no schema for import " + name));
     },
   };
-  const sources = await compiler.compile("javascript", ksy, importer, withOffsets);
+  // in debug mode, which records where each value was read, and so the
+  // width of each float
+  const sources = await compiler.compile("javascript", ksy, importer, true);
 
   // each generated file is a module, which requires those of its imports
   const modules = {};
@@ -250,19 +284,22 @@ async function main() {
     for (const name of path.slice(1)) cls = cls[name];
     const arg = new cls(new KaitaiStream(new Uint8Array(v.bytes)), null, null);
     // in debug mode, the constructor does not read
-    if (withOffsets) arg._read();
+    arg._read();
     return arg;
   });
 
   for (const file of files) {
     try {
       const root = new Root(new KaitaiStream(fs.readFileSync(file)), null, null, ...params);
+      // in debug mode, the constructor does not read
+      root._read();
+      const rootName = displayName(ksy.meta, ksy.meta.id);
       if (withOffsets) {
-        // in debug mode, the constructor does not read
-        root._read();
-        console.log(JSON.stringify({ value: offsets(root, displayName(ksy.meta, ksy.meta.id) + "[0]", 0, root, Object.create(null)) }));
+        console.log(JSON.stringify({ value: offsets(root, rootName + "[0]", 0, root, Object.create(null)) }));
       } else {
-        console.log(JSON.stringify({ value: instance(root) }));
+        const f4 = [];
+        const v = instance(root, rootName, f4);
+        console.log(JSON.stringify({ value: v, f4 }));
       }
     } catch (e) {
       console.log(JSON.stringify({ error: String(e) }));
