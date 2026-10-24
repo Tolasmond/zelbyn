@@ -67,6 +67,10 @@ build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_De
 
 	if enums := get(spec, "enums"); enums != nil {
 		td.enums = build_enums(c, enums) or_return
+		if len(td.enums) >= INDEX_FROM {
+			td.enum_index = make(map[string]^expr.Enum, len(td.enums), c.scratch)
+			for &e in td.enums do td.enum_index[e.name] = &e
+		}
 	}
 	if params := get(spec, "params"); params != nil {
 		td.params = build_params(c, td, params) or_return
@@ -80,6 +84,10 @@ build_type :: proc(c: ^Compiler, name: string, spec: ^yml.Node, parent: ^Type_De
 			list[i] = build_type(c, type_name, e.value, td) or_return
 		}
 		td.types = list
+		if len(list) >= INDEX_FROM {
+			td.type_index = make(map[string]^Type_Def, len(list), c.scratch)
+			for t in list do td.type_index[t.name] = t
+		}
 	}
 	return td, true
 }
@@ -123,16 +131,38 @@ build_enums :: proc(c: ^Compiler, n: ^yml.Node) -> (enums: []expr.Enum, ok: bool
 		if e.value.kind != .Map do return nil, fail(c, .Invalid, e.value, "enum %s must be a mapping", name)
 
 		values := make([]expr.Enum_Value, len(e.value.entries), c.allocator)
+		// the index of each value before, by name and by integer, from
+		// INDEX_FROM of them on
+		names: map[string]int
+		ints: map[int]int
 		for v, j in e.value.entries {
 			n, is_int := parse_int(v.key.text)
 			if !is_int || v.key.style != .Plain do return nil, fail(c, .Invalid, v.key, "enum %s: %q is not an integer", name, v.key.text)
 			if n > i128(max(int)) || n < i128(min(int)) do return nil, fail(c, .Unsupported, v.key, "enum %s: %v does not fit in a 64-bit signed integer", name, v.key.text)
 			value_name := enum_value_name(c, name, v.value) or_return
 
-			for prev in values[:j] {
-				at := v.value.kind == .Map ? get(v.value, "id") : v.value
-				if prev.name == value_name do return nil, fail(c, .Invalid, at, "enum %s: %s appears twice", name, value_name)
-				if prev.value == int(n) do return nil, fail(c, .Invalid, v.key, "enum %s: value %v appears twice", name, v.key.text)
+			// the first value before with the same name or integer
+			prev := -1
+			if j < INDEX_FROM {
+				for p, k in values[:j] {
+					if p.name == value_name || p.value == int(n) {
+						prev = k
+						break
+					}
+				}
+			} else {
+				if j == INDEX_FROM {
+					names = make(map[string]int, 2 * j, c.scratch)
+					ints = make(map[int]int, 2 * j, c.scratch)
+					for p, k in values[:j] do names[p.name], ints[p.value] = k, k
+				}
+				if k, seen := names[value_name]; seen do prev = k
+				if k, seen := ints[int(n)]; seen && (prev < 0 || k < prev) do prev = k
+				names[value_name], ints[int(n)] = j, j
+			}
+			if prev >= 0 {
+				if values[prev].name == value_name do return nil, fail(c, .Invalid, v.value.kind == .Map ? get(v.value, "id") : v.value, "enum %s: %s appears twice", name, value_name)
+				return nil, fail(c, .Invalid, v.key, "enum %s: value %v appears twice", name, v.key.text)
 			}
 			values[j] = {value_name, int(n)}
 		}
@@ -239,6 +269,7 @@ find_type :: proc(td: ^Type_Def, name: string) -> ^Type_Def {
 // The type called name declared in td.
 @(private = "file")
 nested_type :: proc(td: ^Type_Def, name: string) -> ^Type_Def {
+	if td.type_index != nil do return td.type_index[name]
 	for sub in td.types {
 		if sub.name == name do return sub
 	}
@@ -267,20 +298,24 @@ next_name :: proc(rest: ^string) -> string {
 // that find_type finds (a::b).
 @(private = "file")
 find_enum :: proc(td: ^Type_Def, name: string) -> ^expr.Enum {
-	t, enum_name := td, name
+	t := td
 	if i := strings.last_index(name, "::"); i >= 0 {
 		t = find_type(td, name[:i])
 		if t == nil do return nil
-		enum_name = name[i + 2:]
-		for &e in t.enums {
-			if e.name == enum_name do return &e
-		}
-		return nil
+		return own_enum(t, name[i + 2:])
 	}
 	for ; t != nil; t = t.parent {
-		for &e in t.enums {
-			if e.name == name do return &e
-		}
+		if e := own_enum(t, name); e != nil do return e
+	}
+	return nil
+}
+
+// The enum called name declared in td.
+@(private = "file")
+own_enum :: proc(td: ^Type_Def, name: string) -> ^expr.Enum {
+	if td.enum_index != nil do return td.enum_index[name]
+	for &e in td.enums {
+		if e.name == name do return &e
 	}
 	return nil
 }
@@ -317,7 +352,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 	defer c.current = current
 	c.current = set
 
-	ids := make([dynamic]^yml.Node, c.scratch) // the id nodes of the attributes, bit fields and instances
+	ids := Ids{list = make([dynamic]^yml.Node, c.scratch)}
 
 	// each instance is compiled when an expression first refers to it, or
 	// else once every set is (compile_schema)
@@ -680,14 +715,41 @@ compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Inst
 	return true
 }
 
+// How many names a type's ids, types, enums or an enum's values hold before
+// they are looked up in a map. Most types have few, and searching them
+// costs less than hashing, but n names, each checked against or looked up
+// among the others, would take n^2 / 2 comparisons.
 @(private)
-claim_id :: proc(c: ^Compiler, ids: ^[dynamic]^yml.Node, id: string, n: ^yml.Node) -> bool {
-	// a type has few ids, and searching them costs less than hashing
-	for prev in ids {
-		if prev.text != id do continue
-		return fail(c, .Invalid, n, "id %s is already used (line %v, column %v)", id, prev.line, prev.column)
+INDEX_FROM :: 64
+
+// The id nodes of a type's attributes, bit fields and instances, in list,
+// and from INDEX_FROM of them on, by name in index too, which claim_id
+// builds then.
+@(private)
+Ids :: struct {
+	list:  [dynamic]^yml.Node,
+	index: map[string]^yml.Node, // in c.scratch
+}
+
+@(private)
+claim_id :: proc(c: ^Compiler, ids: ^Ids, id: string, n: ^yml.Node) -> bool {
+	prev: ^yml.Node
+	if len(ids.list) < INDEX_FROM {
+		for p in ids.list {
+			if p.text == id {
+				prev = p
+				break
+			}
+		}
+	} else {
+		if ids.index == nil {
+			ids.index = make(map[string]^yml.Node, 2 * len(ids.list), c.scratch)
+			for p in ids.list do ids.index[p.text] = p
+		}
+		if prev = ids.index[id]; prev == nil do ids.index[id] = n
 	}
-	append(ids, n)
+	if prev != nil do return fail(c, .Invalid, n, "id %s is already used (line %v, column %v)", id, prev.line, prev.column)
+	append(&ids.list, n)
 	return true
 }
 

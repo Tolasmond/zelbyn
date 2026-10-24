@@ -3888,3 +3888,77 @@ t[0].peek[0] = 104 @0x1
 	sub := field_instance(r, "sub")
 	testing.expect_value(t, fld.value_span(sub.instance, field_slot(sub, "x"), 0), fld.Span{5, 2})
 }
+
+// Ids, types, enums and an enum's values past the number the compiler
+// compares one by one, which it then looks up in maps: a duplicate is still
+// found, with where it is first, a value repeating the name of one value
+// and the integer of another is reported as the first of the two, and
+// types and enums are found by name and by path. 100,000 types, each used,
+// and an enum of 100,000 values compile in time linear in their number.
+@(test)
+ksy_many_names :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	N :: 70
+
+	// fields f0 ... f(N - 1), each u1, at lines 5, 7, ...
+	fields := strings.builder_make(context.temp_allocator)
+	strings.write_string(&fields, HEAD + "seq:\n")
+	for i in 0 ..< N do fmt.sbprintf(&fields, "  - id: f%d\n    type: u1\n", i)
+	// an enum e of the values v0 = 0 ... v(N - 1), at lines 7 ...
+	values := strings.builder_make(context.temp_allocator)
+	strings.write_string(&values, HEAD + "enums:\n  e:\n")
+	for i in 0 ..< N do fmt.sbprintf(&values, "    %d: v%d\n", i, i)
+	Case :: struct {
+		src:          string,
+		line, column: int,
+		message:      string,
+	}
+	cases := [?]Case {
+		{strings.concatenate({strings.to_string(fields), "  - id: f3\n    type: u1\n"}, context.temp_allocator), 5 + 2 * N, 9, "id f3 is already used (line 11, column 9)"},
+		{strings.concatenate({strings.to_string(fields), "  - id: g\n    type: u1\n  - id: f69\n    type: u1\n"}, context.temp_allocator), 7 + 2 * N, 9, "id f69 is already used (line 143, column 9)"},
+		{strings.concatenate({strings.to_string(fields), "instances:\n  f67:\n    value: 1\n"}, context.temp_allocator), 6 + 2 * N, 3, "id f67 is already used (line 139, column 9)"},
+		{strings.concatenate({strings.to_string(values), "    100: v3\n"}, context.temp_allocator), 6 + N, 10, "enum e: v3 appears twice"},
+		{strings.concatenate({strings.to_string(values), "    0x41: w\n"}, context.temp_allocator), 6 + N, 5, "enum e: value 0x41 appears twice"},
+		// the name of v5 and the integer of v2, then the other way round
+		{strings.concatenate({strings.to_string(values), "    0x2: v5\n"}, context.temp_allocator), 6 + N, 5, "enum e: value 0x2 appears twice"},
+		{strings.concatenate({strings.to_string(values), "    0x5: v2\n"}, context.temp_allocator), 6 + N, 10, "enum e: v2 appears twice"},
+	}
+	for c in cases {
+		ff: mdata.File_Format
+		err := ksy.compile(c.src, &ff)
+		testing.expectf(
+			t,
+			err.kind == .Invalid && err.line == c.line && err.column == c.column && err.message == c.message,
+			"got %v at %v:%v: %s; want at %v:%v: %s",
+			err.kind, err.line, err.column, err.message, c.line, c.column, c.message)
+		ksy.destroy_error(&err)
+		mdata.destroy_file_format(&ff)
+	}
+
+	// N types and enums, at the top level and in o, used by name and by
+	// path, and an enum of o found there before the top level's of its name
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, HEAD + "seq:\n  - id: a\n    type: t67\n  - id: b\n    type: o::t3\n  - id: c\n    type: o\n  - id: d\n    type: u1\n    valid: e67::x67\nenums:\n")
+	for i in 0 ..< N do fmt.sbprintf(&b, "  e%d:\n    %d: x%d\n", i, i, i)
+	strings.write_string(&b, "types:\n")
+	for i in 0 ..< N do fmt.sbprintf(&b, "  t%d:\n    seq:\n      - id: v\n        type: u1\n        enum: e%d\n", i, i)
+	strings.write_string(&b, "  o:\n    seq:\n      - id: w\n        type: u1\n        enum: o::e68\n        valid: e68::y68\n    enums:\n")
+	for i in 0 ..< N do fmt.sbprintf(&b, "      e%d:\n        %d: y%d\n", i, i, i)
+	strings.write_string(&b, "    types:\n")
+	for i in 0 ..< N do fmt.sbprintf(&b, "      t%d:\n        seq:\n          - id: v\n            type: u1\n            enum: e%d\n", i, i)
+	expect_dump(t, "many types and enums", ksy_dump(t, strings.to_string(b), {67, 3, 68, 67}), "t[0].a[0].v[0] = 67\nt[0].b[0].v[0] = 3\nt[0].c[0].w[0] = 68\nt[0].d[0] = 67\n")
+
+	// 100,000 types, each used by a field, and an enum of 100,000 values
+	big := strings.builder_make(context.temp_allocator)
+	strings.write_string(&big, HEAD + "seq:\n")
+	for i in 0 ..< 100_000 do fmt.sbprintf(&big, "  - id: f%d\n    type: t%d\n", i, i)
+	strings.write_string(&big, "types:\n")
+	for i in 0 ..< 100_000 do fmt.sbprintf(&big, "  t%d:\n    seq:\n      - id: v\n        type: u1\n        enum: e\n", i)
+	strings.write_string(&big, "enums:\n  e:\n")
+	for i in 0 ..< 100_000 do fmt.sbprintf(&big, "    %d: v%d\n", i, i)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
+	err := ksy.compile(strings.to_string(big), &ff)
+	defer ksy.destroy_error(&err)
+	testing.expectf(t, err.kind == .None, "100,000 types: %v at %v:%v: %s", err.kind, err.line, err.column, err.message)
+}
