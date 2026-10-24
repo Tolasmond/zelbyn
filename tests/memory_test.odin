@@ -5,6 +5,7 @@ import dat "../zelbyn/data"
 import fld "../zelbyn/field"
 import ksy "../zelbyn/ksy"
 import mdata "../zelbyn/metadata"
+import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:os"
@@ -149,10 +150,11 @@ decode_error_allocates_only_its_strings :: proc(t: ^testing.T) {
 }
 
 // Writes data to a new temporary file and returns its path, which the
-// caller deletes, and removes the file.
+// caller deletes, and removes the file. The file is named by the test
+// that makes it (see temp_file in cli_test.odin).
 @(private = "file")
-write_temp_file :: proc(t: ^testing.T, data: []byte) -> (path: string, ok: bool) {
-	f, create_err := os.create_temp_file("", "zelbyn_test_*.bin")
+write_temp_file :: proc(t: ^testing.T, data: []byte, loc := #caller_location) -> (path: string, ok: bool) {
+	f, create_err := os.create_temp_file("", fmt.tprintf("zelbyn_%s_*.bin", loc.procedure))
 	if !testing.expectf(t, create_err == nil, "creating a temporary file: %v", create_err) do return
 	path = strings.clone(os.name(f))
 	_, write_err := os.write(f, data)
