@@ -177,6 +177,26 @@ types:
 
 MIXED_INPUT = bytes([1, 2, 3, 4, 7]) + struct.pack('<I', 1) + struct.pack('<f', 0.3) + struct.pack('<d', 0.3) + struct.pack('<I', 5)
 
+# Reads that start at one position: an f8 field, and parse instances that
+# read its first half as an f4 and as a u4. The f8 and the f4 end apart;
+# the f4 and the u4 have one span, and the f4's value is not an integer.
+OVERLAP = """meta:
+  id: overlap
+  endian: le
+seq:
+  - id: wide
+    type: f8
+instances:
+  narrow:
+    pos: 0
+    type: f4
+  half:
+    pos: 0
+    type: u4
+"""
+
+OVERLAP_INPUT = struct.pack('<f', 0.1) + bytes(4)
+
 # The JavaScript runtime moves one byte too far past a terminator with
 # include: true and consume, so after t the decoders differ.
 DIFFERING = """meta:
@@ -296,8 +316,18 @@ class Decodes(unittest.TestCase):
         self.assertEqual(out['f4'], ['mixed.v[2]', 'mixed.sub[0].again[0]'])
         self.assertEqual(out['value']['v'], [7, 1, 0.30000001192092896, 0.3])
 
+    def test_decode_js_overlap(self):
+        """A read is known by its span, not only where it starts: an f4 that
+        starts where an f8 does is an f4."""
+        import yaml
+        schema = self.write('s.json', json.dumps(yaml.safe_load(OVERLAP)))
+        out = json.loads(subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema, self.write('in.bin', OVERLAP_INPUT)],
+                                        capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(out['f4'], ['overlap.narrow[0]'])
+        self.assertEqual(out['value']['narrow'], [0.10000000149011612])
+
     def test_floats_agree(self):
-        for schema, data in ((FLOATS, FLOATS_INPUT), (MIXED, MIXED_INPUT)):
+        for schema, data in ((FLOATS, FLOATS_INPUT), (MIXED, MIXED_INPUT), (OVERLAP, OVERLAP_INPUT)):
             for flags in ([], ['--offsets']):
                 with self.subTest(schema=schema.split()[2], flags=flags):
                     r = self.compare(schema, data, *flags)
