@@ -390,12 +390,19 @@ binary_type :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Binary) -> (t: mdata.
 	return .Unresolved, false
 }
 
-// Makes e, an Int expression, a Float: a literal its float, else e + 0.0,
-// which the decoder evaluates as a float.
+// Makes e, an Int expression, a Float: a literal, or a negated one, its
+// float, else e + 0.0, which the decoder evaluates as a float.
 @(private = "file")
 as_float :: proc(r: ^Resolver, e: ^mdata.Expr) {
+	negated: Maybe(int)
+	if neg, is_neg := e.variant.(mdata.Unary); is_neg && neg.op == .Neg {
+		if lit, is_literal := neg.operand.variant.(mdata.Int_Literal); is_literal do negated = -lit.value
+	}
 	if lit, is_literal := e.variant.(mdata.Int_Literal); is_literal {
 		e.variant = mdata.Float_Literal{f64(lit.value)}
+	} else if n, is_negated := negated.?; is_negated {
+		// negated as an integer first, so that -0 is 0.0, as -0 + 0.0 is
+		e.variant = mdata.Float_Literal{f64(n)}
 	} else {
 		operand := new(mdata.Expr, r.allocator)
 		operand^ = e^
@@ -844,9 +851,31 @@ resolve_array_literal :: proc(r: ^Resolver, e: ^mdata.Expr, x: mdata.Array_Liter
 		if item.type == .Int && t == .Float do as_float(r, item)
 		if item.type != t do return fail(r, .Invalid, item.offset, "the items of an array literal must have one type: %s, not %s", type_name(t), type_name(item.type))
 	}
-	e.variant = mdata.Array_Literal{x.items, t}
+	constant := true
+	for item in x.items do constant &&= is_constant(item)
+	e.variant = mdata.Array_Literal{x.items, t, constant}
 	e.type = .Array
 	return true
+}
+
+// Whether e, resolved, is a constant that evaluates without fail, as
+// Array_Literal.constant says.
+@(private = "file")
+is_constant :: proc(e: ^mdata.Expr) -> bool {
+	#partial switch x in e.variant {
+	case mdata.Int_Literal, mdata.Big_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal:
+		return true
+	case mdata.Array_Literal:
+		return x.constant
+	case mdata.Unary:
+		// a negated Big_Literal can be beyond min(int)
+		if x.op != .Neg do return false
+		#partial switch _ in x.operand.variant {
+		case mdata.Int_Literal, mdata.Float_Literal:
+			return true
+		}
+	}
+	return false
 }
 
 // The set of an expression of type Struct.
