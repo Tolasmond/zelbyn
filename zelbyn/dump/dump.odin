@@ -1,7 +1,7 @@
 package dump
 
 import fld "../field"
-import mdat "../metadata"
+import mdata "../metadata"
 import "core:fmt"
 import "core:io"
 import "core:math"
@@ -20,7 +20,7 @@ BLOB_PREVIEW :: 16
 // are not written. With offsets, which needs a tree read with spans, each
 // line ends with " @0x" and the value's offset in the input, in hex.
 @(require_results)
-write_text :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tree, offsets := false) -> io.Error {
+write_text :: proc(w: io.Writer, format: ^mdata.File_Format, tree: ^fld.Value_Tree, offsets := false) -> io.Error {
 	assert(!offsets || tree.spans, "write_text: offsets need a tree read with spans")
 	path := strings.builder_make()
 	defer strings.builder_destroy(&path)
@@ -35,7 +35,7 @@ write_text :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tre
 // {"<root name>":[{...}]}. Blobs are lowercase hex strings, numbers are
 // numbers, and NaN and infinities are null.
 @(require_results)
-write_json :: proc(w: io.Writer, format: ^mdat.File_Format, tree: ^fld.Value_Tree) -> io.Error {
+write_json :: proc(w: io.Writer, format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> io.Error {
 	io.write_byte(w, '{') or_return
 	write_json_field(w, format.root.name, set_of(format.root), tree.root[:]) or_return
 	io.write_string(w, "}\n") or_return
@@ -85,7 +85,7 @@ write_value :: proc(w: io.Writer, v: fld.Value) -> io.Error {
 // owner is nil. offsets is the tree when the lines end with offsets, else
 // nil.
 @(private = "file", require_results)
-write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set: ^mdat.Node, values: []fld.Value, offsets: ^fld.Value_Tree, owner: ^fld.Instance, k: int) -> io.Error {
+write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set: ^mdata.Node, values: []fld.Value, offsets: ^fld.Value_Tree, owner: ^fld.Instance, k: int) -> io.Error {
 	parent_len := strings.builder_len(path^)
 	defer resize(&path.buf, parent_len)
 
@@ -99,7 +99,7 @@ write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set
 
 		// a switch-on field that chose no set has its bytes instead
 		if instance, is_instance := v.(^fld.Instance); is_instance {
-			read_as := mdat.instance_set(set, instance)
+			read_as := mdata.instance_set(set, instance)
 			slot := len(read_as.parse_instances)
 			for child in read_as.children {
 				write_text_array(w, path, child.name, set_of(child), instance.slots[slot][:], offsets, instance, slot) or_return
@@ -128,7 +128,7 @@ write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set
 
 // As for write_text_array.
 @(private = "file", require_results)
-write_json_array :: proc(w: io.Writer, set: ^mdat.Node, values: []fld.Value) -> io.Error {
+write_json_array :: proc(w: io.Writer, set: ^mdata.Node, values: []fld.Value) -> io.Error {
 	io.write_byte(w, '[') or_return
 	for v, i in values {
 		if i > 0 do io.write_byte(w, ',') or_return
@@ -143,9 +143,9 @@ write_json_array :: proc(w: io.Writer, set: ^mdat.Node, values: []fld.Value) -> 
 }
 
 @(private = "file", require_results)
-write_json_object :: proc(w: io.Writer, node: ^mdat.Node, instance: ^fld.Instance) -> io.Error {
+write_json_object :: proc(w: io.Writer, node: ^mdata.Node, instance: ^fld.Instance) -> io.Error {
 	io.write_byte(w, '{') or_return
-	read_as := mdat.instance_set(node, instance)
+	read_as := mdata.instance_set(node, instance)
 	slot := len(read_as.parse_instances)
 	for child, i in read_as.children {
 		if i > 0 do io.write_byte(w, ',') or_return
@@ -165,7 +165,7 @@ write_json_object :: proc(w: io.Writer, node: ^mdat.Node, instance: ^fld.Instanc
 }
 
 @(private = "file", require_results)
-write_json_field :: proc(w: io.Writer, name: string, set: ^mdat.Node, values: []fld.Value) -> io.Error {
+write_json_field :: proc(w: io.Writer, name: string, set: ^mdata.Node, values: []fld.Value) -> io.Error {
 	write_json_string(w, name) or_return
 	io.write_byte(w, ':') or_return
 	return write_json_array(w, set, values)
@@ -173,7 +173,7 @@ write_json_field :: proc(w: io.Writer, name: string, set: ^mdat.Node, values: []
 
 // node when it is a set, else nil.
 @(private = "file")
-set_of :: proc(node: ^mdat.Node) -> ^mdat.Node {
+set_of :: proc(node: ^mdata.Node) -> ^mdata.Node {
 	return node.type == .Set ? node : nil
 }
 

@@ -3,7 +3,7 @@ package tests
 import arn "../zelbyn/arena"
 import fld "../zelbyn/field"
 import ksy "../zelbyn/ksy"
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import "core:mem"
 import "core:testing"
 
@@ -223,8 +223,8 @@ instances:
     pos: 0
     type: u1
 `
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile(src, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "%v: %s", err.kind, err.message) do return
@@ -280,8 +280,8 @@ types:
       - id: v
         type: u2
 `
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile(src, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "%v: %s", err.kind, err.message) do return

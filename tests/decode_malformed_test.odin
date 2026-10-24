@@ -1,7 +1,7 @@
 package tests
 
 import ksy "../zelbyn/ksy"
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import "core:os"
 import "core:testing"
 import "core:time"
@@ -19,8 +19,8 @@ with_header :: proc(suffix: []byte) -> [dynamic]byte {
 @(test)
 minimal_valid :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	data := with_header({0x3B})
@@ -43,8 +43,8 @@ minimal_valid :: proc(t: ^testing.T) {
 @(test)
 comment_then_trailer_at_eof :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	data := with_header({0x21, 0xFE, 0x03, 'a', 'b', 'c', 0x00, 0x3B})
@@ -71,8 +71,8 @@ comment_then_trailer_at_eof :: proc(t: ^testing.T) {
 @(test)
 empty_file :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	d: Decoded
@@ -87,8 +87,8 @@ empty_file :: proc(t: ^testing.T) {
 @(test)
 header_only :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	file, read_err := os.read_entire_file(SAMPLE_855.path, context.allocator)
@@ -107,8 +107,8 @@ header_only :: proc(t: ^testing.T) {
 @(test)
 not_a_gif :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	text := "hello world, not a gif at all"
@@ -124,8 +124,8 @@ not_a_gif :: proc(t: ^testing.T) {
 @(test)
 wrong_version :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	data := with_header({0x3B})
@@ -145,8 +145,8 @@ wrong_version :: proc(t: ^testing.T) {
 @(test)
 wrong_block_size :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	data := with_header({0x21, 0xF9, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3B})
@@ -166,8 +166,8 @@ wrong_block_size :: proc(t: ^testing.T) {
 @(test)
 marker_past_eof_is_absent :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	data := with_header({0x21})
@@ -185,8 +185,8 @@ marker_past_eof_is_absent :: proc(t: ^testing.T) {
 @(test)
 blob_longer_than_file :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	data := with_header({0x21, 0xFE, 0x10, 'a', 'b', 'c'})
@@ -208,8 +208,8 @@ blob_longer_than_file :: proc(t: ^testing.T) {
 @(test)
 missing_terminator :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	d: Decoded
@@ -225,8 +225,8 @@ missing_terminator :: proc(t: ^testing.T) {
 @(test)
 missing_file :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	d: Decoded
@@ -241,7 +241,7 @@ missing_file :: proc(t: ^testing.T) {
 // Decodes data[:n] for each n in lengths. Prefixes shorter than the full
 // decode must fail; longer ones must succeed and consume the same bytes.
 @(private = "file")
-sweep :: proc(t: ^testing.T, ff: ^mdat.File_Format, s: Sample, lengths: []int) {
+sweep :: proc(t: ^testing.T, ff: ^mdata.File_Format, s: Sample, lengths: []int) {
 	file, read_err := os.read_entire_file(s.path, context.allocator)
 	if !testing.expectf(t, read_err == nil, "reading %s: %v", s.path, read_err) do return
 	defer delete(file)
@@ -266,8 +266,8 @@ sweep :: proc(t: ^testing.T, ff: ^mdat.File_Format, s: Sample, lengths: []int) {
 @(test)
 truncation_sweep_small :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	for s in ([]Sample{SAMPLE_89AILLUS, SAMPLE_TEXTTST}) {
@@ -280,8 +280,8 @@ truncation_sweep_small :: proc(t: ^testing.T) {
 @(test)
 truncation_sweep_large :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	for s in ([]Sample{SAMPLE_CG89A, SAMPLE_855}) {
@@ -300,8 +300,8 @@ count_beyond_input :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
 	SRC :: "meta:\n  id: big\n  endian: le\nseq:\n  - id: n\n    type: u8\n  - id: items\n    type: u1\n    repeat: expr\n    repeat-expr: n\n"
 
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile(SRC, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "%v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
@@ -324,8 +324,8 @@ count_beyond_input :: proc(t: ^testing.T) {
 negative_count_and_length :: proc(t: ^testing.T) {
 	SRC :: "meta:\n  id: neg\nseq:\n  - id: n\n    type: s1\n  - id: items\n    type: u1\n    repeat: expr\n    repeat-expr: n\n  - id: m\n    type: s1\n  - id: data\n    size: m\n"
 
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile(SRC, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "%v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return

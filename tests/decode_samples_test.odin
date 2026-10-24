@@ -1,6 +1,6 @@
 package tests
 
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import "core:os"
 import "core:testing"
 import "core:time"
@@ -28,8 +28,8 @@ SAMPLE_TEXTTST  :: Sample{"data/TEXTTST.GIF",  1157,   1536,   320, 200, 256, 1,
 check_sample :: proc(t: ^testing.T, s: Sample) {
 	testing.set_fail_timeout(t, 10 * time.Second)
 
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	info, stat_err := os.stat(s.path, context.temp_allocator)
@@ -65,8 +65,8 @@ decode_855 :: proc(t: ^testing.T) {
 	check_sample(t, SAMPLE_855)
 
 	// extra checks on header strings and the first colour
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	d: Decoded

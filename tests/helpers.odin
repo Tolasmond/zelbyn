@@ -2,7 +2,7 @@ package tests
 
 import fld "../zelbyn/field"
 import ksy "../zelbyn/ksy"
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import rdr "../zelbyn/reader"
 import "base:intrinsics"
 import "core:reflect"
@@ -22,18 +22,18 @@ Schema_Source :: enum {
 }
 
 // Loads the ported GIF schema. Fails the test and returns false on error.
-load_gif :: proc(t: ^testing.T, ff: ^mdat.File_Format) -> bool {
+load_gif :: proc(t: ^testing.T, ff: ^mdata.File_Format) -> bool {
 	return load_ksy(t, KSY_PATH, ff)
 }
 
 // Loads the .ksy schema at path. Fails the test and returns false on error.
-load_ksy :: proc(t: ^testing.T, path: string, ff: ^mdat.File_Format) -> bool {
+load_ksy :: proc(t: ^testing.T, path: string, ff: ^mdata.File_Format) -> bool {
 	err := ksy.read_file_format(path, ff)
 	defer ksy.destroy_error(&err)
 	return testing.expectf(t, err.kind == .None, "loading %s: %v at %v:%v: %s", path, err.kind, err.line, err.column, err.message)
 }
 
-load_gif_from :: proc(t: ^testing.T, source: Schema_Source, ff: ^mdat.File_Format) -> bool {
+load_gif_from :: proc(t: ^testing.T, source: Schema_Source, ff: ^mdata.File_Format) -> bool {
 	switch source {
 	case .Ported:
 		return load_ksy(t, KSY_PATH, ff)
@@ -53,11 +53,11 @@ Decoded :: struct {
 // arena, whose blocks a copy would share without knowing of those the
 // other adds, so it is filled in place and never returned by value
 // (doc/arch.md, "Memory and ownership").
-decode_bytes :: proc(ff: ^mdat.File_Format, data: []byte, d: ^Decoded, spans := false, args: []fld.Value = nil) {
+decode_bytes :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, spans := false, args: []fld.Value = nil) {
 	d.consumed, d.err = rdr.read_from_bytes(data, ff, &d.tree, spans, args)
 }
 
-decode_file :: proc(ff: ^mdat.File_Format, path: string, d: ^Decoded, spans := false) {
+decode_file :: proc(ff: ^mdata.File_Format, path: string, d: ^Decoded, spans := false) {
 	d.consumed, d.err = rdr.read(path, ff, &d.tree, spans)
 }
 
@@ -70,17 +70,17 @@ destroy_decoded :: proc(d: ^Decoded) {
 // look its fields up by name.
 Set_Instance :: struct {
 	instance: ^fld.Instance,
-	set:      ^mdat.Node,
+	set:      ^mdata.Node,
 }
 
 // v, an instance of the set field node.
-instance_of :: proc(v: fld.Value, node: ^mdat.Node) -> Set_Instance {
+instance_of :: proc(v: fld.Value, node: ^mdata.Node) -> Set_Instance {
 	instance := v.(^fld.Instance)
-	return {instance, mdat.instance_set(node, instance)}
+	return {instance, mdata.instance_set(node, instance)}
 }
 
 // The root instance of a decoded tree.
-root_instance :: proc(ff: ^mdat.File_Format, d: ^Decoded) -> Set_Instance {
+root_instance :: proc(ff: ^mdata.File_Format, d: ^Decoded) -> Set_Instance {
 	return instance_of(d.tree.root[0], ff.root)
 }
 
@@ -116,7 +116,7 @@ field_instance :: proc(s: Set_Instance, name: string, index := 0) -> Set_Instanc
 	panic("field_instance: no such set field")
 }
 
-// a == b for a union that has no == (mdat.Scalar, fld.Value): the same
+// a == b for a union that has no == (mdata.Scalar, fld.Value): the same
 // variant, with equal values, comparing slices by their elements.
 variant_equal :: proc(a, b: $U) -> bool where intrinsics.type_is_union(U) {
 	x, y := reflect.get_union_variant(a), reflect.get_union_variant(b)

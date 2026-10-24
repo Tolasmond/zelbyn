@@ -4,7 +4,7 @@ import "base:runtime"
 import expr "../zelbyn/expression"
 import fld "../zelbyn/field"
 import ksy "../zelbyn/ksy"
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import "core:fmt"
 import "core:os"
 import "core:reflect"
@@ -264,65 +264,65 @@ WALKED_INPUT :: "\x01\x02\x03\x04\x05abcab\x06\x00\x00"
 // switch is exhaustive, so a variant added fails to compile here until it
 // is walked, and so until this test names it.
 @(private = "file")
-walk_expr :: proc(e: ^mdat.Expr, seen: ^map[string]bool) {
+walk_expr :: proc(e: ^mdata.Expr, seen: ^map[string]bool) {
 	if e == nil do return
 	seen[fmt.tprintf("%v", reflect.union_variant_typeid(e.variant))] = true
 	switch x in e.variant {
-	case mdat.Int_Literal, mdat.Big_Literal, mdat.Float_Literal, mdat.Bool_Literal, mdat.String_Literal, mdat.Bytes_Literal:
-	case mdat.Name, mdat.Enum_Constant, mdat.Size_Of, mdat.Repeat_Index, mdat.Repeat_Element, mdat.Root_Arg:
-	case mdat.Instance:
-	case mdat.Unary:
+	case mdata.Int_Literal, mdata.Big_Literal, mdata.Float_Literal, mdata.Bool_Literal, mdata.String_Literal, mdata.Bytes_Literal:
+	case mdata.Name, mdata.Enum_Constant, mdata.Size_Of, mdata.Repeat_Index, mdata.Repeat_Element, mdata.Root_Arg:
+	case mdata.Instance:
+	case mdata.Unary:
 		walk_expr(x.operand, seen)
-	case mdat.Binary:
+	case mdata.Binary:
 		walk_expr(x.left, seen)
 		walk_expr(x.right, seen)
-	case mdat.Ternary:
+	case mdata.Ternary:
 		walk_expr(x.cond, seen)
 		walk_expr(x.then, seen)
 		walk_expr(x.otherwise, seen)
-	case mdat.Index:
+	case mdata.Index:
 		walk_expr(x.operand, seen)
 		walk_expr(x.index, seen)
-	case mdat.Array_Literal:
+	case mdata.Array_Literal:
 		for item in x.items do walk_expr(item, seen)
-	case mdat.Member:
+	case mdata.Member:
 		walk_expr(x.operand, seen)
-	case mdat.Cast:
+	case mdata.Cast:
 		walk_expr(x.operand, seen)
-	case mdat.Call:
+	case mdata.Call:
 		walk_expr(x.operand, seen)
 		for a in x.args do walk_expr(a, seen)
-	case mdat.Field_Ref:
+	case mdata.Field_Ref:
 		walk_expr(x.base, seen)
-	case mdat.Size:
+	case mdata.Size:
 		walk_expr(x.operand, seen)
-	case mdat.String_Length:
+	case mdata.String_Length:
 		walk_expr(x.operand, seen)
-	case mdat.To_S:
+	case mdata.To_S:
 		walk_expr(x.operand, seen)
-	case mdat.To_I:
+	case mdata.To_I:
 		walk_expr(x.operand, seen)
-	case mdat.Array_Method:
+	case mdata.Array_Method:
 		walk_expr(x.operand, seen)
-	case mdat.Io:
+	case mdata.Io:
 		walk_expr(x.instance, seen)
-	case mdat.Io_Pos:
+	case mdata.Io_Pos:
 		walk_expr(x.stream, seen)
-	case mdat.Io_Size:
+	case mdata.Io_Size:
 		walk_expr(x.stream, seen)
-	case mdat.Io_Eof:
+	case mdata.Io_Eof:
 		walk_expr(x.stream, seen)
-	case mdat.Value_Ref:
+	case mdata.Value_Ref:
 		walk_expr(x.base, seen)
-	case mdat.Switch_Cast:
+	case mdata.Switch_Cast:
 		walk_expr(x.operand, seen)
-	case mdat.Decode:
+	case mdata.Decode:
 		walk_expr(x.operand, seen)
-	case mdat.Substring:
+	case mdata.Substring:
 		walk_expr(x.operand, seen)
 		walk_expr(x.from, seen)
 		walk_expr(x.to, seen)
-	case mdat.To_Bytes:
+	case mdata.To_Bytes:
 		walk_expr(x.operand, seen)
 	}
 }
@@ -330,26 +330,26 @@ walk_expr :: proc(e: ^mdat.Expr, seen: ^map[string]bool) {
 // Records the variants of every expression of the plan from node, each of
 // which is also printed.
 @(private = "file")
-walk_plan :: proc(t: ^testing.T, node: ^mdat.Node, seen: ^map[string]bool, visited: ^map[^mdat.Node]bool) {
+walk_plan :: proc(t: ^testing.T, node: ^mdata.Node, seen: ^map[string]bool, visited: ^map[^mdata.Node]bool) {
 	if node == nil || node in visited do return
 	visited[node] = true
-	walk_variants :: proc(e: ^mdat.Expr, seen: ^map[string]bool) {
+	walk_variants :: proc(e: ^mdata.Expr, seen: ^map[string]bool) {
 		if e == nil do return
 		walk_expr(e, seen)
 		_ = expr.to_string(e, context.temp_allocator)
 	}
 	walk_variants(node.cond, seen)
 	#partial switch c in node.count {
-	case mdat.Rule_Count:
+	case mdata.Rule_Count:
 		walk_variants(c.expr, seen)
-	case mdat.Until_Count:
+	case mdata.Until_Count:
 		walk_variants(c.expr, seen)
 	}
-	if l, ok := node.length.(mdat.Rule_Length); ok do walk_variants(l.expr, seen)
+	if l, ok := node.length.(mdata.Rule_Length); ok do walk_variants(l.expr, seen)
 	walk_variants(node.pos, seen)
 	walk_variants(node.io, seen)
 	for a in node.args do walk_variants(a, seen)
-	if v, ok := node.valid.(mdat.Valid_Expr); ok do for c in v.checks do walk_variants(c.cond, seen)
+	if v, ok := node.valid.(mdata.Valid_Expr); ok do for c in v.checks do walk_variants(c.cond, seen)
 	for inst in node.instances {
 		walk_variants(inst.cond, seen)
 		walk_variants(inst.expr, seen)
@@ -379,8 +379,8 @@ expression_variants_walked :: proc(t: ^testing.T) {
 	}
 	src := fmt.tprintf(WALKED_SCHEMA, strings.to_string(b))
 
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile(src, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "%v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
@@ -395,7 +395,7 @@ expression_variants_walked :: proc(t: ^testing.T) {
 	testing.expectf(t, d.err.kind == .None, "%v at %v in %s", d.err.kind, d.err.offset, failed)
 
 	seen := make(map[string]bool, context.temp_allocator)
-	visited := make(map[^mdat.Node]bool, context.temp_allocator)
+	visited := make(map[^mdata.Node]bool, context.temp_allocator)
 	walk_plan(t, ff.root, &seen, &visited)
 	for c in WALKED_CHECKS {
 		parsed, parse_err := expr.parse(c, context.temp_allocator)
@@ -406,7 +406,7 @@ expression_variants_walked :: proc(t: ^testing.T) {
 		walk_expr(parsed, &seen)
 		testing.expectf(t, expr.to_string(parsed, context.temp_allocator) != "", "%q: not printed", c)
 	}
-	union_info := runtime.type_info_base(type_info_of(mdat.Expr_Variant)).variant.(runtime.Type_Info_Union)
+	union_info := runtime.type_info_base(type_info_of(mdata.Expr_Variant)).variant.(runtime.Type_Info_Union)
 	for v in union_info.variants {
 		name := fmt.tprintf("%v", v.id)
 		testing.expectf(t, seen[name], "variant %s is in no check of WALKED_CHECKS, so no walk is tested on it", name)

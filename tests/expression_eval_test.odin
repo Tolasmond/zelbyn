@@ -3,7 +3,7 @@ package tests
 import arn "../zelbyn/arena"
 import dat "../zelbyn/data"
 import expr "../zelbyn/expression"
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import "core:fmt"
 import "core:mem"
 import "core:testing"
@@ -15,8 +15,8 @@ import "core:testing"
 // data's length is set by each test.
 @(private)
 Expr_Plan :: struct {
-	ff:              mdat.File_Format,
-	root, hdr, data: ^mdat.Node,
+	ff:              mdata.File_Format,
+	root, hdr, data: ^mdata.Node,
 }
 
 // a = 5, b = 0x1234, hdr.n = 3, hdr.tag = ee ee, items.v = 0a 0b 0c, then 3
@@ -28,17 +28,17 @@ EXPR_INPUT := []byte{0x05, 0x34, 0x12, 0x03, 0xee, 0xee, 0x0a, 0x0b, 0x0c, 0xd0,
 DATA_POS :: 9 // where data starts in EXPR_INPUT
 
 @(private)
-plan_node :: proc(name: string, type: dat.Data_Type, a: mem.Allocator, children: ..^mdat.Node) -> ^mdat.Node {
-	n := new(mdat.Node, a)
-	n^ = {name = name, ref_name = name, type = type, count = mdat.Fixed_Count{n = 1}}
+plan_node :: proc(name: string, type: dat.Data_Type, a: mem.Allocator, children: ..^mdata.Node) -> ^mdata.Node {
+	n := new(mdata.Node, a)
+	n^ = {name = name, ref_name = name, type = type, count = mdata.Fixed_Count{n = 1}}
 	if len(children) > 0 do n.children = slice_clone(children, a)
-	n.slot_count = mdat.count_slots(n) // the children's bit fields must be set first
+	n.slot_count = mdata.count_slots(n) // the children's bit fields must be set first
 	return n
 }
 
 @(private = "file")
-slice_clone :: proc(s: []^mdat.Node, a: mem.Allocator) -> []^mdat.Node {
-	c := make([]^mdat.Node, len(s), a)
+slice_clone :: proc(s: []^mdata.Node, a: mem.Allocator) -> []^mdata.Node {
+	c := make([]^mdata.Node, len(s), a)
 	copy(c, s)
 	return c
 }
@@ -46,14 +46,14 @@ slice_clone :: proc(s: []^mdat.Node, a: mem.Allocator) -> []^mdat.Node {
 // Compiles text as an Int in scope, into the plan's arena. Fails the test
 // and returns nil on error.
 @(private)
-must_compile :: proc(t: ^testing.T, ff: ^mdat.File_Format, text: string, scope: ..^mdat.Node, in_repeat := false) -> ^mdat.Expr {
+must_compile :: proc(t: ^testing.T, ff: ^mdata.File_Format, text: string, scope: ..^mdata.Node, in_repeat := false) -> ^mdata.Expr {
 	e, err := expr.compile(text, {types = scope, in_repeat = in_repeat}, .Int, arn.arena_allocator(&ff.arena))
 	defer expr.destroy_error(&err)
 	testing.expectf(t, err.kind == .None, "%q: %v at %v: %s", text, err.kind, err.offset, err.message)
 	return e
 }
 
-// Fills p, which must be zero; destroy with mdat.destroy_file_format(&p.ff).
+// Fills p, which must be zero; destroy with mdata.destroy_file_format(&p.ff).
 @(private)
 make_expr_plan :: proc(t: ^testing.T, p: ^Expr_Plan) {
 	a := arn.arena_allocator(&p.ff.arena)
@@ -66,16 +66,16 @@ make_expr_plan :: proc(t: ^testing.T, p: ^Expr_Plan) {
 	p.ff.name = "r"
 	p.ff.root = p.root
 
-	tag.length = mdat.Rule_Length{expr = must_compile(t, &p.ff, "_parent.a - 3", p.root, p.hdr)}
-	items.count = mdat.Rule_Count{expr = must_compile(t, &p.ff, "hdr.n", p.root)}
+	tag.length = mdata.Rule_Length{expr = must_compile(t, &p.ff, "_parent.a - 3", p.root, p.hdr)}
+	items.count = mdata.Rule_Count{expr = must_compile(t, &p.ff, "hdr.n", p.root)}
 }
 
 @(test)
 expression_field_references :: proc(t: ^testing.T) {
 	p: Expr_Plan
-	defer mdat.destroy_file_format(&p.ff)
+	defer mdata.destroy_file_format(&p.ff)
 	make_expr_plan(t, &p)
-	p.data.length = mdat.Rule_Length{expr = must_compile(t, &p.ff, "items.size - hdr.tag.size", p.root)}
+	p.data.length = mdata.Rule_Length{expr = must_compile(t, &p.ff, "items.size - hdr.tag.size", p.root)}
 
 	d: Decoded
 	defer destroy_decoded(&d)
@@ -92,14 +92,14 @@ expression_field_references :: proc(t: ^testing.T) {
 
 @(test)
 expression_repeat_index :: proc(t: ^testing.T) {
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	a := arn.arena_allocator(&ff.arena)
 
 	s := plan_node("s", .Blob, a)
-	s.count = mdat.Fixed_Count{n = 3}
+	s.count = mdata.Fixed_Count{n = 3}
 	ff.root = plan_node("r", .Set, a, s)
-	s.length = mdat.Rule_Length{expr = must_compile(t, &ff, "_index", ff.root, in_repeat = true)}
+	s.length = mdata.Rule_Length{expr = must_compile(t, &ff, "_index", ff.root, in_repeat = true)}
 
 	d: Decoded
 	defer destroy_decoded(&d)
@@ -290,14 +290,14 @@ EVAL_CASES := [?]Eval_Case {
 expression_eval :: proc(t: ^testing.T) {
 	for c in EVAL_CASES {
 		p: Expr_Plan
-		defer mdat.destroy_file_format(&p.ff)
+		defer mdata.destroy_file_format(&p.ff)
 		make_expr_plan(t, &p)
 
 		// data is 1 byte when text gives the expected value, 2 when it does not
 		check := fmt.tprintf("(%s) == (%s) ? 1 : 2", c.text, c.err == .None ? c.want : "0")
 		e := must_compile(t, &p.ff, check, p.root)
 		if e == nil do continue
-		p.data.length = mdat.Rule_Length{expr = e}
+		p.data.length = mdata.Rule_Length{expr = e}
 
 		d: Decoded
 		defer destroy_decoded(&d)
@@ -350,7 +350,7 @@ expression_constant_as_eval :: proc(t: ^testing.T) {
 	}
 	for c in cases {
 		p: Expr_Plan
-		defer mdat.destroy_file_format(&p.ff)
+		defer mdata.destroy_file_format(&p.ff)
 		make_expr_plan(t, &p)
 
 		parsed, parse_err := expr.parse(c.text, arn.arena_allocator(&p.ff.arena))
@@ -365,7 +365,7 @@ expression_constant_as_eval :: proc(t: ^testing.T) {
 		check := folded ? fmt.tprintf("(%s) == %v ? 1 : 2", c.text, v) : fmt.tprintf("(%s) > 9223372036854775807 ? 1 : 2", c.text)
 		e := must_compile(t, &p.ff, check, p.root)
 		if e == nil do continue
-		p.data.length = mdat.Rule_Length{expr = e}
+		p.data.length = mdata.Rule_Length{expr = e}
 		d: Decoded
 		defer destroy_decoded(&d)
 		decode_bytes(&p.ff, EXPR_INPUT, &d)
@@ -381,16 +381,16 @@ expression_constant_as_eval :: proc(t: ^testing.T) {
 // and a reference to a field whose value is absent fails with Absent_Field.
 @(test)
 expression_absent_set :: proc(t: ^testing.T) {
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	a := arn.arena_allocator(&ff.arena)
 
 	// opt: present only when the input starts with 0x21
 	opt := plan_node("opt", .Set, a, plan_node("n", .UInt8, a))
-	opt.count = mdat.Marker_Count{markers = slice_marker(mdat.Marker{0, .UInt8, 0x21, .Little}, a)}
+	opt.count = mdata.Marker_Count{markers = slice_marker(mdata.Marker{0, .UInt8, 0x21, .Little}, a)}
 	data := plan_node("data", .Blob, a)
 	ff.root = plan_node("r", .Set, a, opt, data)
-	data.length = mdat.Rule_Length{expr = must_compile(t, &ff, "opt.n - 0x21", ff.root)}
+	data.length = mdata.Rule_Length{expr = must_compile(t, &ff, "opt.n - 0x21", ff.root)}
 
 	present: Decoded
 	defer destroy_decoded(&present)
@@ -405,8 +405,8 @@ expression_absent_set :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-slice_marker :: proc(m: mdat.Marker, a: mem.Allocator) -> []mdat.Marker {
-	s := make([]mdat.Marker, 1, a)
+slice_marker :: proc(m: mdata.Marker, a: mem.Allocator) -> []mdata.Marker {
+	s := make([]mdata.Marker, 1, a)
 	s[0] = m
 	return s
 }
@@ -415,7 +415,7 @@ slice_marker :: proc(m: mdat.Marker, a: mem.Allocator) -> []mdat.Marker {
 @(test)
 expression_resolved_text :: proc(t: ^testing.T) {
 	p: Expr_Plan
-	defer mdat.destroy_file_format(&p.ff)
+	defer mdata.destroy_file_format(&p.ff)
 	make_expr_plan(t, &p)
 
 	e := must_compile(t, &p.ff, "_root.hdr.n + hdr.tag.size + items.size", p.root)
@@ -427,6 +427,6 @@ expression_resolved_text :: proc(t: ^testing.T) {
 	e = must_compile(t, &p.ff, "(1.5 + 2. + 1e3 + 1e20 + 0.1).to_i", p.root)
 	if e != nil do testing.expect_value(t, expr.to_string(e, context.temp_allocator), "((((1.5 + 2.0) + 1000.0) + 1e+20) + 0.1).to_i")
 
-	tag := p.hdr.children[1].length.(mdat.Rule_Length).expr
+	tag := p.hdr.children[1].length.(mdata.Rule_Length).expr
 	testing.expect_value(t, expr.to_string(tag, context.temp_allocator), "(_parent.a - 3)")
 }
