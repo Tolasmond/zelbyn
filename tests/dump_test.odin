@@ -3,7 +3,7 @@ package tests
 import dmp "../zelbyn/dump"
 import fld "../zelbyn/field"
 import ksy "../zelbyn/ksy"
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import "core:encoding/json"
 import "core:strings"
 import "core:testing"
@@ -12,8 +12,8 @@ import "core:time"
 // Decodes path and dumps it into b as JSON (as_json) or text. Fails the
 // test and returns false on any error.
 dump_sample :: proc(t: ^testing.T, path: string, as_json: bool, b: ^strings.Builder, source := Schema_Source.Ported, spans := false) -> bool {
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif_from(t, source, &ff) do return false
 
 	d: Decoded
@@ -147,8 +147,8 @@ dump_json_string_bytes :: proc(t: ^testing.T) {
 		0xed, 0xa0, 0x80,
 		0xc0, 0xaf,
 	}
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	src := "meta:\n  id: t\nseq:\n  - id: s\n    type: str\n    size: 22\n    encoding: UTF-8\n"
 	err := ksy.compile(src, &ff)
 	defer ksy.destroy_error(&err)
