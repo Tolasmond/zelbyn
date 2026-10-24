@@ -250,7 +250,7 @@ instances:
 
 // The spans of an array that grew, from 8 values by doubling, as a count
 // not known in advance grows (repeat: eos), and one above the bytes left
-// (repeat-expr), are those of the values read before it grew too, as the
+// (repeat-expr: 100 with 80 left), are those of the values read before it grew too, as the
 // elements of a repeated set and the values in their cells, and as the
 // -bits fields beside an integer, whose slots grow with its slot.
 @(test)
@@ -262,7 +262,7 @@ layout_spans_after_growth :: proc(t: ^testing.T) {
   - id: nothing
     size: 0
     repeat: expr
-    repeat-expr: 60
+    repeat-expr: 100
   - id: recs
     type: rec
     repeat: expr
@@ -299,10 +299,13 @@ types:
 	root := root_instance(&ff, &d)
 	testing.expect_value(t, fld.value_span(root.instance, field_slot(root, "head"), 0), fld.Span{0, 1})
 
-	// 60 empty elements with 60 bytes left: grown, 8, 16, 32, 64
+	// 100 empty elements with 80 bytes left, more than can be reserved
+	// exactly (reader.read_values), so grown: 8, 16, 32, 64, 128
+	COUNT :: 100
+	testing.expectf(t, COUNT > len(input) - 1, "nothing's count, %v, must be above the %v bytes left, to grow", COUNT, len(input) - 1)
 	k := field_slot(root, "nothing")
-	testing.expect_value(t, len(root.instance.slots[k]), 60)
-	for i in 0 ..< 60 do testing.expectf(t, fld.value_span(root.instance, k, i) == fld.Span{1, 0}, "nothing[%v]: %v", i, fld.value_span(root.instance, k, i))
+	testing.expect_value(t, len(root.instance.slots[k]), COUNT)
+	for i in 0 ..< COUNT do testing.expectf(t, fld.value_span(root.instance, k, i) == fld.Span{1, 0}, "nothing[%v]: %v", i, fld.value_span(root.instance, k, i))
 
 	k = field_slot(root, "recs")
 	for i in 0 ..< 20 {
