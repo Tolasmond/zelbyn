@@ -1,5 +1,5 @@
 // One cold measurement of the official Kaitai Struct C++ runtime, as
-// tools/bench/main.odin is of zelbyn (decision record §10.2). build.py
+// tools/bench/main.odin is of zelbyn (doc/development.md, Benchmark). build.py
 // compiles it with the parser that the official compiler generates from a
 // .ksy schema; bench.py runs it in a fresh process for every measurement.
 //
