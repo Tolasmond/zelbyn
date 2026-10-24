@@ -19,7 +19,7 @@ import arn "../../zelbyn/arena"
 import dmp "../../zelbyn/dump"
 import fld "../../zelbyn/field"
 import ksy "../../zelbyn/ksy"
-import mdat "../../zelbyn/metadata"
+import mdata "../../zelbyn/metadata"
 import rdr "../../zelbyn/reader"
 import "core:fmt"
 import "core:os"
@@ -36,7 +36,7 @@ main :: proc() {
 	schema, path := os.args[1], os.args[2]
 
 	t := time.tick_now()
-	ff: mdat.File_Format
+	ff: mdata.File_Format
 	if err := ksy.read_file_format(schema, &ff); err.kind != .None {
 		fmt.eprintfln("%s:%v:%v: %v: %s", schema, err.line, err.column, err.kind, err.message)
 		os.exit(1)

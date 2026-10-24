@@ -13,7 +13,7 @@ import "core:strings"
 import dmp "../dump"
 import fld "../field"
 import ksy "../ksy"
-import mdat "../metadata"
+import mdata "../metadata"
 import rdr "../reader"
 
 Options :: struct {
@@ -136,8 +136,8 @@ execute :: proc(args: []string, stdout, stderr: io.Writer) -> (exit_code: int) {
 // success, 1 on a load, parse or output error, and 2 when params do not
 // give one argument for each param.
 run :: proc(schema_path: string, file_path: string, import_path: string, dump: Dump_Kind, offsets: bool, params: []string, stdout, stderr: io.Writer) -> int {
-	file_format: mdat.File_Format
-	defer mdat.destroy_file_format(&file_format)
+	file_format: mdata.File_Format
+	defer mdata.destroy_file_format(&file_format)
 
 	import_paths, _ := filepath.split_list(import_path, context.temp_allocator)
 	if !load_format(schema_path, import_paths, &file_format, stderr) do return 1
@@ -186,7 +186,7 @@ run :: proc(schema_path: string, file_path: string, import_path: string, dump: D
 // set of the schema's top-level type, in their order, with byte arrays in
 // context.temp_allocator. ok is false, with the error reported on stderr,
 // unless there is one valid argument for each param.
-root_args :: proc(root: ^mdat.Node, params: []string, stderr: io.Writer) -> (args: []fld.Value, ok: bool) {
+root_args :: proc(root: ^mdata.Node, params: []string, stderr: io.Writer) -> (args: []fld.Value, ok: bool) {
 	args = make([]fld.Value, len(root.params))
 	given := make([]bool, len(root.params), context.temp_allocator)
 	defer if !ok do delete(args)
@@ -272,7 +272,7 @@ hex_digit :: proc(c: byte) -> (v: byte, ok: bool) {
 
 // Loads file_format from schema_path, reporting any error on stderr with
 // the file it is in: the schema, or one it imports.
-load_format :: proc(schema_path: string, import_paths: []string, file_format: ^mdat.File_Format, stderr: io.Writer) -> bool {
+load_format :: proc(schema_path: string, import_paths: []string, file_format: ^mdata.File_Format, stderr: io.Writer) -> bool {
 	err := ksy.read_file_format(schema_path, file_format, import_paths)
 	defer ksy.destroy_error(&err)
 

@@ -4,7 +4,7 @@ import arn "../zelbyn/arena"
 import dat "../zelbyn/data"
 import fld "../zelbyn/field"
 import ksy "../zelbyn/ksy"
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import "core:log"
 import "core:mem"
 import "core:os"
@@ -16,8 +16,8 @@ import "core:time"
 @(test)
 decode_uses_only_arena :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	for s in ([]Sample{SAMPLE_855, SAMPLE_CG89A}) do for spans in ([?]bool{false, true}) {
@@ -49,8 +49,8 @@ decode_uses_only_arena :: proc(t: ^testing.T) {
 @(test)
 decode_zlib_uses_only_arena :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile("meta:\n  id: z\nseq:\n  - id: n\n    type: u1\n  - id: z\n    size: n\n    process: zlib\n", &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "compile: %s", err.message) do return
@@ -78,8 +78,8 @@ decode_zlib_uses_only_arena :: proc(t: ^testing.T) {
 @(test)
 read_uses_only_arena :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	d: Decoded
@@ -102,8 +102,8 @@ read_uses_only_arena :: proc(t: ^testing.T) {
 @(test)
 decode_error_allocates_only_path :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	text := "hello world, not a gif at all"
@@ -156,7 +156,7 @@ Comment_Slots :: struct {
 }
 
 @(private = "file")
-comment_slots :: proc(ff: ^mdat.File_Format) -> (s: Comment_Slots) {
+comment_slots :: proc(ff: ^mdata.File_Format) -> (s: Comment_Slots) {
 	s.signature, s.version, s.blocks = slot_by_name(ff.root, "signature"), slot_by_name(ff.root, "version"), slot_by_name(ff.root, "blocks")
 	path := [len(s.path)]string{"blocks", "extensions", "comment_extension", "comment_data", "data_sub_block_values"}
 	set := ff.root
@@ -191,9 +191,9 @@ check_comment_gif :: proc(t: ^testing.T, d: ^Decoded, s: Comment_Slots) -> (blob
 @(test)
 value_tree_outlives_schema :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
+	ff: mdata.File_Format
 	if !load_gif(t, &ff) {
-		mdat.destroy_file_format(&ff)
+		mdata.destroy_file_format(&ff)
 		return
 	}
 
@@ -214,7 +214,7 @@ value_tree_outlives_schema :: proc(t: ^testing.T) {
 	testing.expect_value(t, track.total_allocation_count, 0)
 
 	slots := comment_slots(&ff)
-	mdat.destroy_file_format(&ff)
+	mdata.destroy_file_format(&ff)
 
 	blob := check_comment_gif(t, &d, slots)
 	start, end := uintptr(raw_data(data)), uintptr(raw_data(data)) + uintptr(len(data))
@@ -226,9 +226,9 @@ value_tree_outlives_schema :: proc(t: ^testing.T) {
 @(test)
 value_tree_from_read_outlives_file :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
+	ff: mdata.File_Format
 	if !load_gif(t, &ff) {
-		mdat.destroy_file_format(&ff)
+		mdata.destroy_file_format(&ff)
 		return
 	}
 
@@ -236,7 +236,7 @@ value_tree_from_read_outlives_file :: proc(t: ^testing.T) {
 	f, create_err := os.create_temp_file("", "zelbyn_test_*.gif")
 	if !testing.expectf(t, create_err == nil, "creating a temporary file: %v", create_err) {
 		delete(data)
-		mdat.destroy_file_format(&ff)
+		mdata.destroy_file_format(&ff)
 		return
 	}
 	path := strings.clone(os.name(f))
@@ -246,7 +246,7 @@ value_tree_from_read_outlives_file :: proc(t: ^testing.T) {
 	delete(data)
 	if !testing.expectf(t, write_err == nil, "writing %s: %v", path, write_err) {
 		_ = os.remove(path)
-		mdat.destroy_file_format(&ff)
+		mdata.destroy_file_format(&ff)
 		return
 	}
 
@@ -264,7 +264,7 @@ value_tree_from_read_outlives_file :: proc(t: ^testing.T) {
 	testing.expect_value(t, track.total_allocation_count, 0)
 
 	slots := comment_slots(&ff)
-	mdat.destroy_file_format(&ff)
+	mdata.destroy_file_format(&ff)
 	remove_err := os.remove(path)
 	testing.expectf(t, remove_err == nil, "removing %s: %v", path, remove_err)
 
@@ -299,11 +299,11 @@ types:
 @(test)
 value_tree_string_args_outlive_schema :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
+	ff: mdata.File_Format
 	err := ksy.compile(STRING_ARGS_KSY, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) {
-		mdat.destroy_file_format(&ff)
+		mdata.destroy_file_format(&ff)
 		return
 	}
 
@@ -311,7 +311,7 @@ value_tree_string_args_outlive_schema :: proc(t: ^testing.T) {
 	defer destroy_decoded(&d)
 	decode_bytes(&ff, nil, &d)
 	if !testing.expectf(t, d.err.kind == .None, "decode: %v at %v in %s", d.err.kind, d.err.offset, d.err.path) {
-		mdat.destroy_file_format(&ff)
+		mdata.destroy_file_format(&ff)
 		return
 	}
 
@@ -322,10 +322,10 @@ value_tree_string_args_outlive_schema :: proc(t: ^testing.T) {
 	root := root_instance(&ff, &d)
 	for name, i in fields {
 		child := field_instance(root, name)
-		texts[i] = child.instance.slots[mdat.param_slot(child.set, 0)][0].(string)
+		texts[i] = child.instance.slots[mdata.param_slot(child.set, 0)][0].(string)
 		if !testing.expectf(t, !in_arena(&ff.arena, texts[i]), "%s: the argument is in the schema's arena", name) do in_schema = true
 	}
-	mdat.destroy_file_format(&ff)
+	mdata.destroy_file_format(&ff)
 	// reading an argument in the schema's arena would fault once it is destroyed
 	if in_schema do return
 
@@ -346,7 +346,7 @@ in_arena :: proc(a: ^arn.Arena, s: string) -> bool {
 
 // The index in set's children of the child whose .ksy id is name.
 @(private = "file")
-child_index :: proc(set: ^mdat.Node, name: string) -> int {
+child_index :: proc(set: ^mdata.Node, name: string) -> int {
 	for child, i in set.children {
 		if child.ref_name == name do return i
 	}
@@ -355,15 +355,15 @@ child_index :: proc(set: ^mdat.Node, name: string) -> int {
 
 // The slot in an instance of set of the child whose .ksy id is name.
 @(private = "file")
-slot_by_name :: proc(set: ^mdat.Node, name: string) -> int {
-	return mdat.slot_of(set, child_index(set, name))
+slot_by_name :: proc(set: ^mdata.Node, name: string) -> int {
+	return mdata.slot_of(set, child_index(set, name))
 }
 
 @(test)
 value_tree_reuse_after_destroy :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	if !load_gif(t, &ff) do return
 
 	data := with_header({0x3B})
@@ -412,8 +412,8 @@ schema_compile_uses_only_arena :: proc(t: ^testing.T) {
 		if !testing.expectf(t, read_err == nil, "reading %s: %v", path, read_err) do continue
 		defer delete(src)
 
-		ff: mdat.File_Format
-		defer mdat.destroy_file_format(&ff)
+		ff: mdata.File_Format
+		defer mdata.destroy_file_format(&ff)
 
 		err: ksy.Error
 		defer ksy.destroy_error(&err)
@@ -449,7 +449,7 @@ schema_error_allocates_only_message_and_path :: proc(t: ^testing.T) {
 		{"tests/schemas/imports/errors/broken_import.ksy", "", .Invalid, 2},
 	}
 	for c in cases {
-		ff: mdat.File_Format
+		ff: mdata.File_Format
 
 		// recorded inside the block, asserted after it: the message is freed inside
 		kind: ksy.Error_Kind
@@ -468,7 +468,7 @@ schema_error_allocates_only_message_and_path :: proc(t: ^testing.T) {
 			kind = err.kind
 			live_with_error = len(track.allocation_map)
 			ksy.destroy_error(&err)
-			mdat.destroy_file_format(&ff)
+			mdata.destroy_file_format(&ff)
 			live_after = len(track.allocation_map)
 		}
 
@@ -482,7 +482,7 @@ schema_error_allocates_only_message_and_path :: proc(t: ^testing.T) {
 
 @(test)
 destroy_file_format_resets :: proc(t: ^testing.T) {
-	ff: mdat.File_Format
+	ff: mdata.File_Format
 
 	track: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&track, context.allocator)
@@ -490,11 +490,11 @@ destroy_file_format_resets :: proc(t: ^testing.T) {
 	{
 		context.allocator = mem.tracking_allocator(&track)
 		context.logger = log.nil_logger()
-		mdat.destroy_file_format(&ff) // never loaded
+		mdata.destroy_file_format(&ff) // never loaded
 	}
 
 	if !load_gif(t, &ff) {
-		mdat.destroy_file_format(&ff)
+		mdata.destroy_file_format(&ff)
 		return
 	}
 
@@ -503,12 +503,12 @@ destroy_file_format_resets :: proc(t: ^testing.T) {
 		context.allocator = mem.tracking_allocator(&track)
 		context.logger = log.nil_logger()
 
-		mdat.destroy_file_format(&ff)
+		mdata.destroy_file_format(&ff)
 		arena_reset = ff.arena.block == nil
 		name_reset = ff.name == ""
 		root_reset = ff.root == nil
 
-		mdat.destroy_file_format(&ff) // already destroyed: must not crash
+		mdata.destroy_file_format(&ff) // already destroyed: must not crash
 	}
 
 	testing.expect_value(t, track.total_allocation_count, 0)

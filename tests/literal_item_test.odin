@@ -2,7 +2,7 @@ package tests
 
 import dmp "../zelbyn/dump"
 import ksy "../zelbyn/ksy"
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import "core:fmt"
 import "core:strings"
 import "core:testing"
@@ -19,41 +19,41 @@ import "core:testing"
 // Counts the array literals in the plan from node that are constant,
 // clearing the flag when clear is set.
 @(private = "file")
-walk_constant :: proc(node: ^mdat.Node, count: ^int, clear: bool) {
-	visit :: proc(e: ^mdat.Expr, count: ^int, clear: bool) {
+walk_constant :: proc(node: ^mdata.Node, count: ^int, clear: bool) {
+	visit :: proc(e: ^mdata.Expr, count: ^int, clear: bool) {
 		if e == nil do return
 		#partial switch &x in e.variant {
-		case mdat.Array_Literal:
+		case mdata.Array_Literal:
 			if x.constant do count^ += 1
 			if clear do x.constant = false
 			for item in x.items do visit(item, count, clear)
-		case mdat.Index:
+		case mdata.Index:
 			visit(x.operand, count, clear)
 			visit(x.index, count, clear)
-		case mdat.Binary:
+		case mdata.Binary:
 			visit(x.left, count, clear)
 			visit(x.right, count, clear)
-		case mdat.Unary:
+		case mdata.Unary:
 			visit(x.operand, count, clear)
-		case mdat.Ternary:
+		case mdata.Ternary:
 			visit(x.cond, count, clear)
 			visit(x.then, count, clear)
 			visit(x.otherwise, count, clear)
-		case mdat.Size:
+		case mdata.Size:
 			visit(x.operand, count, clear)
-		case mdat.Field_Ref:
+		case mdata.Field_Ref:
 			visit(x.base, count, clear)
-		case mdat.Value_Ref:
+		case mdata.Value_Ref:
 			visit(x.base, count, clear)
 		}
 	}
 
 	visit(node.cond, count, clear)
 	#partial switch c in node.count {
-	case mdat.Rule_Count:
+	case mdata.Rule_Count:
 		visit(c.expr, count, clear)
 	}
-	if l, ok := node.length.(mdat.Rule_Length); ok do visit(l.expr, count, clear)
+	if l, ok := node.length.(mdata.Rule_Length); ok do visit(l.expr, count, clear)
 	for inst in node.instances {
 		visit(inst.cond, count, clear)
 		visit(inst.expr, count, clear)
@@ -70,10 +70,10 @@ walk_constant :: proc(node: ^mdat.Node, count: ^int, clear: bool) {
 // literals src has.
 @(private = "file")
 check_same_literals :: proc(t: ^testing.T, src: string, input: []byte, loc := #caller_location) -> (constants: int) {
-	item, whole: mdat.File_Format
-	defer mdat.destroy_file_format(&item)
-	defer mdat.destroy_file_format(&whole)
-	for ff in ([?]^mdat.File_Format{&item, &whole}) {
+	item, whole: mdata.File_Format
+	defer mdata.destroy_file_format(&item)
+	defer mdata.destroy_file_format(&whole)
+	for ff in ([?]^mdata.File_Format{&item, &whole}) {
 		err := ksy.compile(src, ff)
 		defer ksy.destroy_error(&err)
 		if !testing.expectf(t, err.kind == .None, "%v at %v:%v: %s\n%s", err.kind, err.line, err.column, err.message, src, loc = loc) do return
@@ -172,14 +172,14 @@ literal_item_only_of_constants :: proc(t: ^testing.T) {
 	}
 	for c in cases {
 		src := fmt.tprintf("meta:\n  id: l\nseq:\n  - id: n\n    type: u1\ninstances:\n  v:\n    value: '%s'\n", c.value)
-		ff: mdat.File_Format
+		ff: mdata.File_Format
 		err := ksy.compile(src, &ff)
 		if testing.expectf(t, err.kind == .None, "%s: %v: %s", c.value, err.kind, err.message) {
-			lit, is_literal := ff.root.instances[0].expr.variant.(mdat.Array_Literal)
+			lit, is_literal := ff.root.instances[0].expr.variant.(mdata.Array_Literal)
 			testing.expectf(t, is_literal && lit.constant == c.constant, "%s: constant is %v, want %v", c.value, lit.constant, c.constant)
 		}
 		ksy.destroy_error(&err)
-		mdat.destroy_file_format(&ff)
+		mdata.destroy_file_format(&ff)
 	}
 
 	// an error in an item the index does not give, of an array that is not
@@ -194,7 +194,7 @@ literal_item_only_of_constants :: proc(t: ^testing.T) {
 	}
 	for f in fails {
 		src := fmt.tprintf("meta:\n  id: l\nseq:\n  - id: n\n    type: u1\n  - id: z\n    type: u1\n%s", f.fields)
-		ff: mdat.File_Format
+		ff: mdata.File_Format
 		err := ksy.compile(src, &ff)
 		if testing.expectf(t, err.kind == .None, "%s: %v: %s", f.fields, err.kind, err.message) {
 			d: Decoded
@@ -204,7 +204,7 @@ literal_item_only_of_constants :: proc(t: ^testing.T) {
 			destroy_decoded(&d)
 		}
 		ksy.destroy_error(&err)
-		mdat.destroy_file_format(&ff)
+		mdata.destroy_file_format(&ff)
 	}
 }
 
@@ -229,8 +229,8 @@ literal_item_negated_floats :: proc(t: ^testing.T) {
 	strings.write_string(&b, "meta:\n  id: l\nenums:\n  e:\n    -9223372036854775808: min_value\nseq:\n")
 	for c, i in checks do fmt.sbprintf(&b, "  - id: c%v\n    type: u1\n    valid:\n      expr: '%s'\n", i, c)
 
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile(strings.to_string(b), &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "%v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
