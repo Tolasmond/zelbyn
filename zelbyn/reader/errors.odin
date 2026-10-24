@@ -25,7 +25,7 @@ Decoder :: struct {
 	r:           dat.Reader,      // the stream being read: the input, or a substream of it
 	base:        int,             // the offset in the input of r.data[0]
 	arena:       ^arn.Arena,      // the value tree's; the decoder allocates its values here directly
-	allocator:   mem.Allocator,   // the same arena, for path, frames and streams
+	allocator:   mem.Allocator,   // the same arena, for path, frames, streams and the maps, bounded by its limit too (push_record)
 	path:        [dynamic]Path_Segment,
 	frames:      [dynamic]Frame,  // the set instances being decoded, outermost first
 	streams:     [dynamic]Stream, // the streams that substreams were taken from, outermost first, as they are now

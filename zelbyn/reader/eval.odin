@@ -590,7 +590,7 @@ eval_cached :: proc(d: ^Decoder, inst: ^mdata.Value_Instance, self: Eval_Context
 	v = eval_kept(d, inst.expr, self) or_return
 	// as in Kaitai, a value instance that has no value is evaluated again
 	if d.cache == nil do d.cache = make(map[Cached]Kept_Value, d.allocator)
-	d.cache[key] = v
+	if map_insert(&d.cache, key, v) == nil do return {}, .Memory_Limit
 	return v, .None
 }
 

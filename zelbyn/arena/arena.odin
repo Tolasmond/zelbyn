@@ -16,7 +16,8 @@ Arena :: struct {
 	block:      ^virtual.Memory_Block, // the current block; the earlier ones through prev
 	block_size: uint,                  // to reserve for the next block
 	prior_used: uint,                  // the bytes handed out in the blocks before block
-	limit:      uint,                  // the bytes that may be handed out (arena_used), beyond which an allocation fails; 0 for no limit
+	limit:      uint,                  // the bytes that may be handed out (arena_used), beyond which an allocation fails; 0 for no limit (arena_set_limit)
+	end:        uint,                  // the offset in block that arena_make hands out memory inline up to: its committed memory, or less, where limit is reached (set_end)
 }
 
 // The least a block commits at a time. Each commit is a system call, and
@@ -40,12 +41,12 @@ arena_allocator :: proc(a: ^Arena) -> mem.Allocator {
 	return {allocator_proc, a}
 }
 
-// a as a mem.Allocator whose allocations a.limit does not bound, though
-// they count towards it: the decoder's own records (its path, frames and
-// maps), whose growth would fail where nothing could report it, and which
-// the decoder's steps bound instead.
-arena_unbounded_allocator :: proc(a: ^Arena) -> mem.Allocator {
-	return {unbounded_allocator_proc, a}
+// Sets the bytes a may hand out in all (arena_used), 0 for no limit. An
+// allocation that would take a beyond them fails, however much memory is
+// committed: the operating system commits more than is asked for.
+arena_set_limit :: proc(a: ^Arena, limit: uint) {
+	a.limit = limit
+	if a.block != nil do set_end(a)
 }
 
 // The bytes a has handed out.
@@ -65,8 +66,8 @@ arena_destroy :: proc(a: ^Arena) {
 
 // Allocates n values of T, zero and aligned for T, without going through
 // mem.Allocator: the decoder's allocations. A block's committed memory is
-// handed out inline; only committing more, or a new block, takes a call,
-// which checks a.limit. Fails with Out_Of_Memory when the allocation would
+// handed out inline, up to a.limit (a.end); only committing more, a new
+// block, or reaching the limit, takes a call. Fails with Out_Of_Memory when the allocation would
 // take a beyond its limit, when the operating system has no memory left,
 // or when n values of T would not fit in the address space.
 @(require_results)
@@ -77,31 +78,39 @@ arena_make :: #force_inline proc(a: ^Arena, $T: typeid, n: int) -> (values: []T,
 	if b := a.block; b != nil {
 		top := uintptr(b.base) + uintptr(b.used)
 		start := uint((top + uintptr(alignment - 1)) &~ uintptr(alignment - 1) - uintptr(b.base))
-		if start + size <= b.committed {
+		if start + size <= a.end {
 			b.used = start + size
 			return ([^]T)(&b.base[start])[:n], nil
 		}
 	}
-	bytes := arena_alloc(a, size, alignment, true) or_return
+	bytes := arena_alloc(a, size, alignment) or_return
 	return ([^]T)(raw_data(bytes))[:n], nil
 }
 
-// Whether a can hand out extra bytes more, within a.limit; checked only
-// where memory is committed or a block is added (arena_alloc), so a.limit
-// is passed by at most what one commit adds, COMMIT_SIZE.
+// Whether a can hand out extra bytes more, within a.limit.
 @(private = "file")
 within_limit :: #force_inline proc(a: ^Arena, extra: uint) -> bool {
 	return a.limit == 0 || (extra <= a.limit && arena_used(a) <= a.limit - extra)
 }
 
+// Sets a.end, which bounds arena_make's inline path, from the current
+// block's committed memory, as it changes, and a.limit: virtual commits
+// half as much again as the block holds, which would otherwise take a
+// beyond its limit.
+@(private = "file")
+set_end :: proc(a: ^Arena) {
+	a.end = a.block.committed
+	if a.limit != 0 do a.end = min(a.end, a.limit > a.prior_used ? a.limit - a.prior_used : 0)
+}
+
 // size bytes aligned to alignment, from the current block, or a block
-// added; bounded, the allocation fails when it would take a beyond
-// a.limit.
+// added; fails when they would take a beyond a.limit.
 @(private = "file", require_results)
-arena_alloc :: proc(a: ^Arena, size, alignment: uint, bounded: bool) -> (data: []byte, err: mem.Allocator_Error) {
-	if bounded && !within_limit(a, size + alignment) do return nil, .Out_Of_Memory
+arena_alloc :: proc(a: ^Arena, size, alignment: uint) -> (data: []byte, err: mem.Allocator_Error) {
+	if !within_limit(a, size + alignment) do return nil, .Out_Of_Memory
 	if a.block != nil {
 		data, err = virtual.alloc_from_memory_block(a.block, size, alignment, COMMIT_SIZE)
+		set_end(a)
 		if err != .Out_Of_Memory do return
 	}
 
@@ -117,7 +126,9 @@ arena_alloc :: proc(a: ^Arena, size, alignment: uint, bounded: bool) -> (data: [
 	block.prev = a.block
 	a.block = block
 	a.block_size *= 2
-	return virtual.alloc_from_memory_block(a.block, size, alignment, COMMIT_SIZE)
+	data, err = virtual.alloc_from_memory_block(a.block, size, alignment, COMMIT_SIZE)
+	set_end(a)
+	return
 }
 
 @(private = "file")
@@ -132,37 +143,18 @@ allocator_proc :: proc(
 	data: []byte,
 	err: mem.Allocator_Error,
 ) {
-	return allocate((^Arena)(allocator_data), mode, size, alignment, old_memory, old_size, true)
-}
+	a := (^Arena)(allocator_data)
 
-@(private = "file")
-unbounded_allocator_proc :: proc(
-	allocator_data: rawptr,
-	mode: mem.Allocator_Mode,
-	size, alignment: int,
-	old_memory: rawptr,
-	old_size: int,
-	loc := #caller_location,
-) -> (
-	data: []byte,
-	err: mem.Allocator_Error,
-) {
-	return allocate((^Arena)(allocator_data), mode, size, alignment, old_memory, old_size, false)
-}
-
-// The work of both allocators, bounded by a.limit or not.
-@(private = "file")
-allocate :: proc(a: ^Arena, mode: mem.Allocator_Mode, size, alignment: int, old_memory: rawptr, old_size: int, bounded: bool) -> (data: []byte, err: mem.Allocator_Error) {
 	switch mode {
 	case .Alloc, .Alloc_Non_Zeroed:
 		if size == 0 do return nil, nil
-		return arena_alloc(a, uint(size), uint(alignment), bounded)
+		return arena_alloc(a, uint(size), uint(alignment))
 	case .Resize, .Resize_Non_Zeroed:
 		old := ([^]byte)(old_memory)
 		switch {
 		case old == nil:
 			if size == 0 do return nil, nil
-			return arena_alloc(a, uint(size), uint(alignment), bounded)
+			return arena_alloc(a, uint(size), uint(alignment))
 		case size <= old_size:
 			return old[:size], nil
 		}
@@ -171,13 +163,14 @@ allocate :: proc(a: ^Arena, mode: mem.Allocator_Mode, size, alignment: int, old_
 		if b := a.block; b != nil && uintptr(old) & uintptr(alignment - 1) == 0 {
 			start := uint(uintptr(old) - uintptr(b.base))
 			if start < b.used && start + uint(old_size) == b.used && start + uint(size) <= b.reserved {
-				if bounded && !within_limit(a, uint(size - old_size)) do return nil, .Out_Of_Memory
-				_ = virtual.alloc_from_memory_block(b, uint(size - old_size), 1, COMMIT_SIZE) or_return
-				return old[:size], nil
+				if !within_limit(a, uint(size - old_size)) do return nil, .Out_Of_Memory
+				_, err = virtual.alloc_from_memory_block(b, uint(size - old_size), 1, COMMIT_SIZE)
+				set_end(a)
+				return err == nil ? old[:size] : nil, err
 			}
 		}
 
-		data = arena_alloc(a, uint(size), uint(alignment), bounded) or_return
+		data = arena_alloc(a, uint(size), uint(alignment)) or_return
 		copy(data, old[:old_size])
 		return data, nil
 	case .Free, .Free_All, .Query_Info:
