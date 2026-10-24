@@ -51,7 +51,7 @@ python3 tools/bench/bench.py
 ```
 
 For each file it prints medians of:
-- the input size, the tree size (the bytes the tree's arena handed out), and the page faults taken during the decode (not counted on Windows);
+- the input size, the tree size (the bytes the tree's arena handed out), and the page faults taken during the decode;
 - the time to compile the schema, read the file, decode it and write the JSON dump to memory, each timed inside one process;
 - the whole-process time of `zelbyn <schema> <file> --dump json`, with its output discarded.
 

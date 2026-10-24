@@ -59,7 +59,11 @@ main :: proc() {
 		fmt.eprintfln("%s: %v at 0x%08X in %s", path, err.kind, err.offset, err.path)
 		os.exit(1)
 	}
-	if faults >= 0 do faults -= faults_before
+	if faults_before >= 0 && faults >= 0 {
+		faults -= faults_before
+	} else {
+		faults = -1
+	}
 
 	out := strings.builder_make()
 	_ = time.tick_lap_time(&t)
