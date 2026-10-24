@@ -151,12 +151,6 @@ literal_item :: proc(d: ^Decoder, x: mdata.Index, ctx: Eval_Context) -> (v: Eval
 	return v, true, err
 }
 
-// The stack that decoding may have used when a value instance is
-// evaluated, below MAX_STACK by what the evaluation of one more link of a
-// chain of them can take before the next is checked: an expression
-// expression.MAX_DEPTH deep, and the instances it reads.
-MAX_EVAL_STACK :: MAX_STACK - 256 * 1024
-
 // Takes n of the decode's steps (Limits.max_steps); Step_Limit when there
 // are not as many left.
 @(private, require_results)
@@ -254,158 +248,164 @@ eval_check_operand :: proc(d: ^Decoder, e: ^mdata.Expr, index: int, element: fld
 
 @(private = "file", require_results)
 eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, err: dat.Read_Error) {
-	switch x in e.variant {
-	case mdata.Int_Literal:
-		return x.value, .None
-	case mdata.Big_Literal:
-		return x.value, .None
-	case mdata.Float_Literal:
-		return x.value, .None
-	case mdata.Bool_Literal:
-		return x.value, .None
-	case mdata.String_Literal:
-		return x.value, .None
-	case mdata.Index:
-		if item, found, item_err := literal_item(d, x, ctx); found do return item, item_err
-		operand := eval(d, x.operand, ctx) or_return
-		index := eval(d, x.index, ctx) or_return
-		// an index above max(int) is beyond any array
-		i, is_int := index.(int)
-		if !is_int do return nil, .Index_Out_Of_Range
-		#partial switch o in operand {
-		case []byte:
-			if i < 0 || i >= len(o) do return nil, .Index_Out_Of_Range
-			return int(o[i]), .None
-		case []fld.Value:
-			if i < 0 || i >= len(o) do return nil, .Index_Out_Of_Range
-			return single_value(o[i])
-		}
-		panic("eval: indexing neither an array nor bytes")
-	case mdata.String_Length:
-		operand := eval(d, x.operand, ctx) or_return
-		return utf8.rune_count_in_string(operand.(string)), .None
-	case mdata.To_S:
-		operand := eval(d, x.operand, ctx) or_return
-		n, _ := as_wide(operand)
-		return int_to_string(d, n)
-	case mdata.Decode:
-		operand := eval(d, x.operand, ctx) or_return
-		bytes := operand.([]byte)
-		if x.encoding == .None do return string(bytes), .None
-		return decode_text(d, bytes, x.encoding)
-	case mdata.Substring:
-		operand := eval(d, x.operand, ctx) or_return
-		from := eval(d, x.from, ctx) or_return
-		to := eval(d, x.to, ctx) or_return
-		return substring(operand.(string), clamp_int(from), clamp_int(to))
-	case mdata.To_Bytes:
-		operand := eval(d, x.operand, ctx) or_return
-		return values_to_bytes(d, operand.([]fld.Value))
-	case mdata.Root_Arg:
-		return single_value(d.args[x.index])
-	case mdata.To_I:
-		operand := eval(d, x.operand, ctx) or_return
-		#partial switch o in operand {
-		case bool:
-			return int(o), .None
-		case f64:
-			return float_to_int(o)
-		}
-		return string_to_int(operand.(string))
-	case mdata.Array_Method:
-		operand := eval(d, x.operand, ctx) or_return
-		// .min and .max visit every item
-		if x.method == .Min || x.method == .Max {
+	// a block of its own, so that its defer comes before the panic below
+	{
+		d.stack += EVAL_STACK
+		defer d.stack -= EVAL_STACK
+		if !check_stack(d) do return nil, .Too_Deep
+		switch x in e.variant {
+		case mdata.Int_Literal:
+			return x.value, .None
+		case mdata.Big_Literal:
+			return x.value, .None
+		case mdata.Float_Literal:
+			return x.value, .None
+		case mdata.Bool_Literal:
+			return x.value, .None
+		case mdata.String_Literal:
+			return x.value, .None
+		case mdata.Index:
+			if item, found, item_err := literal_item(d, x, ctx); found do return item, item_err
+			operand := eval(d, x.operand, ctx) or_return
+			index := eval(d, x.index, ctx) or_return
+			// an index above max(int) is beyond any array
+			i, is_int := index.(int)
+			if !is_int do return nil, .Index_Out_Of_Range
 			#partial switch o in operand {
 			case []byte:
-				take_steps(d, len(o)) or_return
+				if i < 0 || i >= len(o) do return nil, .Index_Out_Of_Range
+				return int(o[i]), .None
 			case []fld.Value:
-				take_steps(d, len(o)) or_return
+				if i < 0 || i >= len(o) do return nil, .Index_Out_Of_Range
+				return single_value(o[i])
 			}
-		}
-		return array_method(operand, x.method)
-	case mdata.Unary:
-		operand := eval(d, x.operand, ctx) or_return
-		switch x.op {
-		case .Neg:
-			if f, is_float := operand.(f64); is_float do return -f, .None
+			panic("eval: indexing neither an array nor bytes")
+		case mdata.String_Length:
+			operand := eval(d, x.operand, ctx) or_return
+			return utf8.rune_count_in_string(operand.(string)), .None
+		case mdata.To_S:
+			operand := eval(d, x.operand, ctx) or_return
 			n, _ := as_wide(operand)
-			return from_wide(mdata.int_unary(.Neg, n) or_return)
-		case .Bit_Not:
-			n, _ := as_wide(operand)
-			return from_wide(mdata.int_unary(.Bit_Not, n) or_return)
-		case .Not:
-			return !operand.(bool), .None
+			return int_to_string(d, n)
+		case mdata.Decode:
+			operand := eval(d, x.operand, ctx) or_return
+			bytes := operand.([]byte)
+			if x.encoding == .None do return string(bytes), .None
+			return decode_text(d, bytes, x.encoding)
+		case mdata.Substring:
+			operand := eval(d, x.operand, ctx) or_return
+			from := eval(d, x.from, ctx) or_return
+			to := eval(d, x.to, ctx) or_return
+			return substring(operand.(string), clamp_int(from), clamp_int(to))
+		case mdata.To_Bytes:
+			operand := eval(d, x.operand, ctx) or_return
+			return values_to_bytes(d, operand.([]fld.Value))
+		case mdata.Root_Arg:
+			return single_value(d.args[x.index])
+		case mdata.To_I:
+			operand := eval(d, x.operand, ctx) or_return
+			#partial switch o in operand {
+			case bool:
+				return int(o), .None
+			case f64:
+				return float_to_int(o)
+			}
+			return string_to_int(operand.(string))
+		case mdata.Array_Method:
+			operand := eval(d, x.operand, ctx) or_return
+			// .min and .max visit every item
+			if x.method == .Min || x.method == .Max {
+				#partial switch o in operand {
+				case []byte:
+					take_steps(d, len(o)) or_return
+				case []fld.Value:
+					take_steps(d, len(o)) or_return
+				}
+			}
+			return array_method(operand, x.method)
+		case mdata.Unary:
+			operand := eval(d, x.operand, ctx) or_return
+			switch x.op {
+			case .Neg:
+				if f, is_float := operand.(f64); is_float do return -f, .None
+				n, _ := as_wide(operand)
+				return from_wide(mdata.int_unary(.Neg, n) or_return)
+			case .Bit_Not:
+				n, _ := as_wide(operand)
+				return from_wide(mdata.int_unary(.Bit_Not, n) or_return)
+			case .Not:
+				return !operand.(bool), .None
+			}
+		case mdata.Binary:
+			return eval_binary(d, x, ctx)
+		case mdata.Ternary:
+			cond := eval(d, x.cond, ctx) or_return
+			return eval(d, cond.(bool) ? x.then : x.otherwise, ctx)
+		case mdata.Instance:
+			if x.root {
+				if len(d.frames) == 0 do return nil, .Absent_Field
+				return d.frames[0].instance, .None
+			}
+			if x.imported_root && ctx.self == nil do return imported_root(d, x.node)
+			return ancestor(d, ctx, x.up)
+		case mdata.Field_Ref:
+			slot := field_slot(d, x, ctx) or_return
+			values := slot^
+			if e.type == .Array do return values[:], .None
+			if len(values) == 0 do return nil, .Absent_Field
+			return single_value(values[0])
+		case mdata.Size:
+			operand := eval(d, x.operand, ctx) or_return
+			#partial switch o in operand {
+			case []byte:
+				return len(o), .None
+			case []fld.Value:
+				return len(o), .None
+			}
+		case mdata.Io_Pos:
+			r := stream_reader(d, x.stream, ctx) or_return
+			return r.pos, .None
+		case mdata.Io_Size:
+			r := stream_reader(d, x.stream, ctx) or_return
+			return len(r.data), .None
+		case mdata.Io_Eof:
+			r := stream_reader(d, x.stream, ctx) or_return
+			return dat.at_eof(r), .None
+		case mdata.Repeat_Index:
+			assert(ctx.index >= 0, "eval: _index outside a repeat")
+			return ctx.index, .None
+		case mdata.Repeat_Element:
+			// nil after an element of a switch-on that chose no case, which has
+			// no value
+			if ctx.element == nil do return nil, .Absent_Field
+			return single_value(ctx.element)
+		case mdata.Value_Ref:
+			kept := eval_value_ref(d, x, ctx) or_return
+			if kept.slot != nil do return kept.slot^, .None
+			return kept.value, .None
+		case mdata.Bytes_Literal:
+			// in the tree's arena, which may keep it, as an argument
+			bytes := tree_make(d, byte, len(x.value)) or_return
+			copy(bytes, x.value)
+			return bytes, .None
+		case mdata.Array_Literal:
+			take_steps(d, len(x.items)) or_return
+			values := tree_make(d, fld.Value, len(x.items)) or_return
+			for item, i in x.items {
+				value := eval(d, item, ctx) or_return
+				values[i] = tree_value(value)
+			}
+			return values, .None
+		case mdata.Switch_Cast:
+			operand := eval(d, x.operand, ctx) or_return
+			instance, is_instance := operand.(^fld.Instance)
+			if !is_instance || !slice.contains(x.choices, instance.choice) do return nil, .Wrong_Type
+			return instance, .None
+		case mdata.Io:
+			panic("eval: a Stream expression (eval_stream)")
+		case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast, mdata.Call:
+			panic("eval: unresolved expression")
 		}
-	case mdata.Binary:
-		return eval_binary(d, x, ctx)
-	case mdata.Ternary:
-		cond := eval(d, x.cond, ctx) or_return
-		return eval(d, cond.(bool) ? x.then : x.otherwise, ctx)
-	case mdata.Instance:
-		if x.root {
-			if len(d.frames) == 0 do return nil, .Absent_Field
-			return d.frames[0].instance, .None
-		}
-		if x.imported_root && ctx.self == nil do return imported_root(d, x.node)
-		return ancestor(d, ctx, x.up)
-	case mdata.Field_Ref:
-		slot := field_slot(d, x, ctx) or_return
-		values := slot^
-		if e.type == .Array do return values[:], .None
-		if len(values) == 0 do return nil, .Absent_Field
-		return single_value(values[0])
-	case mdata.Size:
-		operand := eval(d, x.operand, ctx) or_return
-		#partial switch o in operand {
-		case []byte:
-			return len(o), .None
-		case []fld.Value:
-			return len(o), .None
-		}
-	case mdata.Io_Pos:
-		r := stream_reader(d, x.stream, ctx) or_return
-		return r.pos, .None
-	case mdata.Io_Size:
-		r := stream_reader(d, x.stream, ctx) or_return
-		return len(r.data), .None
-	case mdata.Io_Eof:
-		r := stream_reader(d, x.stream, ctx) or_return
-		return dat.at_eof(r), .None
-	case mdata.Repeat_Index:
-		assert(ctx.index >= 0, "eval: _index outside a repeat")
-		return ctx.index, .None
-	case mdata.Repeat_Element:
-		// nil after an element of a switch-on that chose no case, which has
-		// no value
-		if ctx.element == nil do return nil, .Absent_Field
-		return single_value(ctx.element)
-	case mdata.Value_Ref:
-		kept := eval_value_ref(d, x, ctx) or_return
-		if kept.slot != nil do return kept.slot^, .None
-		return kept.value, .None
-	case mdata.Bytes_Literal:
-		// in the tree's arena, which may keep it, as an argument
-		bytes := tree_make(d, byte, len(x.value)) or_return
-		copy(bytes, x.value)
-		return bytes, .None
-	case mdata.Array_Literal:
-		take_steps(d, len(x.items)) or_return
-		values := tree_make(d, fld.Value, len(x.items)) or_return
-		for item, i in x.items {
-			value := eval(d, item, ctx) or_return
-			values[i] = tree_value(value)
-		}
-		return values, .None
-	case mdata.Switch_Cast:
-		operand := eval(d, x.operand, ctx) or_return
-		instance, is_instance := operand.(^fld.Instance)
-		if !is_instance || !slice.contains(x.choices, instance.choice) do return nil, .Wrong_Type
-		return instance, .None
-	case mdata.Io:
-		panic("eval: a Stream expression (eval_stream)")
-	case mdata.Name, mdata.Member, mdata.Enum_Constant, mdata.Size_Of, mdata.Cast, mdata.Call:
-		panic("eval: unresolved expression")
 	}
 	panic("eval: invalid expression")
 }
@@ -570,9 +570,11 @@ eval_value_ref :: proc(d: ^Decoder, x: mdata.Value_Ref, ctx: Eval_Context) -> (v
 	// each evaluation is a step, so that a chain whose links each use the
 	// next twice, which doubles the work with each, ends; and a chain of
 	// them, each evaluated inside the one before, ends with Too_Deep once it
-	// has used MAX_EVAL_STACK
+	// takes the stack past MAX_STACK (VALUE_STACK)
 	take_steps(d, 1) or_return
-	if stack_used(d) > MAX_EVAL_STACK do return {}, .Too_Deep
+	d.stack += VALUE_STACK
+	defer d.stack -= VALUE_STACK
+	if !check_stack(d) do return {}, .Too_Deep
 	base := eval(d, x.base, ctx) or_return
 	caller := ctx
 	self := Eval_Context{index = -1, self = base.(^fld.Instance), base = x.base, caller = &caller}

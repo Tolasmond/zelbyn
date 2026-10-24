@@ -582,40 +582,50 @@ eval_args :: proc(d: ^Decoder, set: ^mdata.Node, index: int) -> (args: []fld.Val
 }
 
 // The deepest that set instances nest, as frames. Only a recursive type
-// can nest them deeper than CHECK_DEPTH, and an input can then nest them
-// as deeply as it likes, which would overflow the stack. Decoding a level
-// takes about 1 KB of it with -o:speed, and 3.1 KB in a debug build (3.2 KB
-// on Windows), so MAX_DEPTH levels stay within MAX_STACK in every build,
-// and fit in the 1 MB of the main thread's stack on Windows.
+// can nest them deeper than its schema, and an input can then nest them as
+// deeply as it likes, which would overflow the stack. MAX_DEPTH levels
+// of SET_STACK stay within MAX_STACK.
 MAX_DEPTH :: 224
 
-// The most stack that decoding uses before an instance is Too_Deep, which
-// bounds what frames do not count: read_parse_instance sets aside the
-// frames above the instance's while it reads, and a parse instance read
-// from an expression has the evaluator's frames below it, which take
-// several times what a level takes otherwise (6.6 KB, and 20 KB in a debug
-// build, for the instance in an if). Instances read that way can reach it
-// in fewer than MAX_DEPTH levels. It is checked in each parse instance, and
-// in each set instance deeper than CHECK_DEPTH, so the stack grows at most
-// CHECK_DEPTH levels past it.
-MAX_STACK :: 768 * 1024
+// The most stack that each kind of frame that decoding can nest without
+// end takes, from where it is entered to where the next is, in the build
+// that takes the most: a debug build, on Windows, whose frames are a few
+// percent larger than on Linux. On Linux, over the corpus's samples, the
+// most was 3.2 KB for a set instance (2.2 KB with -o:speed), 3.2 KB for a
+// parse instance, 7 KB for an evaluation, whose eval takes 5.3 KB itself in
+// a debug build and 1.4 KB with -o:speed, and 1.2 KB for a value instance,
+// with -o:speed. Decoder.stack adds them up as decoding enters each frame,
+// so that it is at least the stack really used in every build, which a
+// debug build asserts (check_stack), and Too_Deep is decided by it alone:
+// a schema and an input reach the same depth in every build.
+SET_STACK :: 3392
+PARSE_STACK :: 3328
+EVAL_STACK :: 7296
+VALUE_STACK :: 1280
 
-// The frames below which the depth and the stack are not checked: deeper
-// than formats without recursive types nest, so that they pay one test.
-CHECK_DEPTH :: 32
+// The most stack, as Decoder.stack counts it, that decoding takes before
+// an instance, evaluation or value instance is Too_Deep. The stack really
+// used is at most STACK_BASE more, the frames below the root's set
+// instance, which leaves room in the 1 MB of the main thread's stack on
+// Windows for the frames that decoding does not nest, such as a scalar's
+// read, its decoding as text and zlib.
+MAX_STACK :: 768 * 1024
+STACK_BASE :: 8 * 1024
 
 // Appends one instance of set node to s, read as choice (see
 // field.Instance), with the values of its params, args, and reads its
 // children into it, and keeps the parse instances that no expression has
 // read, to be read once the root is (keep_pending). An instance nested
-// deeper than MAX_DEPTH is Too_Deep, and so is one read below CHECK_DEPTH
-// frames once decoding has used MAX_STACK.
+// deeper than MAX_DEPTH is Too_Deep, and so is one that takes the stack
+// past MAX_STACK (SET_STACK).
 @(private = "file", require_results)
 read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int, args: []fld.Value, $SPANS: bool) -> dat.Read_Error {
 	when ODIN_DEBUG {
 		assert(node.slot_count == mdata.count_slots(node), "read_set_instance: the set's slot_count was not recorded")
 	}
-	if len(d.frames) >= CHECK_DEPTH && (len(d.frames) >= MAX_DEPTH || stack_used(d) > MAX_STACK) do return fail(d, .Too_Deep, d.r.pos)
+	d.stack += SET_STACK
+	defer d.stack -= SET_STACK
+	if !check_stack(d) || len(d.frames) >= MAX_DEPTH do return fail(d, .Too_Deep, d.r.pos)
 
 	node := node
 	instance, cells, alloc_err := fld.make_instance(d.arena, node.slot_count, choice, SPANS)
@@ -721,6 +731,20 @@ stack_used :: #force_inline proc(d: ^Decoder) -> int {
 	return int(d.stack_start - uintptr(&marker))
 }
 
+// Whether the stack that decoding takes, as Decoder.stack counts it once a
+// frame has added its part, is within MAX_STACK. The stack really used is
+// checked too, against MAX_STACK and STACK_BASE, which Decoder.stack is
+// meant to keep it within in every build; a debug build asserts that it
+// does, so that the tests find a frame that takes more than its part.
+@(private, require_results)
+check_stack :: #force_inline proc(d: ^Decoder) -> bool {
+	used := stack_used(d)
+	when ODIN_DEBUG {
+		assert(used <= d.stack + STACK_BASE, "reader: a frame takes more stack than Decoder.stack counts for it")
+	}
+	return d.stack <= MAX_STACK && used <= MAX_STACK + STACK_BASE
+}
+
 // Records the stream of instance, which has been read, for an io
 // expression or a value instance that refers to it once it is no longer
 // decoded (stream_of). Not inlined: inlining it into
@@ -734,12 +758,15 @@ keep_stream :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance) -> da
 
 // Reads parse instance node of instance into slot k: at its pos in the
 // instance's stream, as the instance's frame sees it, or in the stream of
-// its io; for an instance no longer decoded, as it was kept (read_kept). The stream, frames and path are then
-// put back as they were. It is Too_Deep once decoding has used MAX_STACK.
+// its io; for an instance no longer decoded, as it was kept (read_kept).
+// The stream, frames and path are then put back as they were. It is
+// Too_Deep when it takes the stack past MAX_STACK (PARSE_STACK).
 @(private, require_results)
 read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int, $SPANS: bool) -> dat.Read_Error {
 	node := node
-	if stack_used(d) > MAX_STACK {
+	d.stack += PARSE_STACK
+	defer d.stack -= PARSE_STACK
+	if !check_stack(d) {
 		append(&d.path, Path_Segment{node.name, 0})
 		return fail(d, .Too_Deep, d.r.pos)
 	}
