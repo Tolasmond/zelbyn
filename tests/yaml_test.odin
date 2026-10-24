@@ -4,6 +4,8 @@ import yml "../zelbyn/yaml"
 import "core:fmt"
 import "core:strings"
 import "core:testing"
+import "core:time"
+import "core:unicode/utf8"
 
 // The tree as one line per node, in the form of tools/yaml_corpus: MAP and
 // SEQ with their position, then their contents and END; SCALAR with its
@@ -288,5 +290,47 @@ yaml_errors :: proc(t: ^testing.T) {
 			"%q: got %v at %v:%v: %s; want %v at %v:%v: ...%s...",
 			c.src, err.kind, err.line, err.column, err.message, c.kind, c.line, c.column, c.message)
 		testing.expectf(t, doc.root == nil, "%q: root set after an error", c.src)
+	}
+}
+
+// A key that occurs twice in a mapping, block or flow, is found, and the
+// error names where it is first, among fewer keys than the parser compares
+// one by one, as many, more, and 100,000, which take time linear in their
+// number: comparing each with every other took 23 s. With é in each key, a
+// column is counted in characters, on from the last on its line.
+@(test)
+yaml_duplicate_among_many :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	for n in ([]int{63, 64, 65, 100_000}) {
+		for dup in ([]int{0, n - 1}) {
+			for flow in ([]bool{false, true}) {
+				for prefix in ([]string{"k", "ék"}) {
+					// with flow, the mapping is on one line, and each key's
+					// column is the characters before it
+					b := strings.builder_make(context.temp_allocator)
+					first_column := 1
+					if flow do strings.write_string(&b, "{")
+					for i in 0 ..< n {
+						if flow && i == dup do first_column = utf8.rune_count(b.buf[:]) + 1
+						fmt.sbprintf(&b, flow ? "%s%d: %d, " : "%s%d: %d\n", prefix, i, i)
+					}
+					line, column := n + 1, 1
+					if flow do line, column = 1, utf8.rune_count(b.buf[:]) + 1
+					fmt.sbprintf(&b, flow ? "%s%d: x}}\n" : "%s%d: x\n", prefix, dup)
+
+					doc: yml.Document
+					err := yml.parse(strings.to_string(b), &doc)
+					key := fmt.tprintf("%s%d", prefix, dup)
+					want := fmt.tprintf("duplicate key %q (first at line %d, column %d)", key, flow ? 1 : dup + 1, first_column)
+					testing.expectf(
+						t,
+						err.kind == .Duplicate_Key && err.line == line && err.column == column && err.message == want,
+						"%v keys, %s again, flow %v: got %v at %v:%v: %s; want at %v:%v: %s",
+						n, key, flow, err.kind, err.line, err.column, err.message, line, column, want)
+					yml.destroy_error(&err)
+					yml.destroy_document(&doc)
+				}
+			}
+		}
 	}
 }

@@ -1,16 +1,17 @@
-package limits
+package tests
 
-import arn "../../zelbyn/arena"
-import expr "../../zelbyn/expression"
-import fld "../../zelbyn/field"
-import ksy "../../zelbyn/ksy"
-import mdata "../../zelbyn/metadata"
-import rdr "../../zelbyn/reader"
-import yml "../../zelbyn/yaml"
+import arn "../zelbyn/arena"
+import expr "../zelbyn/expression"
+import fld "../zelbyn/field"
+import ksy "../zelbyn/ksy"
+import mdata "../zelbyn/metadata"
+import rdr "../zelbyn/reader"
+import yml "../zelbyn/yaml"
 import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "core:time"
 
 // What a decode may take (reader.Limits), and how deeply YAML, expressions
 // and a schema's types and instances may nest (yaml.MAX_NESTING,
@@ -255,9 +256,12 @@ limits_expression_depth :: proc(t: ^testing.T) {
 // is of the next, of parse instances whose pos uses the next, or of
 // sizeof<t> through such types, is Unsupported; so is a chain of value
 // instances, each using the next, longer than MAX_CHAIN, whatever order
-// it is compiled in.
+// it is compiled in. Each of 100,000 types or instances takes time linear
+// in their number: in a mapping, their keys were each compared with every
+// other, which took minutes.
 @(test)
 limits_compile_nesting :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
 	// a field of type t0, whose field is of t1, ..., down to t(n - 1)
 	types :: proc(n: int, size_of: bool) -> string {
 		b := strings.builder_make(context.temp_allocator)

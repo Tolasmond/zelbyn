@@ -86,7 +86,7 @@ bit_type :: proc(name: string) -> (width: int, order: Maybe(endian.Byte_Order), 
 // to compile the rest into. One without an id is named as in Kaitai
 // (unnamed).
 @(private)
-new_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, index: int, ids: ^[dynamic]^yml.Node) -> (node: ^mdata.Node, ok: bool) {
+new_attr :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, index: int, ids: ^Ids) -> (node: ^mdata.Node, ok: bool) {
 	id_node := get(attr, "id")
 	if id_node == nil {
 		id := unnamed(c, index)
@@ -110,7 +110,7 @@ unnamed :: proc(c: ^Compiler, index: int) -> string {
 // its id and pos, into node, in scope. ids holds the ids of the type, which
 // bit fields claim; nil for a parse instance, which has none.
 @(private)
-compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata.Node, scope: expr.Scope, ids: ^[dynamic]^yml.Node) -> bool {
+compile_field :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, node: ^mdata.Node, scope: expr.Scope, ids: ^Ids) -> bool {
 	id := node.ref_name
 	type_node := get(attr, "type")
 	contents := get(attr, "contents")
@@ -522,7 +522,7 @@ compile_terminator :: proc(c: ^Compiler, attr: ^yml.Node, id: string, node: ^mda
 // significant). Each is the unsigned number in those bits, of the smallest
 // unsigned type that holds it. They are kept in order of their low bit.
 @(private = "file")
-compile_bits :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Type, ids: ^[dynamic]^yml.Node) -> (bits: []mdata.Bit_Field, ok: bool) {
+compile_bits :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Type, ids: ^Ids) -> (bits: []mdata.Bit_Field, ok: bool) {
 	if type not_in INTEGER_TYPES do return nil, fail(c, .Invalid, n, "%s: -bits applies only to integer types", id)
 	if n.kind != .Seq || len(n.items) == 0 do return nil, fail(c, .Invalid, n, "%s: -bits must be a non-empty sequence", id)
 

@@ -291,8 +291,10 @@ Type_Def :: struct {
 	parent:      ^Type_Def, // the type it is declared in; nil at the top level
 	meta:        Meta,
 	types:       []^Type_Def,
+	type_index:  map[string]^Type_Def, // types by name, when there are INDEX_FROM or more; else nil
 	instances:   []yml.Entry, // the entries of instances, each checked
 	enums:       []expr.Enum,
+	enum_index:  map[string]^expr.Enum, // enums by name, when there are INDEX_FROM or more; else nil
 	params:      []Param_Def,
 	compiling:   ^mdata.Node, // the set its attributes are being compiled into; nil when they are not
 	sizing:      bool, // its size is being found (type_bits)
