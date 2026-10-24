@@ -1885,15 +1885,25 @@ ksy_contents_numbers_and_text :: proc(t: ^testing.T) {
 		{"0o17", "0o17"},
 		{"08", "08"},
 		{"0b", "0b"},
+		{"0XFF", "0XFF"},
+		{"0B10", "0B10"},
+		{"0O17", "0O17"},
 	}
 	for c in cases {
-		src := fmt.tprintf("%sseq:\n  - id: m\n    contents: [%s]\n", HEAD, c.item)
-		got := ksy_dump(t, src, transmute([]byte)c.input)
-		testing.expectf(t, strings.has_prefix(got, "t[0].m[0] = <"), "%s: %s", c.item, got)
+		// the size of the contents, as _sizeof gives it, is what is read
+		src := fmt.tprintf("%sseq:\n  - id: m\n    contents: [%s]\n  - id: size\n    type: u1\n    valid:\n      expr: m._sizeof == %v and _ == %v\n", HEAD, c.item, len(c.input), len(c.input))
+		input := strings.concatenate({c.input, string([]byte{byte(len(c.input))})}, context.temp_allocator)
+		got := ksy_dump(t, src, transmute([]byte)input)
+		testing.expectf(t, strings.has_prefix(got, fmt.tprintf("t[0].m[0] = <%v bytes>", len(c.input))), "%s: %s", c.item, got)
+		testing.expectf(t, strings.contains(got, fmt.tprintf("t[0].size[0] = %v\n", len(c.input))), "%s: %s", c.item, got)
 		// one byte more is not the contents
-		wrong := strings.concatenate({"\x01", c.input}, context.temp_allocator)
+		wrong := strings.concatenate({"\x01", input}, context.temp_allocator)
 		testing.expectf(t, strings.has_prefix(ksy_dump(t, src, transmute([]byte)wrong), "error: Not_Equal"), "%s: matched %q", c.item, wrong)
 	}
+
+	// items of both kinds in one list: "ab", a byte and text
+	src := HEAD + "seq:\n  - id: m\n    contents: [ab, 1, 0o17, 0XFF]\n  - id: size\n    type: u1\n    valid:\n      expr: m._sizeof == 11\n"
+	expect_dump(t, "mixed contents", ksy_dump(t, src, transmute([]byte)string("ab\x010o170XFF\x0b")), "t[0].m[0] = <11 bytes> 61 62 01 30 6f 31 37 30 58 46 46\nt[0].size[0] = 11\n")
 }
 
 // A switch-on compares its value, and its cases, as any integers an

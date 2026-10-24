@@ -1513,16 +1513,22 @@ reads_nothing :: proc(c: ^Compiler, td: ^Type_Def, attr: ^yml.Node, id: string) 
 }
 
 // The number of bytes of contents, a string or a sequence of bytes and
-// strings (byte_list).
+// strings (byte_list), its items told apart as byte_list does.
 @(private = "file")
 contents_length :: proc(contents: ^yml.Node) -> int {
 	if contents.kind != .Seq do return len(contents.text)
 	n := 0
-	for item in contents.items {
-		_, is_int := parse_int(item.text)
-		n += is_int && item.style == .Plain ? 1 : len(item.text)
-	}
+	for item in contents.items do n += is_byte_item(item) ? 1 : len(item.text)
 	return n
+}
+
+// Whether item, a scalar of a list of bytes and strings (contents, the
+// peek extensions), is a byte rather than text: a plain scalar that YAML
+// 1.1, as the official tools read the YAML, reads as an integer (yaml_int),
+// which byte_list then requires to be one from 0 to 255.
+@(private = "file")
+is_byte_item :: proc(item: ^yml.Node) -> bool {
+	return item.style == .Plain && yaml_int(item.text)
 }
 
 // The value of n when it is an expression of integer literals and
@@ -2429,7 +2435,7 @@ byte_list :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (bytes: []byte, o
 			// a number, as the official tools read the YAML, is a byte; one
 			// that is not written as zelbyn reads integers is an error, rather
 			// than its text
-			if item.style == .Plain && yaml_int(item.text) {
+			if is_byte_item(item) {
 				v, status := int_scalar_value(item.text)
 				if status != .Ok do return nil, fail(c, .Invalid, item, "%s: %s is an integer in YAML, which is not written as zelbyn reads one: decimal without leading zeros, 0x, 0b or 0o, with single _ between digits, to 2^64 - 1", what, item.text)
 				if v < 0 || v > 255 do return nil, fail(c, .Invalid, item, "%s: %s is not a byte (0 to 255)", what, item.text)
