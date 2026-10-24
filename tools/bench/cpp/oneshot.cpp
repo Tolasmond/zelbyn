@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     }
     Clock::time_point t1 = Clock::now();
 
-    long faults = page_faults();
+    long faults_before = page_faults();
     try {
         kaitai::kstream* ks = new kaitai::kstream(data);
         new KS_ROOT(ks);
@@ -64,7 +64,12 @@ int main(int argc, char** argv) {
         return 1;
     }
     Clock::time_point t2 = Clock::now();
-    if (faults >= 0) faults = page_faults() - faults;
+    long faults = page_faults();
+    if (faults_before >= 0 && faults >= 0) {
+        faults -= faults_before;
+    } else {
+        faults = -1;
+    }
 
     std::printf("read_us=%.1f decode_us=%.1f faults=%ld\n", us(t0, t1), us(t1, t2), faults);
     return 0;
