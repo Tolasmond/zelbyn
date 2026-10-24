@@ -331,9 +331,9 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, $SPANS: bool) -> d
 		count = c.n
 	case mdata.Rule_Count:
 		n, err := eval_int(d, c.expr)
-		if err == .None && n < 0 do err = .Invalid_Length
 		if err != .None do return fail(d, err, d.r.pos)
-		count = n
+		// a negative count reads no elements, as in Kaitai's runtimes
+		count = max(n, 0)
 	case mdata.Marker_Count:
 		count = markers_match(&d.r, c.markers) ? 1 : 0
 	case mdata.Repeat_Count:
