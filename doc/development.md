@@ -12,7 +12,24 @@ odin check . -vet -strict-style -debug
 odin check tests -vet -strict-style -no-entry-point
 odin test tests -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_LEVEL=warning
 odin test tests -o:speed -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_LEVEL=warning
+odin check tools/bench -vet -strict-style
+odin check tools/ksy_corpus -vet -strict-style
+odin check tools/yaml_corpus -vet -strict-style
 ```
+
+`tools/check.py` runs them all, each whatever the ones before it give, and ends with a summary; it exits 1 if any failed. It builds the tests in a temporary directory. The checks are pinned to Odin `dev-2026-10` (commit `84bc3fc`), and the script warns when another is on the `PATH`.
+
+```
+python3 tools/check.py
+```
+
+The checks that need what the repository does not hold run only when asked: `--formats ../kaitai_struct_formats` runs the corpus check, and with it `--samples ../kaitai_struct_samples` the sample comparison and `--yaml-corpus` the YAML corpus check (each below, with the clones and tools it needs, and the commits the clones must be at), and `--compare-tests` the tests of `tools/kaitai_compare`. Their results are reported as they are: the sample comparison fails on the two samples that "Corpus check" names, so a run with `--samples` exits 1.
+
+```
+python3 tools/check.py --formats ../kaitai_struct_formats --samples ../kaitai_struct_samples --yaml-corpus --compare-tests
+```
+
+`.github/workflows/check.yml` runs `tools/check.py` on every push to `main` and every pull request, with the Odin release it is pinned to, checked against its SHA-256. The optional checks are not run there.
 
 Debug builds (`odin build . -debug -out:build/zelbyn`) run under a tracking allocator and exit 1 if anything leaks or is freed twice.
 

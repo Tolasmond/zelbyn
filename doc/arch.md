@@ -55,6 +55,8 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `tools/kaitai_compare/` | A comparison of decodes, and of offsets, with the official Kaitai Struct JavaScript runtime |
 | `tools/ksy_corpus/` | The corpus test: every schema of `kaitai_struct_formats` compiled, against a record, and the samples of `kaitai_struct_samples` compared with the official runtime |
 | `tools/yaml_corpus/` | A comparison of the YAML parser with libyaml |
+| `tools/check.py` | The checks a change must pass, in one command, and the optional corpus checks |
+| `.github/workflows/check.yml` | CI: `tools/check.py` on each push to `main` and each pull request |
 
 `.gitattributes` normalizes text files to LF. It marks everything under `data/` and `tests/golden/` as binary, so that the samples and golden dumps are stored byte for byte.
 
