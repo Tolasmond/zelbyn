@@ -180,7 +180,15 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "enums:\n  e:\n    9223372036854775808: big\n", .Unsupported, 6, 5, "enum e: 9223372036854775808 does not fit in a 64-bit signed integer"},
 	{HEAD + "enums:\n  e:\n    1__0: x\n", .Invalid, 6, 5, `enum e: "1__0" is not an integer`},
 	{HEAD + "enums:\n  e:\n    010: x\n", .Invalid, 6, 5, `enum e: "010" is not an integer`},
-	{HEAD + "seq:\n  - id: a\n    contents: [010]\n", .Invalid, 6, 16, "is not a byte"},
+	// a scalar that YAML 1.1 reads as an integer, as the official tools do, is
+	// a byte of contents, and one that is not written as zelbyn reads integers
+	// is an error, not its text
+	{HEAD + "seq:\n  - id: a\n    contents: [010]\n", .Invalid, 6, 16, "010 is an integer in YAML, which is not written as zelbyn reads one"},
+	{HEAD + "seq:\n  - id: a\n    contents: [1__0]\n", .Invalid, 6, 16, "1__0 is an integer in YAML, which is not written as zelbyn reads one"},
+	{HEAD + "seq:\n  - id: a\n    contents: [1_]\n", .Invalid, 6, 16, "1_ is an integer in YAML"},
+	{HEAD + "seq:\n  - id: a\n    contents: [1:30]\n", .Invalid, 6, 16, "1:30 is an integer in YAML"},
+	{HEAD + "seq:\n  - id: a\n    contents: [18446744073709551616]\n", .Invalid, 6, 16, "18446744073709551616 is an integer in YAML"},
+	{HEAD + "seq:\n  - id: a\n    contents: [300]\n", .Invalid, 6, 16, "300 is not a byte (0 to 255)"},
 	{HEAD + "seq:\n  - id: a\n    contents: 010\n", .Invalid, 6, 15, "write a byte as a sequence"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        -9223372036854775809: u1\n", .Unsupported, 9, 9, "a: a case must be an integer literal, from -2^63 to 2^64 - 1, or an enum constant"},
 	{HEAD + "  encoding: ASCII\nseq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n        2: strz\n  - id: b\n    size: a\n", .Unsupported, 13, 11, "size: a is a switch-on field whose values can be an integer or a string"},
@@ -1853,6 +1861,38 @@ ksy_valid_constant_bounds :: proc(t: ^testing.T) {
 		as_expr := fmt.tprintf("%sseq:\n  - id: n\n    type: u8\n    valid:\n      expr: _ == %s\n", HEAD, c.bound)
 		expect_dump(t, c.bound, ksy_dump(t, as_value, c.input), c.want)
 		expect_dump(t, c.bound, ksy_dump(t, as_expr, c.input), c.want)
+	}
+}
+
+// The items of contents that YAML 1.1 reads as integers are bytes, and
+// the others, also ones that look like numbers but are not integers in
+// YAML 1.1 (0o17, 08, a literal beyond 2^64 - 1 followed by text), are
+// their text, as the official tools take them.
+@(test)
+ksy_contents_numbers_and_text :: proc(t: ^testing.T) {
+	Case :: struct {
+		item:  string,
+		input: string,
+	}
+	cases := [?]Case {
+		{"1_0", "\x0a"},
+		{"0x1_F", "\x1f"},
+		{"0b1_0", "\x02"},
+		{"+5", "\x05"},
+		{"0", "\x00"},
+		{"18446744073709551616x", "18446744073709551616x"},
+		{"0x10000000000000000g", "0x10000000000000000g"},
+		{"0o17", "0o17"},
+		{"08", "08"},
+		{"0b", "0b"},
+	}
+	for c in cases {
+		src := fmt.tprintf("%sseq:\n  - id: m\n    contents: [%s]\n", HEAD, c.item)
+		got := ksy_dump(t, src, transmute([]byte)c.input)
+		testing.expectf(t, strings.has_prefix(got, "t[0].m[0] = <"), "%s: %s", c.item, got)
+		// one byte more is not the contents
+		wrong := strings.concatenate({"\x01", c.input}, context.temp_allocator)
+		testing.expectf(t, strings.has_prefix(ksy_dump(t, src, transmute([]byte)wrong), "error: Not_Equal"), "%s: matched %q", c.item, wrong)
 	}
 }
 

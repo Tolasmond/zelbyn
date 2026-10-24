@@ -2419,17 +2419,20 @@ byte_list :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (bytes: []byte, o
 	b := make([dynamic]byte, c.allocator)
 	switch n.kind {
 	case .Scalar:
-		if _, status := int_scalar_value(n.text); status != .Invalid && n.style == .Plain {
+		if n.style == .Plain && yaml_int(n.text) {
 			return nil, fail(c, .Invalid, n, "%s: write a byte as a sequence, [%s]", what, n.text)
 		}
 		append(&b, n.text)
 	case .Seq:
 		for item in n.items {
 			if item.kind != .Scalar do return nil, fail(c, .Invalid, item, "%s: an element must be a byte or a string", what)
-			v, status := int_scalar_value(item.text)
-			if status != .Invalid && item.style == .Plain {
-				// 010 and one beyond 2^64 - 1 are numbers in YAML, not strings
-				if status != .Ok || v < 0 || v > 255 do return nil, fail(c, .Invalid, item, "%s: %s is not a byte (0 to 255)", what, item.text)
+			// a number, as the official tools read the YAML, is a byte; one
+			// that is not written as zelbyn reads integers is an error, rather
+			// than its text
+			if item.style == .Plain && yaml_int(item.text) {
+				v, status := int_scalar_value(item.text)
+				if status != .Ok do return nil, fail(c, .Invalid, item, "%s: %s is an integer in YAML, which is not written as zelbyn reads one: decimal without leading zeros, 0x, 0b or 0o, with single _ between digits, to 2^64 - 1", what, item.text)
+				if v < 0 || v > 255 do return nil, fail(c, .Invalid, item, "%s: %s is not a byte (0 to 255)", what, item.text)
 				append(&b, byte(v))
 			} else {
 				append(&b, item.text)
@@ -2696,6 +2699,50 @@ int_of :: proc(s: mdata.Scalar) -> i128 {
 parse_int :: proc(text: string) -> (v: i128, ok: bool) {
 	value, status := int_scalar_value(text)
 	return value, status == .Ok
+}
+
+// Whether YAML 1.1, which the official Kaitai tools read schemas with
+// (SnakeYAML, and PyYAML, which tools/kaitai_compare uses), reads text, a
+// plain scalar, as an integer: with an optional sign, 0b and 0x digits,
+// octal with a leading 0, decimal, or base 60 (1:30), each with _
+// anywhere after its first digit. A list of bytes and strings (contents)
+// takes a scalar that is one as a byte, any other as text: 0o17 and 08,
+// which YAML 1.1 reads as strings, are text.
+@(private = "file")
+yaml_int :: proc(text: string) -> bool {
+	only :: proc(s: string, allowed: string) -> bool {
+		if len(s) == 0 do return false
+		for ch in s do if !strings.contains_rune(allowed, ch) do return false
+		return true
+	}
+	s := text
+	if len(s) > 0 && (s[0] == '-' || s[0] == '+') do s = s[1:]
+	switch {
+	case strings.has_prefix(s, "0b"):
+		return only(s[2:], "01_")
+	case strings.has_prefix(s, "0x"):
+		return only(s[2:], "0123456789abcdefABCDEF_")
+	case s == "0":
+		return true
+	case len(s) > 0 && s[0] == '0':
+		return only(s[1:], "01234567_")
+	case len(s) > 0 && s[0] >= '1' && s[0] <= '9':
+		colon := strings.index_byte(s, ':')
+		if colon < 0 do return only(s, "0123456789_")
+		if !only(s[:colon], "0123456789_") do return false
+		// then :[0-5]?[0-9], one or more times
+		rest := s[colon:]
+		for len(rest) > 0 {
+			if rest[0] != ':' do return false
+			rest = rest[1:]
+			k := 0
+			for k < len(rest) && k < 2 && rest[k] >= '0' && rest[k] <= '9' do k += 1
+			if k == 0 || (k == 2 && rest[0] > '5') do return false
+			rest = rest[k:]
+		}
+		return true
+	}
+	return false
 }
 
 // The value of text as parse_int reads it, and why it is not one: Invalid
