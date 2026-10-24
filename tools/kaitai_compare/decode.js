@@ -11,8 +11,9 @@
 // type as {"type": its name, "bytes": an array of integers}, from which it
 // is made. For each file, prints one line of JSON, {"value": v, "f4": [...]},
 // or for a file that fails to decode, {"error": "..."}. f4 lists the paths
-// (root.field[i].field[j]...) of the floats read as f4s, by the width of
-// their debug records, as the schema is always compiled in debug mode. v is
+// (root.field[i].field[j]...) of the floats read with an f4 reader, which
+// is found by the position of each value's debug record, as the schema is
+// always compiled in debug mode (READS). v is
 // in the shape of zelbyn's --dump json: a set instance is an
 // object of its seq fields in read order, then its parse instances
 // (instances with pos), each an array of its values (one for a field read
@@ -189,12 +190,52 @@ function put(out, name, values) {
   if (!(name in out) || values.length > 0) out[name] = values;
 }
 
+// What each primitive read of the runtime read, by stream and position:
+// "f4", "f8" or "int" (an integer or bits), as the generated code calls
+// one reader for each type. A switch-on whose cases are of several types
+// (minecraft_nbt.ksy's tag::float and tag::double, or an integer and a
+// float) has a value of the type of the case chosen, which the schema alone
+// cannot tell, nor the width of the value's debug record (a u4 and an f4).
+const READS = new Map();
+
+for (const name of Object.getOwnPropertyNames(KaitaiStream.prototype)) {
+  const m = /^read(?:([USF])([1248])(?:le|be)?|BitsInt(?:Be|Le))$/.exec(name);
+  if (!m) continue;
+  const kind = m[1] === "F" ? "f" + m[2] : "int";
+  const read = KaitaiStream.prototype[name];
+  KaitaiStream.prototype[name] = function (...args) {
+    const at = this.pos;
+    if (!READS.has(this)) READS.set(this, new Map());
+    const reads = READS.get(this);
+    if (!reads.has(at)) reads.set(at, new Set());
+    reads.get(at).add(kind);
+    return read.apply(this, args);
+  };
+}
+
+// What was read for x, a number whose debug record is d, read from stream
+// io, or for a parse instance with io, a stream whose offset is d's
+// ioOffset: "f4", "f8" or "int"; undefined when nothing was read there.
+// Reads of several kinds at one position (a parse instance that reads a
+// field's bytes again as another type) give the one float kind when x is
+// not an integer, which only a float reader gives, else "int", so that x
+// is compared exactly rather than rounded as an f4 it may not be.
+function readKind(io, d, x) {
+  const kinds = new Set();
+  for (const [stream, reads] of READS) {
+    if (io ? stream !== io : stream.byteOffset !== d.ioOffset) continue;
+    for (const k of reads.get(d.start) || []) kinds.add(k);
+  }
+  if (kinds.size <= 1) return [...kinds][0];
+  const floats = [...kinds].filter((k) => k !== "int");
+  return !Number.isInteger(x) && floats.length === 1 ? floats[0] : "int";
+}
+
 // obj, a set instance at path (as compare.py's first_difference writes
 // paths: the root's name, then .name[i] for each value), in the shape of
 // zelbyn's --dump json, with the path of every value that was read as an
-// f4 added to f4. A float field's values are f4 or f8 as the runtime read
-// them, 4 or 8 bytes by their debug records, which also tells the cases of
-// a switch-on with both (minecraft_nbt.ksy's tag::float and tag::double).
+// f4 added to f4: of a field whose type, or a case of whose switch-on, is
+// a float type, the values that the runtime read with an f4 reader.
 function instance(obj, path, f4) {
   const m = membersOf(obj);
   const out = Object.create(null);
@@ -208,9 +249,9 @@ function instance(obj, path, f4) {
     put(out, name, values.map((x, i) => {
       const p = path + "." + name + "[" + i + "]";
       if (rs && typeof x === "number") {
-        const width = rs.length === values.length ? rs[i].end - rs[i].start : -1;
-        if (width !== 4 && width !== 8) throw new Error("no f4 or f8 read for the float at " + p);
-        if (width === 4) f4.push(p);
+        const kind = rs.length === values.length ? readKind(m.withIo.has(key) ? null : obj._io, rs[i], x) : undefined;
+        if (kind === undefined) throw new Error("no one read of a type is known for the value at " + p);
+        if (kind === "f4") f4.push(p);
       }
       return typeof x === "object" && x !== null && !(x instanceof Uint8Array) ? instance(x, p, f4) : value(x);
     }));
@@ -246,8 +287,8 @@ async function main() {
       return spec ? Promise.resolve(spec) : Promise.reject(new Error("no schema for import " + name));
     },
   };
-  // in debug mode, which records where each value was read, and so the
-  // width of each float
+  // in debug mode, which records where each value was read, and so what
+  // read it (readKind)
   const sources = await compiler.compile("javascript", ksy, importer, true);
 
   // each generated file is a module, which requires those of its imports

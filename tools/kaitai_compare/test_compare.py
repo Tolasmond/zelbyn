@@ -133,6 +133,50 @@ seq:
 FLOATS_INPUT = (struct.pack('<ff', 0.1, 1e-3) + struct.pack('<d', 0.1) + bytes([1, 2])
                 + struct.pack('<f', 0.3) + struct.pack('<d', 0.3))
 
+# A switch-on with integer and float cases, which MIXED_INPUT reads as u1,
+# u4, f4 and f8: a u1 has no f4 or f8 width, and a u4 has an f4's, so
+# neither tells a value's type, which is the case chosen. holder's parse
+# instances read v[2]'s bytes again, from _root's stream, as an f4 and as a
+# u4, so that two kinds of read are at one position.
+MIXED = """meta:
+  id: mixed
+  endian: le
+seq:
+  - id: kinds
+    type: u1
+    repeat: expr
+    repeat-expr: 4
+  - id: v
+    type:
+      switch-on: kinds[_index]
+      cases:
+        1: u1
+        2: u4
+        3: f4
+        4: f8
+    repeat: expr
+    repeat-expr: 4
+  - id: sub
+    size: 4
+    type: holder
+types:
+  holder:
+    seq:
+      - id: raw
+        type: u4
+    instances:
+      again:
+        io: _root._io
+        pos: 9
+        type: f4
+      as_int:
+        io: _root._io
+        pos: 9
+        type: u4
+"""
+
+MIXED_INPUT = bytes([1, 2, 3, 4, 7]) + struct.pack('<I', 1) + struct.pack('<f', 0.3) + struct.pack('<d', 0.3) + struct.pack('<I', 5)
+
 # The JavaScript runtime moves one byte too far past a terminator with
 # include: true and consume, so after t the decoders differ.
 DIFFERING = """meta:
@@ -242,11 +286,23 @@ class Decodes(unittest.TestCase):
         self.assertEqual(out['value']['double'], [0.1])
         self.assertEqual(out['value']['either'], [0.30000001192092896, 0.3])
 
+    def test_decode_js_mixed_cases(self):
+        """A value of a switch-on with integer and float cases is an f4 only
+        when the case chosen is: not a u1 or a u4."""
+        import yaml
+        schema = self.write('s.json', json.dumps(yaml.safe_load(MIXED)))
+        out = json.loads(subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema, self.write('in.bin', MIXED_INPUT)],
+                                        capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(out['f4'], ['mixed.v[2]', 'mixed.sub[0].again[0]'])
+        self.assertEqual(out['value']['v'], [7, 1, 0.30000001192092896, 0.3])
+
     def test_floats_agree(self):
-        for flags in ([], ['--offsets']):
-            r = self.compare(FLOATS, FLOATS_INPUT, *flags)
-            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn('1 files: 1 agree', r.stdout)
+        for schema, data in ((FLOATS, FLOATS_INPUT), (MIXED, MIXED_INPUT)):
+            for flags in ([], ['--offsets']):
+                with self.subTest(schema=schema.split()[2], flags=flags):
+                    r = self.compare(schema, data, *flags)
+                    self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                    self.assertIn('1 files: 1 agree', r.stdout)
 
     def test_scoped_names_agree(self):
         for flags in ([], ['--offsets']):
