@@ -589,15 +589,27 @@ eval_args :: proc(d: ^Decoder, set: ^mdata.Node, index: int) -> (args: []fld.Val
 // and fit in the 1 MB of the main thread's stack on Windows.
 MAX_DEPTH :: 224
 
+// The deepest that parse instances are read each inside the one before,
+// which only an expression of a parse instance's type that reads one of
+// its own parse instances does: the others are read once the root is
+// (read_pending), one after another. A level takes the evaluator's frames
+// too, several times what a set instance takes: 7 KB with -o:speed and
+// 30 KB in a debug build for the instance in an if, and 47 KB in a debug
+// build for one read through three value instances. MAX_INSTANCE_DEPTH
+// levels stay within MAX_STACK, and the evaluator's MAX_EVAL_STACK, in
+// every build, so a schema and an input reach the same depth in each.
+MAX_INSTANCE_DEPTH :: 8
+
 // The most stack that decoding uses before an instance is Too_Deep, which
-// bounds what frames do not count: read_parse_instance sets aside the
-// frames above the instance's while it reads, and a parse instance read
-// from an expression has the evaluator's frames below it, which take
-// several times what a level takes otherwise (6.6 KB, and 20 KB in a debug
-// build, for the instance in an if). Instances read that way can reach it
-// in fewer than MAX_DEPTH levels. It is checked in each parse instance, and
-// in each set instance deeper than CHECK_DEPTH, so the stack grows at most
-// CHECK_DEPTH levels past it.
+// bounds what frames and MAX_INSTANCE_DEPTH do not count:
+// read_parse_instance sets aside the frames above the instance's while it
+// reads, and the evaluator's frames below a parse instance read from an
+// expression grow with the expression, and with the value instances it
+// reads. Only a level
+// far deeper or longer than those of the corpus reaches it before
+// MAX_INSTANCE_DEPTH, and then at a depth that depends on the build. It is
+// checked in each parse instance, and in each set instance deeper than
+// CHECK_DEPTH, so the stack grows at most CHECK_DEPTH levels past it.
 MAX_STACK :: 768 * 1024
 
 // The frames below which the depth and the stack are not checked: deeper
@@ -734,8 +746,10 @@ keep_stream :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance) -> da
 
 // Reads parse instance node of instance into slot k: at its pos in the
 // instance's stream, as the instance's frame sees it, or in the stream of
-// its io; for an instance no longer decoded, as it was kept (read_kept). The stream, frames and path are then
-// put back as they were. It is Too_Deep once decoding has used MAX_STACK.
+// its io; for an instance no longer decoded, as it was kept (read_kept).
+// The stream, frames and path are then put back as they were. It is
+// Too_Deep inside MAX_INSTANCE_DEPTH others, or once decoding has used
+// MAX_STACK.
 @(private, require_results)
 read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int, $SPANS: bool) -> dat.Read_Error {
 	node := node
@@ -746,6 +760,12 @@ read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.N
 	j := len(d.frames) - 1
 	for j >= 0 && d.frames[j].instance != instance do j -= 1
 	if j < 0 do return read_kept(d, instance, node, k, SPANS)
+	if d.nesting >= MAX_INSTANCE_DEPTH {
+		append(&d.path, Path_Segment{node.name, 0})
+		return fail(d, .Too_Deep, d.r.pos)
+	}
+	d.nesting += 1
+	defer d.nesting -= 1
 	frame := d.frames[j]
 	// as the set the instance was read as has it: an expression compiled
 	// outside a type whose endian is a switch-on refers to the parse

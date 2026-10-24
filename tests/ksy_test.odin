@@ -2607,9 +2607,11 @@ t[0].by_flags[0] = <1 bytes> 99
 `)
 }
 
-// Set instances nest at most reader.MAX_DEPTH deep, and through parse
-// instances read from expressions, which take more stack, until the
-// decoder has used reader.MAX_STACK, at a depth that depends on the build.
+// Set instances nest at most reader.MAX_DEPTH deep, and parse instances
+// read from expressions of their own type at most
+// reader.MAX_INSTANCE_DEPTH, in every build: the tests are run in a debug
+// build too, where the evaluator's frames take the most stack, also for a
+// level that reads through three value instances or a deeper expression.
 // Deeper ones are Too_Deep.
 @(test)
 ksy_too_deep :: proc(t: ^testing.T) {
@@ -2628,10 +2630,29 @@ ksy_too_deep :: proc(t: ^testing.T) {
 	want := fmt.tprintf("error: Too_Deep at %v in nest[0]", rdr.MAX_DEPTH)
 	testing.expectf(t, strings.has_prefix(got, want) && strings.count(got, ".next[0]") == rdr.MAX_DEPTH, "MAX_DEPTH + 1 levels: %.80s", got)
 
-	through_instances := "meta:\n  id: p\nseq:\n  - id: flag\n    type: u1\n  - id: x\n    size: 0\n    if: flag != 0 and child.flag < 2\ninstances:\n  child:\n    pos: _io.pos\n    type: p\n    if: flag != 0\n"
-	ones := make([]byte, rdr.MAX_DEPTH, context.temp_allocator)
-	slice.fill(ones, 1)
-	testing.expect(t, strings.has_prefix(ksy_dump(t, through_instances, ones), "error: Too_Deep at "), "parse instances read from expressions")
+	// each level reads its child, a parse instance, from the if of x, until
+	// the child whose flag is 0
+	P_HEAD :: "meta:\n  id: p\nseq:\n  - id: flag\n    type: u1\n  - id: x\n    size: 0\n"
+	P_CHILD :: "  child:\n    pos: _io.pos\n    type: p\n    if: flag != 0\n"
+	through_instances := [?]string {
+		P_HEAD + "    if: flag != 0 and child.flag < 2\ninstances:\n" + P_CHILD,
+		P_HEAD + "    if: flag != 0 and a < 2\ninstances:\n  a:\n    value: b\n  b:\n    value: c\n  c:\n    value: child.flag\n" + P_CHILD,
+		P_HEAD + "    if: flag != 0 and ((((((child.flag + 1) * 2) - 1) / 1) + 0) < 100)\ninstances:\n" + P_CHILD,
+	}
+	// MAX_INSTANCE_DEPTH flags of 1 and one of 0, with room for one more 1
+	flags := make([]byte, rdr.MAX_INSTANCE_DEPTH + 2, context.temp_allocator)
+	slice.fill(flags[:rdr.MAX_INSTANCE_DEPTH], 1)
+	deepest := strings.repeat(".child[0]", rdr.MAX_INSTANCE_DEPTH, context.temp_allocator)
+	for src, i in through_instances {
+		got = ksy_dump(t, src, flags[:rdr.MAX_INSTANCE_DEPTH + 1])
+		testing.expectf(t, strings.has_suffix(got, fmt.tprintf("p[0]%s.flag[0] = 0\n", deepest)), "schema %v, MAX_INSTANCE_DEPTH levels: %.120s", i, got)
+
+		flags[rdr.MAX_INSTANCE_DEPTH] = 1
+		got = ksy_dump(t, src, flags)
+		flags[rdr.MAX_INSTANCE_DEPTH] = 0
+		want = fmt.tprintf("error: Too_Deep at %v in p[0]%s.child[0]", rdr.MAX_INSTANCE_DEPTH + 1, deepest)
+		testing.expectf(t, got == want, "schema %v, MAX_INSTANCE_DEPTH + 1 levels: got %q, want %q", i, got, want)
+	}
 }
 
 // Encodings: each one zelbyn decodes, by names in other cases and by
