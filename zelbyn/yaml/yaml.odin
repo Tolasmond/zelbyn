@@ -181,6 +181,27 @@ Parser :: struct {
 	allocator:  mem.Allocator,
 	end:        Mark, // where the last scalar or flow collection ended
 	err:        Error,
+	nesting:    int,  // the collections being parsed, at most MAX_NESTING
+}
+
+// The deepest that collections nest, block or flow: some eight times the
+// deepest of the corpus (15), and few enough that parsing, which recurses
+// once a level, cannot use the stack up. A deeper one is Unsupported.
+MAX_NESTING :: 128
+
+// Enters a collection at the reader; false, after an Unsupported error, when
+// it is nested more deeply than MAX_NESTING. leave_collection leaves it.
+@(private = "file")
+enter_collection :: proc(p: ^Parser) -> bool {
+	p.nesting += 1
+	if p.nesting <= MAX_NESTING do return true
+	fail(p, .Unsupported, p.pos, "collections nested more than %v deep are not supported", MAX_NESTING)
+	return false
+}
+
+@(private = "file")
+leave_collection :: proc(p: ^Parser) {
+	p.nesting -= 1
 }
 
 // Where a node is parsed: at the top of the document, as the value of a
@@ -465,6 +486,8 @@ expect_line_end :: proc(p: ^Parser) -> bool {
 // with the reader at the : after it.
 @(private = "file")
 parse_block_map :: proc(p: ^Parser, col: int, first_key: ^Node) -> ^Node {
+	if !enter_collection(p) do return nil
+	defer leave_collection(p)
 	node := new_node(p, .Map, {})
 	node.line, node.column = first_key.line, first_key.column
 	entries := make([dynamic]Entry, p.allocator)
@@ -554,6 +577,8 @@ fail_at_node :: proc(p: ^Parser, kind: Error_Kind, n: ^Node, format: string, arg
 // first -.
 @(private = "file")
 parse_block_seq :: proc(p: ^Parser, col: int) -> ^Node {
+	if !enter_collection(p) do return nil
+	defer leave_collection(p)
 	node := new_node(p, .Seq, mark(p))
 	items := make([dynamic]^Node, p.allocator)
 
@@ -933,6 +958,8 @@ block_scalar_breaks :: proc(p: ^Parser, content_indent: ^int, breaks: ^int, inde
 // A flow sequence or mapping, with the reader at its bracket.
 @(private = "file")
 parse_flow :: proc(p: ^Parser) -> ^Node {
+	if !enter_collection(p) do return nil
+	defer leave_collection(p)
 	is_map := peek(p) == '{'
 	close: byte = is_map ? '}' : ']'
 	node := new_node(p, is_map ? .Map : .Seq, mark(p))

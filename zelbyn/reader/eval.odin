@@ -91,7 +91,7 @@ eval_string :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (s: string, err
 eval_value :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (value: fld.Value, err: dat.Read_Error) {
 	v := eval(d, e, {index = index}) or_return
 	if s, is_string := v.(string); is_string {
-		copied := arn.arena_make(d.arena, byte, len(s))
+		copied := tree_make(d, byte, len(s)) or_return
 		copy(copied, s)
 		return string(copied), .None
 	}
@@ -149,6 +149,29 @@ literal_item :: proc(d: ^Decoder, x: mdata.Index, ctx: Eval_Context) -> (v: Eval
 	if !is_int || i < 0 || i >= len(literal.items) do return nil, true, .Index_Out_Of_Range
 	v, err = eval(d, literal.items[i], item_ctx)
 	return v, true, err
+}
+
+// The stack that decoding may have used when a value instance is
+// evaluated, below MAX_STACK by what the evaluation of one more link of a
+// chain of them can take before the next is checked: an expression
+// expression.MAX_DEPTH deep, and the instances it reads.
+MAX_EVAL_STACK :: MAX_STACK - 256 * 1024
+
+// Takes n of the decode's steps (Limits.max_steps); Step_Limit when there
+// are not as many left.
+@(private, require_results)
+take_steps :: #force_inline proc(d: ^Decoder, n: int) -> dat.Read_Error {
+	d.steps_left -= n
+	return d.steps_left < 0 ? .Step_Limit : .None
+}
+
+// n values of T in the tree's arena, zero (arena_make); Memory_Limit when
+// the arena reached its limit (Limits.max_memory), or the system has no
+// memory left.
+@(private, require_results)
+tree_make :: #force_inline proc(d: ^Decoder, $T: typeid, n: int) -> ([]T, dat.Read_Error) {
+	values, err := arn.arena_make(d.arena, T, n)
+	return values, err == nil ? .None : .Memory_Limit
 }
 
 // The value of a direct form, a Bool as 0 or 1. ok is false when there is
@@ -257,11 +280,12 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 	case mdata.To_S:
 		operand := eval(d, x.operand, ctx) or_return
 		n, _ := as_wide(operand)
-		return int_to_string(d, n), .None
+		return int_to_string(d, n)
 	case mdata.Decode:
 		operand := eval(d, x.operand, ctx) or_return
 		bytes := operand.([]byte)
-		return x.encoding == .None ? string(bytes) : decode_text(d, bytes, x.encoding), .None
+		if x.encoding == .None do return string(bytes), .None
+		return decode_text(d, bytes, x.encoding)
 	case mdata.Substring:
 		operand := eval(d, x.operand, ctx) or_return
 		from := eval(d, x.from, ctx) or_return
@@ -283,6 +307,15 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		return string_to_int(operand.(string))
 	case mdata.Array_Method:
 		operand := eval(d, x.operand, ctx) or_return
+		// .min and .max visit every item
+		if x.method == .Min || x.method == .Max {
+			#partial switch o in operand {
+			case []byte:
+				take_steps(d, len(o)) or_return
+			case []fld.Value:
+				take_steps(d, len(o)) or_return
+			}
+		}
 		return array_method(operand, x.method)
 	case mdata.Unary:
 		operand := eval(d, x.operand, ctx) or_return
@@ -346,11 +379,12 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		return kept.value, .None
 	case mdata.Bytes_Literal:
 		// in the tree's arena, which may keep it, as an argument
-		bytes := arn.arena_make(d.arena, byte, len(x.value))
+		bytes := tree_make(d, byte, len(x.value)) or_return
 		copy(bytes, x.value)
 		return bytes, .None
 	case mdata.Array_Literal:
-		values := arn.arena_make(d.arena, fld.Value, len(x.items))
+		take_steps(d, len(x.items)) or_return
+		values := tree_make(d, fld.Value, len(x.items)) or_return
 		for item, i in x.items {
 			value := eval(d, item, ctx) or_return
 			values[i] = tree_value(value)
@@ -526,6 +560,12 @@ field_slot :: #force_inline proc(d: ^Decoder, x: mdata.Field_Ref, ctx: Eval_Cont
 // cached.
 @(private = "file", require_results)
 eval_value_ref :: proc(d: ^Decoder, x: mdata.Value_Ref, ctx: Eval_Context) -> (v: Kept_Value, err: dat.Read_Error) {
+	// each evaluation is a step, so that a chain whose links each use the
+	// next twice, which doubles the work with each, ends; and a chain of
+	// them, each evaluated inside the one before, ends with Too_Deep once it
+	// has used MAX_EVAL_STACK
+	take_steps(d, 1) or_return
+	if stack_used(d) > MAX_EVAL_STACK do return {}, .Too_Deep
 	base := eval(d, x.base, ctx) or_return
 	caller := ctx
 	self := Eval_Context{index = -1, self = base.(^fld.Instance), base = x.base, caller = &caller}
@@ -550,7 +590,7 @@ eval_cached :: proc(d: ^Decoder, inst: ^mdata.Value_Instance, self: Eval_Context
 	v = eval_kept(d, inst.expr, self) or_return
 	// as in Kaitai, a value instance that has no value is evaluated again
 	if d.cache == nil do d.cache = make(map[Cached]Kept_Value, d.allocator)
-	d.cache[key] = v
+	if map_insert(&d.cache, key, v) == nil do return {}, .Memory_Limit
 	return v, .None
 }
 
@@ -681,6 +721,7 @@ eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval
 		if l, is_wide := as_wide(left); is_wide {
 			if r, r_is_wide := as_wide(right); r_is_wide do return eval_binary_wide(x.op, l, r)
 		}
+		if l, is_string := left.(string); is_string && x.op == .Add do return join_strings(d, l, right.(string))
 		return eval_binary_other(d, x.op, left, right), .None
 	}
 	n: int
@@ -836,13 +877,9 @@ eval_binary_other :: proc(d: ^Decoder, op: mdata.Binary_Op, x, y: Eval_Value) ->
 		panic("eval: invalid operator on booleans")
 	}
 
+	// + of strings is join_strings, which can fail
 	l, r := x.(string), y.(string)
 	#partial switch op {
-	case .Add:
-		joined := arn.arena_make(d.arena, byte, len(l) + len(r))
-		copy(joined, l)
-		copy(joined[len(l):], r)
-		return string(joined)
 	case .Eq:
 		return l == r
 	case .Ne:
@@ -877,11 +914,21 @@ substring :: proc(s: string, from, to: int) -> (v: Eval_Value, err: dat.Read_Err
 	return s[start:end], .None
 }
 
+// l + r, a new string in the tree's arena.
+@(private = "file", require_results)
+join_strings :: proc(d: ^Decoder, l, r: string) -> (v: Eval_Value, err: dat.Read_Error) {
+	joined := tree_make(d, byte, len(l) + len(r)) or_return
+	copy(joined, l)
+	copy(joined[len(l):], r)
+	return string(joined), .None
+}
+
 // values, Int values of an array, as bytes in the tree's arena
 // (mdata.To_Bytes).
 @(private = "file", require_results)
 values_to_bytes :: proc(d: ^Decoder, values: []fld.Value) -> (v: Eval_Value, err: dat.Read_Error) {
-	bytes := arn.arena_make(d.arena, byte, len(values))
+	take_steps(d, len(values)) or_return
+	bytes := tree_make(d, byte, len(values)) or_return
 	for value, i in values {
 		item := single_value(value) or_return
 		n, is_int := item.(int)
@@ -920,7 +967,7 @@ float_to_int :: proc(f: f64) -> (v: Eval_Value, err: dat.Read_Error) {
 // The decimal digits of n, with a - when it is negative, in the tree's
 // arena: like a string that + makes, it lasts as long as the tree.
 @(private = "file")
-int_to_string :: proc(d: ^Decoder, n: i128) -> string {
+int_to_string :: proc(d: ^Decoder, n: i128) -> (v: Eval_Value, err: dat.Read_Error) {
 	buf: [20]byte // the digits of min(int), and its -, or of max(u64)
 	i := len(buf)
 	u := u64(n < 0 ? -n : n)
@@ -934,9 +981,9 @@ int_to_string :: proc(d: ^Decoder, n: i128) -> string {
 		i -= 1
 		buf[i] = '-'
 	}
-	out := arn.arena_make(d.arena, byte, len(buf) - i)
+	out := tree_make(d, byte, len(buf) - i) or_return
 	copy(out, buf[i:])
-	return string(out)
+	return string(out), .None
 }
 
 // The decimal integer s is, with an optional + or -: Invalid_Number when it

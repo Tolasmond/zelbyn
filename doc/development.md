@@ -10,6 +10,7 @@ All of these must pass before committing:
 odin check . -vet -strict-style
 odin check . -vet -strict-style -debug
 odin check tests -vet -strict-style -no-entry-point
+odin check tests/limits -vet -strict-style -no-entry-point
 odin test tests -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_LEVEL=warning
 odin test tests -o:speed -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_LEVEL=warning
 odin check tools/bench -vet -strict-style
@@ -23,13 +24,19 @@ odin check tools/yaml_corpus -vet -strict-style
 python3 tools/check.py
 ```
 
+The tests of the limits (`tests/limits`, doc/arch.md §7.11) run only when asked, with `--limits`, as they take a few minutes, most of it compiling schemas nested 100,000 deep: run them when a change touches the limits, the arena, the YAML parser, the expression parser or resolver, or the compiler's nesting.
+
+```
+python3 tools/check.py --limits
+```
+
 The checks that need what the repository does not hold run only when asked: `--formats ../kaitai_struct_formats` runs the corpus check, and with it `--samples ../kaitai_struct_samples` the sample comparison and `--yaml-corpus` the YAML corpus check (each below, with the clones and tools it needs, and the commits the clones must be at), and `--compare-tests` the tests of `tools/kaitai_compare`. Their results are reported as they are: the sample comparison fails on the two samples that "Corpus check" names, so a run with `--samples` exits 1.
 
 ```
 python3 tools/check.py --formats ../kaitai_struct_formats --samples ../kaitai_struct_samples --yaml-corpus --compare-tests
 ```
 
-`.github/workflows/check.yml` runs `tools/check.py` on every push to `main` and every pull request, with the Odin release it is pinned to, checked against its SHA-256. The optional checks are not run there.
+`.github/workflows/check.yml` runs `tools/check.py` on every push to `main` and every pull request, with the Odin release it is pinned to, checked against its SHA-256. The optional checks, `--limits` among them, are not run there.
 
 Debug builds (`odin build . -debug -out:build/zelbyn`) run under a tracking allocator and exit 1 if anything leaks or is freed twice.
 

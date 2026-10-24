@@ -4,10 +4,39 @@ import arn "../arena"
 import dat "../data"
 import fld "../field"
 import mdata "../metadata"
+import "base:runtime"
 import bts "core:bytes"
 import "core:compress/zlib"
 import "core:os"
 import "core:slice"
+
+// What a decode may take, so that every input either decodes or fails with
+// the limit it reached, Memory_Limit or Step_Limit, at the offset and path
+// where it did. Each is 0 for no limit; start from DEFAULT_LIMITS to
+// change one.
+//
+// max_memory is the bytes the tree's arena may hold, beyond the input read
+// puts in it: every value, instance, array, string made or decoded, and
+// what process: zlib decompresses, and the decoder's own records (its
+// path, frames, maps and the parse instances it keeps). An allocation
+// never takes the arena past it.
+//
+// max_steps is the steps a decode may take: one for each element of a
+// field, set instance and parse instance read, value instance evaluated,
+// and item of an array an expression makes, converts or searches.
+Limits :: struct {
+	max_memory: int,
+	max_steps:  int,
+}
+
+// The limits read and read_from_bytes take when not given others.
+// max_memory is some 300 times the largest tree of a sample of the corpus
+// (3.3 MB), and max_steps some 3 seconds of gif.ksy's elements, read at
+// about 40 million a second (doc/arch.md, "Limits").
+DEFAULT_LIMITS :: Limits {
+	max_memory = 1 << 30,
+	max_steps  = 100_000_000,
+}
 
 // Reads the file name into tree's arena, closes it, and decodes it into
 // tree, which must be zero or destroyed. Strings and blobs are views of that
@@ -19,8 +48,9 @@ import "core:slice"
 // param's type: an i64 for an integer type, a bool, []byte for bytes or a
 // string for str, which the tree copies, or for a user type, []byte, read
 // as an instance of it in a stream of their own; else Invalid_Arguments.
+// limits bound the decode (Limits).
 @(require_results)
-read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false, args: []fld.Value = nil) -> (consumed: int, err: Parse_Error) {
+read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false, args: []fld.Value = nil, limits := DEFAULT_LIMITS) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read: tree must be zero or destroyed")
 	f, open_err := os.open(name)
 	if open_err != nil {
@@ -34,7 +64,7 @@ read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, sp
 	if read_err != nil {
 		return 0, Parse_Error{kind = .File_Read_Failed, os_error = read_err}
 	}
-	return decode(data, format, tree, spans, args)
+	return decode(data, format, tree, spans, args, limits)
 }
 
 // Decodes data into tree, which must be zero or destroyed. Strings and
@@ -43,42 +73,44 @@ read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, sp
 // unchanged for as long as the tree is used. The tree references nothing
 // in the schema. spans and args are as for read.
 @(require_results)
-read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false, args: []fld.Value = nil) -> (consumed: int, err: Parse_Error) {
+read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false, args: []fld.Value = nil, limits := DEFAULT_LIMITS) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
 	init_arena(tree, len(data))
-	return decode(data, format, tree, spans, args)
+	return decode(data, format, tree, spans, args, limits)
 }
 
 // args, the arguments of the params of params, copied into the tree's
-// arena; ok is false unless there is one of each param's type, bytes for a
-// param of a user type (read_root_arg).
-@(private = "file")
-root_args :: proc(params: []^mdata.Node, args: []fld.Value, arena: ^arn.Arena) -> (copied: []fld.Value, ok: bool) {
-	if len(args) != len(params) do return
-	copied = arn.arena_make(arena, fld.Value, len(args))
+// arena; Invalid_Arguments unless there is one of each param's type, bytes
+// for a param of a user type (read_root_arg).
+@(private = "file", require_results)
+root_args :: proc(d: ^Decoder, params: []^mdata.Node, args: []fld.Value) -> (copied: []fld.Value, err: dat.Read_Error) {
+	if len(args) != len(params) do return nil, .Invalid_Arguments
+	copied = tree_make(d, fld.Value, len(args)) or_return
 	for p, k in params {
 		#partial switch p.type {
 		case .Int64:
-			_ = args[k].(i64) or_return
+			if _, ok := args[k].(i64); !ok do return nil, .Invalid_Arguments
 			copied[k] = args[k]
 		case .Bool:
-			_ = args[k].(bool) or_return
+			if _, ok := args[k].(bool); !ok do return nil, .Invalid_Arguments
 			copied[k] = args[k]
 		case .Blob, .Set:
-			v := args[k].([]byte) or_return
-			b := arn.arena_make(arena, byte, len(v))
+			v, ok := args[k].([]byte)
+			if !ok do return nil, .Invalid_Arguments
+			b := tree_make(d, byte, len(v)) or_return
 			copy(b, v)
 			copied[k] = b
 		case .String:
-			v := args[k].(string) or_return
-			b := arn.arena_make(arena, byte, len(v))
+			v, ok := args[k].(string)
+			if !ok do return nil, .Invalid_Arguments
+			b := tree_make(d, byte, len(v)) or_return
 			copy(b, v)
 			copied[k] = string(b)
 		case:
-			return
+			return nil, .Invalid_Arguments
 		}
 	}
-	return copied, true
+	return copied, .None
 }
 
 // Sizes the first block of tree's arena for an input of input_size bytes.
@@ -93,20 +125,24 @@ init_arena :: proc(tree: ^fld.Value_Tree, input_size: int) {
 // compiled twice, with and without spans, so that a decode without them
 // pays nothing for them.
 @(private = "file", require_results)
-decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans: bool, args: []fld.Value) -> (consumed: int, err: Parse_Error) {
+decode :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans: bool, args: []fld.Value, limits: Limits) -> (consumed: int, err: Parse_Error) {
+	// the decoder's own records, which max_memory bounds too
 	allocator := arn.arena_allocator(&tree.arena)
 	tree.spans = spans
+	// beyond the input, which read put in the arena
+	if limits.max_memory > 0 do arn.arena_set_limit(&tree.arena, arn.arena_used(&tree.arena) + uint(limits.max_memory))
 
 	d := Decoder{arena = &tree.arena, allocator = allocator, spans = spans}
+	d.steps_left = limits.max_steps > 0 ? limits.max_steps : max(int)
 	d.stack_start = uintptr(&d)
 	d.path = make([dynamic]Path_Segment, allocator)
 	d.frames = make([dynamic]Frame, allocator)
 	d.streams = make([dynamic]Stream, allocator)
 	dat.reader_init(&d.r, data)
 	if params := format.root.params; len(params) > 0 || len(args) > 0 {
-		args_ok: bool
-		d.args, args_ok = root_args(params, args, &tree.arena)
-		if !args_ok do return 0, Parse_Error{kind = .Invalid_Arguments}
+		args_err: dat.Read_Error
+		d.args, args_err = root_args(&d, params, args)
+		if args_err != .None do return 0, Parse_Error{kind = args_err}
 		for p, k in params {
 			if p.type != .Set do continue
 			set := format.root.args[k].variant.(mdata.Root_Arg).set
@@ -173,44 +209,55 @@ Sink :: struct {
 
 // An array with room for n values, and with SPANS, for their spans before
 // it (field.value_span).
-@(private = "file")
-make_values :: #force_inline proc(d: ^Decoder, n: int, $SPANS: bool) -> []fld.Value {
+@(private = "file", require_results)
+make_values :: #force_inline proc(d: ^Decoder, n: int, $SPANS: bool) -> (values: []fld.Value, err: dat.Read_Error) {
 	when SPANS {
 		#assert(size_of(fld.Span) % size_of(rawptr) == 0 && size_of(fld.Value) % size_of(rawptr) == 0)
 		SPAN_WORDS :: size_of(fld.Span) / size_of(rawptr)
 		VALUE_WORDS :: size_of(fld.Value) / size_of(rawptr)
-		if n <= 0 do return nil
-		words := raw_data(arn.arena_make(d.arena, rawptr, n * (SPAN_WORDS + VALUE_WORDS)))
-		return ([^]fld.Value)(&words[n * SPAN_WORDS])[:n]
+		if n <= 0 do return nil, .None
+		if n > max(int) / (SPAN_WORDS + VALUE_WORDS) do return nil, .Memory_Limit
+		words := raw_data(tree_make(d, rawptr, n * (SPAN_WORDS + VALUE_WORDS)) or_return)
+		return ([^]fld.Value)(&words[n * SPAN_WORDS])[:n], .None
 	} else {
-		return arn.arena_make(d.arena, fld.Value, n)
+		return tree_make(d, fld.Value, n)
 	}
 }
 
 // Makes room for n values in each slot of s, which must be empty: the cells
 // when n is at most 1, else an array of exactly n.
-@(private = "file")
-reserve_exactly :: proc(d: ^Decoder, s: ^Sink, n: int, $SPANS: bool) {
+@(private = "file", require_results)
+reserve_exactly :: proc(d: ^Decoder, s: ^Sink, n: int, $SPANS: bool) -> dat.Read_Error {
 	for &slot, k in s.slots {
-		slot = n <= 1 && s.cells != nil ? s.cells[k:k] : make_values(d, n, SPANS)[:0]
+		if n <= 1 && s.cells != nil {
+			slot = s.cells[k:k]
+		} else {
+			values := make_values(d, n, SPANS) or_return
+			slot = values[:0]
+		}
 	}
 	s.cap = n
+	return .None
 }
 
 // Makes room for at least n values in each slot of s, doubling, for a count
-// that is not known in advance.
-@(private = "file")
-reserve_growing :: proc(d: ^Decoder, s: ^Sink, n: int, $SPANS: bool) {
-	if n <= s.cap do return
+// that is not known in advance. The repeats ask for one more than a slot
+// holds before each element, which adds at most one value to each: an
+// element that adds none, of a switch-on that no case chooses, takes no
+// room.
+@(private = "file", require_results)
+reserve_growing :: proc(d: ^Decoder, s: ^Sink, n: int, $SPANS: bool) -> dat.Read_Error {
+	if n <= s.cap do return .None
 	s.cap = max(8, 2 * s.cap, n)
 	for &slot in s.slots {
-		grown := make_values(d, s.cap, SPANS)
+		grown := make_values(d, s.cap, SPANS) or_return
 		copy(grown, slot)
 		when SPANS {
 			if len(slot) > 0 do copy(([^]fld.Span)(fld.array_span(grown, len(slot) - 1))[:len(slot)], ([^]fld.Span)(fld.array_span(slot, len(slot) - 1))[:len(slot)])
 		}
 		slot = grown[:len(slot)]
 	}
+	return .None
 }
 
 // Appends v to slot k of s, which has room for it.
@@ -269,7 +316,7 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, $SPANS: bool) -> d
 			// the instance's stream stays its frame's, for _io in the rest
 			// of node's expressions; read_parse_instance puts the streams
 			// back
-			append(&d.streams, Stream{d.r, d.base})
+			push_record(d, &d.streams, Stream{d.r, d.base}) or_return
 			d.r, d.base = stream.r, stream.base
 		}
 		d.r.pos = pos
@@ -294,7 +341,7 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, $SPANS: bool) -> d
 	case mdata.Eos_Count:
 		for i := 0; !dat.at_eof(&d.r); i += 1 {
 			start, start_bits := d.r.pos, dat.bit_pos(&d.r)
-			reserve_growing(d, s, i + 1, SPANS)
+			reserve_growing(d, s, len(s.slots[0]) + 1, SPANS) or_return
 			read_element(d, s, node, i, SPANS) or_return
 			if dat.bit_pos(&d.r) == start_bits do return no_progress(d, node, i, start)
 		}
@@ -304,7 +351,7 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, $SPANS: bool) -> d
 		for read := 1;; read += 1 {
 			i := read - 1
 			start, start_bits := d.r.pos, dat.bit_pos(&d.r)
-			reserve_growing(d, s, i + 1, SPANS)
+			reserve_growing(d, s, len(s.slots[0]) + 1, SPANS) or_return
 			n := len(s.slots[0])
 			read_element(d, s, node, i, SPANS) or_return
 
@@ -330,13 +377,13 @@ read_values :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, $SPANS: bool) -> d
 	// elements that consume input cannot outnumber the bytes left, so a
 	// larger count, which may come from the input, grows as it is read
 	if count <= 1 || count <= len(d.r.data) - d.r.pos {
-		reserve_exactly(d, s, count, SPANS)
+		reserve_exactly(d, s, count, SPANS) or_return
 		for i in 0 ..< count {
 			read_element(d, s, node, i, SPANS) or_return
 		}
 	} else {
 		for i in 0 ..< count {
-			reserve_growing(d, s, i + 1, SPANS)
+			reserve_growing(d, s, len(s.slots[0]) + 1, SPANS) or_return
 			read_element(d, s, node, i, SPANS) or_return
 		}
 	}
@@ -360,7 +407,7 @@ read_repeat :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, repeat: mdata.Repe
 
 		n := len(s.slots[0])
 		start, start_bits := d.r.pos, dat.bit_pos(&d.r)
-		reserve_growing(d, s, n + 1, SPANS)
+		reserve_growing(d, s, n + 1, SPANS) or_return
 		read_element(d, s, node, n, SPANS) or_return
 		if dat.bit_pos(&d.r) == start_bits do return no_progress(d, node, n, start)
 	}
@@ -380,8 +427,10 @@ no_progress :: proc(d: ^Decoder, node: ^mdata.Node, index, start: int) -> dat.Re
 @(private = "file", require_results)
 read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPANS: bool) -> dat.Read_Error {
 	// on error the segment is left pushed; fail has already copied the path
-	append(&d.path, Path_Segment{node.name, index})
+	push_record(d, &d.path, Path_Segment{node.name, index}) or_return
 	start := d.r.pos
+	d.steps_left -= 1
+	if d.steps_left < 0 do return fail(d, .Step_Limit, start)
 
 	if node.type == .Set {
 		n := len(s.slots[0])
@@ -480,7 +529,7 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPA
 
 	// the parent's stream is already past the substream, whatever the
 	// instance consumes
-	append(&d.streams, Stream{d.r, d.base})
+	push_record(d, &d.streams, Stream{d.r, d.base}) or_return
 	defer {
 		parent := pop(&d.streams)
 		d.r = parent.r
@@ -523,7 +572,7 @@ read_case_value :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int) ->
 // every instance costs more than the check.
 @(private = "file", require_results)
 eval_args :: proc(d: ^Decoder, set: ^mdata.Node, index: int) -> (args: []fld.Value, err: dat.Read_Error) {
-	args = arn.arena_make(d.arena, fld.Value, len(set.args))
+	args = tree_make(d, fld.Value, len(set.args)) or_return
 	for a, k in set.args {
 		v, e := eval_value(d, a, index)
 		if e != .None do return nil, fail(d, e, d.r.pos)
@@ -569,7 +618,8 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	if len(d.frames) >= CHECK_DEPTH && (len(d.frames) >= MAX_DEPTH || stack_used(d) > MAX_STACK) do return fail(d, .Too_Deep, d.r.pos)
 
 	node := node
-	instance, cells := fld.make_instance(d.arena, node.slot_count, choice, SPANS)
+	instance, cells, alloc_err := fld.make_instance(d.arena, node.slot_count, choice, SPANS)
+	if alloc_err != nil do return .Memory_Limit
 	push(s, 0, instance)
 	for v, k in args {
 		slot := mdata.param_slot(node, k)
@@ -580,7 +630,7 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	// on error the frame is left pushed, like the path segment
 	parent := len(d.frames) - 1
 	for _ in 0 ..< node.parent_up do parent = d.frames[parent].parent
-	append(&d.frames, Frame{instance, len(d.streams), len(d.path), node, parent})
+	push_record(d, &d.frames, Frame{instance, len(d.streams), len(d.path), node, parent}) or_return
 	if node.order_switch != nil do node = choose_order(d, node) or_return
 
 	slot := len(node.parse_instances)
@@ -592,9 +642,9 @@ read_set_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, choice: int,
 	}
 
 	for p, k in node.parse_instances {
-		if raw_data(instance.slots[k]) == nil do keep_pending(d, instance, p, k)
+		if raw_data(instance.slots[k]) == nil do keep_pending(d, instance, p, k) or_return
 	}
-	if node.keeps_stream do keep_stream(d, instance)
+	if node.keeps_stream do keep_stream(d, instance) or_return
 
 	pop(&d.frames)
 	return .None
@@ -625,11 +675,15 @@ choose_order :: #force_no_inline proc(d: ^Decoder, node: ^mdata.Node) -> (set: ^
 // Keeps parse instance node of instance, in slot k, which no expression
 // has read, to be read once the root is (read_pending). Not inlined: it is
 // called only for the sets that have parse instances.
-@(private = "file")
-keep_pending :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int) {
+@(private = "file", require_results)
+keep_pending :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int) -> dat.Read_Error {
 	if d.pending == nil do d.pending = make([dynamic]Pending, d.allocator)
-	append(&d.pending, Pending{instance, node, k, clone_dynamic(d, d.frames[:]), clone_dynamic(d, d.streams[:]), clone_dynamic(d, d.path[:]), d.r, d.base})
-	if d.pending_at != nil do d.pending_at[{instance, k}] = len(d.pending) - 1
+	frames := clone_dynamic(d, d.frames[:]) or_return
+	streams := clone_dynamic(d, d.streams[:]) or_return
+	path := clone_dynamic(d, d.path[:]) or_return
+	push_record(d, &d.pending, Pending{instance, node, k, frames, streams, path, d.r, d.base}) or_return
+	if d.pending_at != nil && map_insert(&d.pending_at, Pending_Key{instance, k}, len(d.pending) - 1) == nil do return fail(d, .Memory_Limit, d.r.pos)
+	return .None
 }
 
 // Reads parse instance node of instance, in slot k, for an expression,
@@ -640,8 +694,12 @@ keep_pending :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance, node
 @(private = "file", require_results)
 read_kept :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.Node, k: int, $SPANS: bool) -> dat.Read_Error {
 	if d.pending_at == nil {
-		d.pending_at = make(map[Pending_Key]int, max(len(d.pending), 16), d.allocator)
-		for p, i in d.pending do d.pending_at[{p.instance, p.k}] = i
+		alloc_err: runtime.Allocator_Error
+		d.pending_at, alloc_err = make(map[Pending_Key]int, max(len(d.pending), 16), d.allocator)
+		if alloc_err != nil do return fail(d, .Memory_Limit, d.r.pos)
+		for p, i in d.pending {
+			if map_insert(&d.pending_at, Pending_Key{p.instance, p.k}, i) == nil do return fail(d, .Memory_Limit, d.r.pos)
+		}
 	}
 	i, kept := d.pending_at[{instance, k}]
 	// an instance that has been read keeps the parse instances it did not
@@ -667,10 +725,11 @@ stack_used :: #force_inline proc(d: ^Decoder) -> int {
 // expression or a value instance that refers to it once it is no longer
 // decoded (stream_of). Not inlined: inlining it into
 // read_set_instance costs 0.5% more decode instructions.
-@(private = "file")
-keep_stream :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance) {
+@(private = "file", require_results)
+keep_stream :: #force_no_inline proc(d: ^Decoder, instance: ^fld.Instance) -> dat.Read_Error {
 	if d.kept == nil do d.kept = make(map[^fld.Instance]Stream, d.allocator)
-	d.kept[instance] = Stream{d.r, d.base}
+	if map_insert(&d.kept, instance, Stream{d.r, d.base}) == nil do return fail(d, .Memory_Limit, d.r.pos)
+	return .None
 }
 
 // Reads parse instance node of instance into slot k: at its pos in the
@@ -713,9 +772,10 @@ read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.N
 	frames, streams, path := d.frames, d.streams, d.path
 	aside := j < len(frames) - 1 || frame.stream < len(streams) || frame.path < len(path) || node.io != nil
 	if aside {
-		d.frames = clone_dynamic(d, frames[:j + 1])
-		d.streams = clone_dynamic(d, streams[:frame.stream])
-		d.path = clone_dynamic(d, path[:frame.path])
+		aside_frames := clone_dynamic(d, frames[:j + 1]) or_return
+		aside_streams := clone_dynamic(d, streams[:frame.stream]) or_return
+		aside_path := clone_dynamic(d, path[:frame.path]) or_return
+		d.frames, d.streams, d.path = aside_frames, aside_streams, aside_path
 	}
 
 	s := Sink{slots = instance.slots[k:][:1], cells = cells[k:][:1]}
@@ -728,12 +788,30 @@ read_parse_instance :: proc(d: ^Decoder, instance: ^fld.Instance, node: ^mdata.N
 	return err
 }
 
-// A copy of values, in the tree's arena, to append to.
+// A copy of values, in the tree's arena, to append to; Memory_Limit when
+// the arena has no room for it.
+@(private = "file", require_results)
+clone_dynamic :: proc(d: ^Decoder, values: []$T) -> (copied: [dynamic]T, err: dat.Read_Error) {
+	alloc_err: runtime.Allocator_Error
+	copied, alloc_err = make([dynamic]T, len(values), max(len(values), 8), d.allocator)
+	if alloc_err != nil do return nil, fail(d, .Memory_Limit, d.r.pos)
+	copy(copied[:], values)
+	return copied, .None
+}
+
+// Appends v to records, one of the decoder's own (Decoder.allocator);
+// Memory_Limit when the arena has no room for it.
+@(private, require_results)
+push_record :: #force_inline proc(d: ^Decoder, records: ^[dynamic]$T, v: T) -> dat.Read_Error {
+	if _, err := append(records, v); err != nil do return no_room(d)
+	return .None
+}
+
+// Fails with Memory_Limit, for push_record. Not inlined, so that each
+// append, one for every element read, stays small.
 @(private = "file")
-clone_dynamic :: proc(d: ^Decoder, values: []$T) -> [dynamic]T {
-	a := make([dynamic]T, len(values), max(len(values), 8), d.allocator)
-	copy(a[:], values)
-	return a
+no_room :: #force_no_inline proc(d: ^Decoder) -> dat.Read_Error {
+	return fail(d, .Memory_Limit, d.r.pos)
 }
 
 // Reads element index of node, a field that is not a set.
@@ -766,7 +844,11 @@ read_scalar :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) ->
 		value, err = to_value(dat.read(&d.r, f64, node.order))
 	case .String:
 		bytes := element_bytes(d, node, index) or_return
-		value = fld.Value(node.encoding == .None ? string(bytes) : decode_text(d, bytes, node.encoding))
+		if node.encoding == .None {
+			value = string(bytes)
+		} else {
+			value = fld.Value(decode_text(d, bytes, node.encoding) or_return)
+		}
 	case .Blob:
 		value = fld.Value(element_bytes(d, node, index) or_return)
 	case .Set:
@@ -809,17 +891,49 @@ element_bytes :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) 
 // Not inlined: only fields with process call it.
 @(private = "file", require_results)
 process_bytes :: #force_no_inline proc(d: ^Decoder, raw: []byte, start: int) -> (processed: []byte, err: dat.Read_Error) {
+	// what inflating allocates is bounded by Limits.max_memory, which ends
+	// a stream that decompresses to more than it allows
+	recorder := Failure_Recorder{allocator = arn.arena_allocator(d.arena)}
+	allocator := runtime.Allocator{failure_recorder_proc, &recorder}
 	buf: bts.Buffer
-	bts.buffer_init_allocator(&buf, 0, max(4 * len(raw), 64), d.allocator)
-	inflated: bool
+	bts.buffer_init_allocator(&buf, 0, max(4 * len(raw), 64), allocator)
+	inflate_err: zlib.Error
 	{
-		context.allocator = d.allocator
-		context.temp_allocator = d.allocator
-		inflated = zlib.inflate(raw, &buf) == nil
+		context.allocator = allocator
+		context.temp_allocator = allocator
+		inflate_err = zlib.inflate(raw, &buf)
 	}
-	// the error's path is in the context's allocator
-	if !inflated do return nil, fail(d, .Decompression_Failed, start)
+	// the error's path is in the context's allocator; inflate reports some
+	// allocations that fail as another error
+	if _, out_of_memory := inflate_err.(runtime.Allocator_Error); out_of_memory || recorder.failed do return nil, fail(d, .Memory_Limit, start)
+	if inflate_err != nil do return nil, fail(d, .Decompression_Failed, start)
 	return bts.buffer_to_bytes(&buf), .None
+}
+
+// An allocator, as process_bytes gives inflate the tree's arena, that
+// records whether an allocation through it failed for want of memory.
+@(private = "file")
+Failure_Recorder :: struct {
+	allocator: runtime.Allocator,
+	failed:    bool,
+}
+
+@(private = "file")
+failure_recorder_proc :: proc(
+	allocator_data: rawptr,
+	mode: runtime.Allocator_Mode,
+	size, alignment: int,
+	old_memory: rawptr,
+	old_size: int,
+	loc := #caller_location,
+) -> (
+	data: []byte,
+	err: runtime.Allocator_Error,
+) {
+	r := (^Failure_Recorder)(allocator_data)
+	data, err = r.allocator.procedure(r.allocator.data, mode, size, alignment, old_memory, old_size, loc)
+	if err == .Out_Of_Memory do r.failed = true
+	return
 }
 
 // bytes without node's pad_right at their end, and cut at its terminator.

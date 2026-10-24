@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """Runs the checks a change must pass, as doc/development.md lists them.
 
-    python3 tools/check.py [--formats DIR] [--samples DIR] [--yaml-corpus] [--compare-tests]
+    python3 tools/check.py [--limits] [--formats DIR] [--samples DIR] [--yaml-corpus] [--compare-tests]
 
 Run from the repository root. Needs Odin, the version that ODIN_VERSION
 names (another is warned of, not refused). Always run, in order:
 
   - odin check . -vet -strict-style, and with -debug
-  - odin check tests -vet -strict-style -no-entry-point
+  - odin check tests -vet -strict-style -no-entry-point, and of
+    tests/limits
   - the tests, built without and with -o:speed, with
     ODIN_TEST_FAIL_ON_BAD_MEMORY
   - odin check -vet -strict-style of tools/bench, tools/ksy_corpus and
     tools/yaml_corpus
+
+and, only when asked:
+
+  --limits         the tests of tests/limits, built without and with
+                   -o:speed: a few minutes, mostly compiling schemas
+                   nested 100,000 deep
 
 and, only when asked, as each needs what the repository does not hold:
 
@@ -61,6 +68,7 @@ def run(name, cmd, results):
 
 def main():
     p = argparse.ArgumentParser(usage=__doc__)
+    p.add_argument('--limits', action='store_true')
     p.add_argument('--formats')
     p.add_argument('--samples')
     p.add_argument('--yaml-corpus', action='store_true')
@@ -85,10 +93,14 @@ def main():
         run('odin check .', ['odin', 'check', '.', '-vet', '-strict-style'], results)
         run('odin check . -debug', ['odin', 'check', '.', '-vet', '-strict-style', '-debug'], results)
         run('odin check tests', ['odin', 'check', 'tests', '-vet', '-strict-style', '-no-entry-point'], results)
+        run('odin check tests/limits', ['odin', 'check', 'tests/limits', '-vet', '-strict-style', '-no-entry-point'], results)
         run('tests', ['odin', 'test', 'tests', '-out:' + tests] + TEST_DEFINES, results)
         run('tests -o:speed', ['odin', 'test', 'tests', '-o:speed', '-out:' + tests] + TEST_DEFINES, results)
         for tool in ('tools/bench', 'tools/ksy_corpus', 'tools/yaml_corpus'):
             run('odin check ' + tool, ['odin', 'check', tool, '-vet', '-strict-style'], results)
+        if args.limits:
+            run('limits tests', ['odin', 'test', 'tests/limits', '-out:' + tests] + TEST_DEFINES, results)
+            run('limits tests -o:speed', ['odin', 'test', 'tests/limits', '-o:speed', '-out:' + tests] + TEST_DEFINES, results)
 
     if args.formats:
         cmd = [sys.executable, 'tools/ksy_corpus/check.py']

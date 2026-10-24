@@ -4,6 +4,7 @@ import "../file"
 import mdata "../metadata"
 import yml "../yaml"
 import "core:encoding/endian"
+import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -225,6 +226,8 @@ import_path :: proc(c: ^Compiler, item: ^yml.Node, name: string) -> (path: strin
 // load_schema does.
 @(private = "file")
 load_import :: proc(c: ^Compiler, item: ^yml.Node, path: string) -> (top: ^Type_Def, ok: bool) {
+	enter(c, item, fmt.tprintf("import %s", item.text)) or_return
+	defer leave(c)
 	data, err := file.read_entire_file(path, c.scratch)
 	if err != nil do return nil, fail(c, .Invalid, item, "imports: cannot read %s: %v", path, err)
 
