@@ -166,17 +166,23 @@ compile_valid :: proc(c: ^Compiler, n: ^yml.Node, id: string, node: ^mdata.Node,
 	case eq != nil:
 		append(&checks, mdata.Valid_Check{new_expr(c, .Bool, mdata.Binary{.Eq, value, bounds[0].e}), .Not_Equal})
 	case any_of != nil:
-		cond: ^mdata.Expr
-		for b in bounds {
-			x := new_expr(c, .Bool, mdata.Binary{.Eq, value, b.e})
-			cond = cond == nil ? x : new_expr(c, .Bool, mdata.Binary{.Logical_Or, cond, x})
-		}
-		append(&checks, mdata.Valid_Check{cond, .Not_Any_Of})
+		append(&checks, mdata.Valid_Check{any_of_cond(c, value, bounds), .Not_Any_Of})
 	case:
 		if lo != nil do append(&checks, mdata.Valid_Check{new_expr(c, .Bool, mdata.Binary{.Ge, value, bounds[0].e}), .Less_Than_Min})
 		if hi != nil do append(&checks, mdata.Valid_Check{new_expr(c, .Bool, mdata.Binary{.Le, value, bounds[1].e}), .Greater_Than_Max})
 	}
 	return mdata.Valid_Expr{checks[:]}, true
+}
+
+// value == bounds[0].e or ..., a Bool expression: an or of the equalities,
+// halved into a balanced tree, so that a long any-of is no deeper than
+// its logarithm (expression.MAX_DEPTH); or tests them in order still, and
+// stops at the first that holds.
+@(private = "file")
+any_of_cond :: proc(c: ^Compiler, value: ^mdata.Expr, bounds: []Bound) -> ^mdata.Expr {
+	if len(bounds) == 1 do return new_expr(c, .Bool, mdata.Binary{.Eq, value, bounds[0].e})
+	half := len(bounds) / 2
+	return new_expr(c, .Bool, mdata.Binary{.Logical_Or, any_of_cond(c, value, bounds[:half]), any_of_cond(c, value, bounds[half:])})
 }
 
 // A constant of valid: value when it is a literal, and e when it can be

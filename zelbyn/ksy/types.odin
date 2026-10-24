@@ -606,6 +606,8 @@ compile_parse_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Node
 	if type_only && src.typed do return true
 	if src.compiling && set.recursive != nil do return fail(c, .Unsupported, src.entry.key, "instance %s refers to itself in a field of its type; a type that contains itself cannot be compiled that way", inst.ref_name)
 	if src.compiling do return fail(c, .Invalid, src.entry.key, "instance %s refers to itself", inst.ref_name)
+	enter(c, src.entry.key, inst.ref_name) or_return
+	defer leave(c)
 	src.compiling = true
 	defer src.compiling = false
 	order := c.order
@@ -653,6 +655,8 @@ compile_instance :: proc(c: ^Compiler, set: ^mdata.Node, inst: ^mdata.Value_Inst
 	value := get(src.spec, "value")
 	if src.compiling && set.recursive != nil do return fail(c, .Unsupported, value, "value instance %s refers to itself in a field of its type; a type that contains itself cannot be compiled that way", inst.name)
 	if src.compiling do return fail(c, .Invalid, value, "value instance %s refers to itself", inst.name)
+	enter(c, value, inst.name) or_return
+	defer leave(c)
 	src.compiling = true
 	defer src.compiling = false
 
@@ -770,6 +774,8 @@ compile_user :: proc(c: ^Compiler, user: ^Type_Def, node: ^mdata.Node, n: ^yml.N
 // members, which have the same slots as the other set's.
 @(private)
 compile_type :: proc(c: ^Compiler, user: ^Type_Def, node: ^mdata.Node, field_scope: expr.Scope, arg_sets: []^mdata.Node = nil) -> bool {
+	enter(c, user.spec, fmt.tprintf("type %s", user.name)) or_return
+	defer leave(c)
 	if !declares_endian_switch(user) do return compile_fields(c, user, node, chain_of(c, field_scope.types, user, node), arg_sets)
 
 	sw_node := user.meta.endian_switch

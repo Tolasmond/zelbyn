@@ -1,6 +1,6 @@
 package reader
 
-import arn "../arena"
+import dat "../data"
 import mdata "../metadata"
 import "core:unicode/utf8"
 
@@ -10,11 +10,12 @@ import "core:unicode/utf8"
 // surrogate is one, and so are the bytes left at the end that make no
 // code unit. A byte-order mark is kept, as in Kaitai's C++ and Python
 // runtimes. Not inlined: it is called only for strings in these encodings.
-@(private)
-decode_text :: #force_no_inline proc(d: ^Decoder, bytes: []byte, encoding: mdata.Encoding) -> string {
+// Fails with Memory_Limit when the tree's arena has no room for the text.
+@(private, require_results)
+decode_text :: #force_no_inline proc(d: ^Decoder, bytes: []byte, encoding: mdata.Encoding) -> (string, dat.Read_Error) {
 	switch encoding {
 	case .None:
-		return string(bytes)
+		return string(bytes), .None
 	case .UTF_16LE, .UTF_16BE:
 		return decode_utf16(d, bytes, encoding == .UTF_16BE)
 	case .UTF_32LE, .UTF_32BE:
@@ -40,12 +41,12 @@ put_rune :: #force_inline proc(out: []byte, n: int, r: rune) -> int {
 }
 
 @(private = "file")
-decode_utf16 :: proc(d: ^Decoder, bytes: []byte, big: bool) -> string {
+decode_utf16 :: proc(d: ^Decoder, bytes: []byte, big: bool) -> (text: string, err: dat.Read_Error) {
 	unit :: proc(bytes: []byte, i: int, big: bool) -> rune {
 		return big ? rune(bytes[i]) << 8 | rune(bytes[i + 1]) : rune(bytes[i + 1]) << 8 | rune(bytes[i])
 	}
 	// a unit takes at most 3 bytes, and a pair of them 4
-	out := arn.arena_make(d.arena, byte, len(bytes) / 2 * 3 + 3)
+	out := tree_make(d, byte, len(bytes) / 2 * 3 + 3) or_return
 	n, i := 0, 0
 	for i + 1 < len(bytes) {
 		u := unit(bytes, i, big)
@@ -71,12 +72,12 @@ decode_utf16 :: proc(d: ^Decoder, bytes: []byte, big: bool) -> string {
 		}
 	}
 	if i < len(bytes) do n = put_rune(out, n, utf8.RUNE_ERROR)
-	return string(out[:n])
+	return string(out[:n]), .None
 }
 
 @(private = "file")
-decode_utf32 :: proc(d: ^Decoder, bytes: []byte, big: bool) -> string {
-	out := arn.arena_make(d.arena, byte, len(bytes) + 3)
+decode_utf32 :: proc(d: ^Decoder, bytes: []byte, big: bool) -> (text: string, err: dat.Read_Error) {
+	out := tree_make(d, byte, len(bytes) + 3) or_return
 	n, i := 0, 0
 	for ; i + 3 < len(bytes); i += 4 {
 		b := bytes[i:][:4]
@@ -84,21 +85,21 @@ decode_utf32 :: proc(d: ^Decoder, bytes: []byte, big: bool) -> string {
 		n = put_rune(out, n, u > 0x10FFFF || (u >= 0xD800 && u <= 0xDFFF) ? utf8.RUNE_ERROR : rune(u))
 	}
 	if i < len(bytes) do n = put_rune(out, n, utf8.RUNE_ERROR)
-	return string(out[:n])
+	return string(out[:n]), .None
 }
 
 // A single-byte encoding: bytes below 0x80 are ASCII, and the others are
 // those of high, or with none, ISO-8859-1's, their own values.
 @(private = "file")
-decode_single_byte :: proc(d: ^Decoder, bytes: []byte, high: ^[128]u16) -> string {
-	out := arn.arena_make(d.arena, byte, 3 * len(bytes))
+decode_single_byte :: proc(d: ^Decoder, bytes: []byte, high: ^[128]u16) -> (text: string, err: dat.Read_Error) {
+	out := tree_make(d, byte, 3 * len(bytes)) or_return
 	n := 0
 	for b in bytes {
 		r := rune(b)
 		if b >= 0x80 && high != nil do r = rune(high[b - 0x80])
 		n = put_rune(out, n, r)
 	}
-	return string(out[:n])
+	return string(out[:n]), .None
 }
 
 // The characters of bytes 0x80 to 0xFF. windows-1251 and windows-1252 are

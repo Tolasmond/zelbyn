@@ -131,6 +131,7 @@ compile :: proc(src: string, file_format: ^mdata.File_Format, path := "", import
 	// would cost a mapping, and its first pages, in every compile
 	plan := arn.arena_allocator(&file_format.arena)
 	c := Compiler{allocator = plan, scratch = plan, import_paths = import_paths}
+	c.stack_start = uintptr(&c)
 	c.instances = make(map[^mdata.Value_Instance]^Instance_Source, c.scratch)
 	c.parse_instances = make(map[^mdata.Node]^Parse_Source, c.scratch)
 	c.type_defs = make([dynamic]Set_Type, c.scratch)
@@ -163,6 +164,41 @@ Compiler :: struct {
 	current:         ^mdata.Node,                                // the set whose fields or parse instance are being compiled, which a set compiled now is inside (Set_Type.outer)
 	param_args:      [dynamic]Param_Arg,                         // each param of a user type, with the set of its argument; in scratch
 	err:             Error,
+	nesting:         int,     // the types, instances, sizes and imports being compiled inside each other, at most MAX_NESTING
+	stack_start:     uintptr, // the address of a local of compile, from which enter measures the stack used
+	too_deep:        bool,    // a size was not found, as types nested more than MAX_NESTING deep (type_bits)
+}
+
+// The deepest that the compile of a type, an instance found by a
+// reference, a size found through a type (type_bits) or an import nests
+// inside another: some eight times the deepest of the corpus (8), and few enough
+// that compiling, which recurses through each, cannot use the stack up. A
+// deeper chain of them, a type whose field is of a type whose field is
+// ..., or a value instance that uses one that uses ..., is Unsupported.
+MAX_NESTING :: 64
+
+// The stack that compiling may use before a level of nesting is
+// Unsupported, measured from compile: each level resolves expressions
+// expression.MAX_DEPTH deep at most, which a few levels of MAX_NESTING
+// would take beyond a thread's stack (1 MB for Windows' main thread) in a
+// debug build. One level more stays below it.
+MAX_STACK :: 512 * 1024
+
+// Enters a level of nesting (MAX_NESTING) for what, at n; false, after an
+// Unsupported error, when it is one too many, or compiling has used
+// MAX_STACK. leave leaves it.
+@(private)
+enter :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> bool {
+	c.nesting += 1
+	if c.nesting > MAX_NESTING do return fail(c, .Unsupported, n, "%s: types, instances and imports compiled inside each other more than %v deep are not supported", what, MAX_NESTING)
+	here: u8
+	if int(c.stack_start - uintptr(&here)) > MAX_STACK do return fail(c, .Unsupported, n, "%s: types, instances and expressions nested this deep are not supported, as compiling them would use more than %v KB of stack", what, MAX_STACK / 1024)
+	return true
+}
+
+@(private)
+leave :: proc(c: ^Compiler) {
+	c.nesting -= 1
 }
 
 // A value instance or a parse instance of set whose compile is put off

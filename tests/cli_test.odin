@@ -145,6 +145,13 @@ cli_command_line :: proc(t: ^testing.T) {
 		{"bytes not in hex", {"SCHEMA", "INPUT", "--param", "magic=caf"}, 2, "", `magic is bytes, in hex (0a1b), not "caf"`, false},
 		{"a user type not in hex", {"SCHEMA", "INPUT", "--param", "hdr=zz"}, 2, "", `hdr is bytes, in hex (0a1b), not "zz"`, false},
 		{"an argument the input fails", {"SCHEMA", "INPUT", "--param", "count=2", "--param", "wide=true", "--param", "label=ho", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: Expr_False at 0x00000005 in p[0].name[0]", false},
+		// the argument of hdr, a user type, is read first: its instance and
+		// its field, two steps; then the root, values, extra, tag, name and b
+		{"--max-steps reached", {"SCHEMA", "INPUT", "--max-steps=3", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: Step_Limit at 0x00000000 in p[0].values[0]", false},
+		{"--max-steps and --max-memory within", {"SCHEMA", "INPUT", "--max-steps", "9", "--max-memory=1M", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 0, "p[0].b[0] = 7\n", "", false},
+		{"no limits", {"SCHEMA", "INPUT", "--max-steps=0", "--max-memory=0", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 0, "p[0].b[0] = 7\n", "", false},
+		{"a bad --max-memory", {"SCHEMA", "INPUT", "--max-memory=1x"}, 2, "", `error: --max-memory must be bytes, or with K, M or G, not "1x"`, false},
+		{"a bad --max-steps", {"SCHEMA", "INPUT", "--max-steps=-1"}, 2, "", `error: --max-steps must be a count, not "-1"`, false},
 		{"a schema error", {"BAD", "INPUT"}, 1, "", ":5:11: Invalid: a: unknown type nope", false},
 		{"no schema", {"NONE", "INPUT"}, 1, "", "error: cannot read /nonexistent/zelbyn_cli_test", false},
 		{"no input", {"SCHEMA", "NONE", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: cannot read /nonexistent/zelbyn_cli_test", false},

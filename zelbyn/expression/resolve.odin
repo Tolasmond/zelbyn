@@ -5,6 +5,14 @@ import "base:intrinsics"
 import "core:fmt"
 import "core:mem"
 
+// The most value instances in a row that an expression can use, each
+// through the next (Value_Instance.chain): some five times the most of
+// the corpus (6), and few enough that resolving, evaluating and the walks that
+// follow a value instance to its expression, which recurse once for each,
+// cannot use the stack up, whatever order they are compiled in. A longer
+// chain is Unsupported.
+MAX_CHAIN :: 32
+
 // Where an expression is evaluated: in an instance of the last of types,
 // whose enclosing instances are of the types before it, outermost (_root)
 // first. Names refer to fields of the last type.
@@ -584,6 +592,10 @@ resolve_value_ref :: proc(r: ^Resolver, e: ^mdata.Expr, base: ^mdata.Expr, set: 
 		if !r.scope.compile_instance(r.scope.data, set, inst) do return fail(r, .Invalid, e.offset, "value instance %s is not valid", inst.name)
 		assert(inst.expr != nil, "resolve: compile_instance left the instance uncompiled")
 	}
+	// resolving, evaluating and the walks that follow a value instance to
+	// its expression recurse once for each in a chain of them
+	if inst.chain + 1 > MAX_CHAIN do return fail(r, .Unsupported, e.offset, "value instance %s uses a chain of %v value instances; chains of more than %v are not supported", inst.name, inst.chain + 1, MAX_CHAIN)
+	if r.scope.instance != nil && !r.type_only do r.scope.instance.chain = max(r.scope.instance.chain, inst.chain + 1)
 	// the instances enclosing an argument's are not those that hold the
 	// param, which is all the decoder can reach them through
 	// nor through ?: on sets, as it is compiled for the set of the then
