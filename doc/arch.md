@@ -192,6 +192,19 @@ The decoder evaluates a direct form without walking the tree (§7.9). The tree s
 
 `ksy.read_file_format(path, &ff, import_paths)` reads a `.ksy` file with `file.read_entire_file` and calls `ksy.compile(src, &ff, path, import_paths)`.
 
+The package is in six files, each holding what the paragraphs below of the same subject describe:
+
+| File | Contents |
+|---|---|
+| `compile.odin` | `compile` and `read_file_format`, `Error`, the compiler's state (`Compiler`, `Type_Def` and the records of instances and sets), and what every part uses: errors (`fail`), YAML access, key checks (`check_keys`), identifiers, and compiling an expression |
+| `schema.odin` | Schemas and imports, `meta`, encodings, `ks-version`, and `compile_schema`, which compiles the top-level type and what was put off |
+| `types.odin` | Types and the sets compiled from them: `build_type`, enums and params, finding a type or an enum, `compile_fields`, sets reused for a type that contains itself (`note_escapes`), value and parse instances, the callbacks of `Scope`, arguments and `parent` |
+| `attributes.odin` | Attributes: `compile_field`, primitive, bit and string types, `switch-on`, counts, lengths, terminators and `-bits` |
+| `sizes.odin` | `_sizeof`, `sizeof<t>` and `bitsizeof<t>` from the YAML spec |
+| `constants.odin` | `valid` and its bounds, and the constants of a schema: integers in YAML scalars, bytes and lists of them, booleans, and `switch-on` cases |
+
+A procedure or type used by one file only is private to it (`@(private = "file")`); one that other files of the package use is private to the package (`@(private)`).
+
 **Allocation.** Everything a compile allocates goes in `ff.arena`: the YAML trees of the schema and its imports, the plan, and the compiler's working data (types, maps, lists). The plan uses the YAML trees' strings as they are. A compile makes no allocation through `context.allocator`, apart from an error's message and path (tested in `memory_test.odin`); `read_file_format` reads the schema's text with `context.allocator` and frees it after the compile.
 
 *Reason for one arena:* a second arena costs a mapping and its first pages in every compile, and freeing the working data early saves nothing a process that exits soon after needs. Keeping the YAML trees lets the plan use their strings without copying them. The compile of `gif.ksy` leaves about 75 KB in the plan's arena that the plan does not need.
