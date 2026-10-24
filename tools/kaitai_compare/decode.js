@@ -190,9 +190,11 @@ function put(out, name, values) {
   if (!(name in out) || values.length > 0) out[name] = values;
 }
 
-// What each primitive read of the runtime read, by stream and position:
-// "f4", "f8" or "int" (an integer or bits), as the generated code calls
-// one reader for each type. A switch-on whose cases are of several types
+// What each primitive read of the runtime read, by stream and span (its
+// start and end positions, "start:end"): "f4", "f8" or "int" (an integer
+// or bits), as the generated code calls one reader for each type. An f8
+// and an f4 can start at one position (a parse instance that reads the
+// first half of an f8), but end apart. A switch-on whose cases are of several types
 // (minecraft_nbt.ksy's tag::float and tag::double, or an integer and a
 // float) has a value of the type of the case chosen, which the schema alone
 // cannot tell, nor the width of the value's debug record (a u4 and an f4).
@@ -204,27 +206,30 @@ for (const name of Object.getOwnPropertyNames(KaitaiStream.prototype)) {
   const kind = m[1] === "F" ? "f" + m[2] : "int";
   const read = KaitaiStream.prototype[name];
   KaitaiStream.prototype[name] = function (...args) {
-    const at = this.pos;
+    const start = this.pos;
+    const result = read.apply(this, args);
+    const span = start + ":" + this.pos;
     if (!READS.has(this)) READS.set(this, new Map());
     const reads = READS.get(this);
-    if (!reads.has(at)) reads.set(at, new Set());
-    reads.get(at).add(kind);
-    return read.apply(this, args);
+    if (!reads.has(span)) reads.set(span, new Set());
+    reads.get(span).add(kind);
+    return result;
   };
 }
 
 // What was read for x, a number whose debug record is d, read from stream
 // io, or for a parse instance with io, a stream whose offset is d's
-// ioOffset: "f4", "f8" or "int"; undefined when nothing was read there.
-// Reads of several kinds at one position (a parse instance that reads a
-// field's bytes again as another type) give the one float kind when x is
-// not an integer, which only a float reader gives, else "int", so that x
-// is compared exactly rather than rounded as an f4 it may not be.
+// ioOffset: "f4", "f8" or "int", by the read of d's span; undefined when
+// nothing was read there. Reads of several kinds of one span (a parse
+// instance that reads a field's bytes again as another type of its size,
+// a u4 of an f4) give the one float kind when x is not an integer, which
+// only a float reader gives, else "int", so that x is compared exactly
+// rather than rounded as an f4 it may not be.
 function readKind(io, d, x) {
   const kinds = new Set();
   for (const [stream, reads] of READS) {
     if (io ? stream !== io : stream.byteOffset !== d.ioOffset) continue;
-    for (const k of reads.get(d.start) || []) kinds.add(k);
+    for (const k of reads.get(d.start + ":" + d.end) || []) kinds.add(k);
   }
   if (kinds.size <= 1) return [...kinds][0];
   const floats = [...kinds].filter((k) => k !== "int");
