@@ -440,7 +440,7 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 		read := len(s.slots[0]) > n
 		when SPANS do if read do set_span(d, s, 0, start)
 		if node.valid != nil && read {
-			if e := check_valid(d, s.slots[0][n], node.valid, index); e != .None do return fail(d, e, start)
+			if e := check_valid(d, s.slots[0][n], node.valid, index); e != .None do return fail_check(d, e, start, s.slots[0][n], node.valid, index)
 		}
 		pop(&d.path)
 		return .None
@@ -450,7 +450,7 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 	push(s, 0, value)
 	when SPANS do set_span(d, s, 0, start)
 	if node.valid != nil {
-		if e := check_valid(d, value, node.valid, index); e != .None do return fail(d, e, start)
+		if e := check_valid(d, value, node.valid, index); e != .None do return fail_check(d, e, start, value, node.valid, index)
 	}
 	pop(&d.path)
 
@@ -462,7 +462,7 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 		if bit.valid != nil {
 			if e := check_constant(bit_value, bit.valid); e != .None {
 				append(&d.path, Path_Segment{bit.name, index})
-				return fail(d, e, start)
+				return fail_check(d, e, start, bit_value, bit.valid, index)
 			}
 		}
 	}

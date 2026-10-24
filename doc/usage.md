@@ -113,10 +113,10 @@ A `.ksy` schema that cannot be compiled is reported with its file (the schema, o
 error: formats/x.ksy:6:14: Unsupported: a: process xor(1) is not supported; only zlib is
 ```
 
-Decoding checks every value against its field's `contents` and `valid`. Set instances nested more deeply than the decoder allows, which only a type that contains itself can do, are `Too_Deep`, a cast to a user type of a `switch-on` field read as another case is `Wrong_Type`, an `endian` `switch-on` that matches no case is `Undecided_Endianness`, and `process: zlib` bytes that are not a zlib stream are `Decompression_Failed`. A decode that reaches a limit is `Memory_Limit` or `Step_Limit` ([Limits](#limits)). A value that does not pass stops the decode with `Not_Equal`, `Less_Than_Min`, `Greater_Than_Max`, `Not_Any_Of`, `Not_In_Enum` or `Expr_False` (`valid: expr`), at the offset and path of that value. A file that is not a GIF fails on its signature:
+Decoding checks every value against its field's `contents` and `valid`. Set instances nested more deeply than the decoder allows, which only a type that contains itself can do, are `Too_Deep`, a cast to a user type of a `switch-on` field read as another case is `Wrong_Type`, an `endian` `switch-on` that matches no case is `Undecided_Endianness`, and `process: zlib` bytes that are not a zlib stream are `Decompression_Failed`. A decode that reaches a limit is `Memory_Limit` or `Step_Limit` ([Limits](#limits)). A value that does not pass stops the decode with `Not_Equal`, `Less_Than_Min`, `Greater_Than_Max`, `Not_Any_Of`, `Not_In_Enum` or `Expr_False` (`valid: expr`), at the offset and path of that value, followed by the value read and what the check expected: the constant, the minimum (`at least`) or maximum (`at most`), or the values allowed (`one of`), the first 16 of them. A value is shown as in the text dump, and a string by its first 64 characters, followed by ` ...` when longer. `Expr_False` shows only the value. A file that is not a GIF, here one that starts with `# z`, fails on its signature:
 
 ```
-error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]
+error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]: read <3 bytes> 23 20 7a, expected <3 bytes> 47 49 46
 ```
 
 ## Schemas

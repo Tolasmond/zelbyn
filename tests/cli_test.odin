@@ -190,3 +190,41 @@ cli_command_line :: proc(t: ^testing.T) {
 		}
 	}
 }
+
+// A failed check's message gives what it read and what it expected, for
+// each kind, a bound given by an expression evaluated, and a long value
+// or list shortened; and an error that is not a check's gives neither.
+@(test)
+cli_check_failures :: proc(t: ^testing.T) {
+	HEAD :: "meta:\n  id: t\n  endian: le\n  encoding: ASCII\nseq:\n  - id: n\n    type: u1\n  - id: a\n"
+	Case :: struct {
+		name, attr, input, stderr: string,
+	}
+	cases := [?]Case {
+		{"contents", "    contents: [0x47, 0x49]\n", "\x00GH", `Not_Equal at 0x00000001 in t[0].a[0]: read <2 bytes> 47 48, expected <2 bytes> 47 49`},
+		{"eq, a string", "    type: str\n    size: 2\n    valid: '\"GI\"'\n", "\x00GH", `Not_Equal at 0x00000001 in t[0].a[0]: read "GH", expected "GI"`},
+		{"eq, an expression", "    type: u1\n    valid:\n      eq: n + 1\n", "\x05\x05", `Not_Equal at 0x00000001 in t[0].a[0]: read 5, expected 6`},
+		{"min", "    type: s1\n    valid:\n      min: -2\n", "\x00\xfd", `Less_Than_Min at 0x00000001 in t[0].a[0]: read -3, expected at least -2`},
+		{"min, an expression", "    type: u1\n    valid:\n      min: n * 2\n", "\x03\x05", `Less_Than_Min at 0x00000001 in t[0].a[0]: read 5, expected at least 6`},
+		{"max", "    type: u2\n    valid:\n      max: 300\n", "\x00\x2d\x01", `Greater_Than_Max at 0x00000001 in t[0].a[0]: read 301, expected at most 300`},
+		{"any-of", "    type: u1\n    valid:\n      any-of: [1, 2]\n", "\x00\x03", `Not_Any_Of at 0x00000001 in t[0].a[0]: read 3, expected one of 1, 2`},
+		{"any-of, expressions", "    type: u1\n    valid:\n      any-of: [n, n + 1, 9]\n", "\x04\x03", `Not_Any_Of at 0x00000001 in t[0].a[0]: read 3, expected one of 4, 5, 9`},
+		{"in-enum", "    type: u1\n    enum: e\n    valid:\n      in-enum: true\nenums:\n  e:\n    1: x\n    7: y\n", "\x00\x03", `Not_In_Enum at 0x00000001 in t[0].a[0]: read 3, expected one of 1, 7`},
+		{"expr", "    type: u1\n    valid:\n      expr: _ > n\n", "\x04\x03", `Expr_False at 0x00000001 in t[0].a[0]: read 3`},
+		{"expr on a set", "    type: s\n    valid:\n      expr: _.x == 1\ntypes:\n  s:\n    seq:\n      - id: x\n        type: u1\n", "\x00\x03", `Expr_False at 0x00000001 in t[0].a[0]`},
+		{"a long blob", "    size: 20\n    valid:\n      eq: '[1]'\n", "\x00\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01", `Not_Equal at 0x00000001 in t[0].a[0]: read <20 bytes> 01 01 01 01 01 01 01 01 01 01 01 01 01 01 01 01 ..., expected <1 bytes> 01`},
+		{"an expression that fails", "    type: u1\n    valid:\n      expr: _ == v\ninstances:\n  v:\n    value: 1\n    if: false\n", "\x00\x03", `Absent_Field at 0x00000001 in t[0].a[0]`},
+	}
+	for c in cases {
+		schema := temp_file(t, "zelbyn_cli_*.ksy", strings.concatenate({HEAD, c.attr}, context.temp_allocator))
+		input := temp_file(t, "zelbyn_cli_*.bin", c.input)
+		defer {
+			for path in ([]string{schema, input}) do if path != "" do os.remove(path)
+		}
+		if schema == "" || input == "" do continue
+
+		r := run_cli({"zelbyn", schema, input})
+		want := strings.concatenate({"error: ", c.stderr, "\n"}, context.temp_allocator)
+		testing.expectf(t, r.exit_code == 1 && r.stderr == want && r.stdout == "", "%s: exit code %v, stderr %q; want 1 and %q", c.name, r.exit_code, r.stderr, want)
+	}
+}

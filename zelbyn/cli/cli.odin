@@ -178,7 +178,9 @@ run :: proc(schema_path: string, file_path: string, import_path: string, dump: D
 		fmt.wprintfln(stderr, "error: cannot read %s: %v", file_path, parse_err.os_error)
 		return 1
 	} else if parse_err.kind != .None {
-		fmt.wprintfln(stderr, "error: %v at 0x%08X in %s", parse_err.kind, parse_err.offset, parse_err.path)
+		fmt.wprintf(stderr, "error: %v at 0x%08X in %s", parse_err.kind, parse_err.offset, parse_err.path)
+		write_check_values(stderr, parse_err)
+		fmt.wprintln(stderr)
 		return 1
 	}
 
@@ -333,4 +335,22 @@ load_format :: proc(schema_path: string, import_paths: []string, file_format: ^m
 		fmt.wprintfln(stderr, "error: %s:%v:%v: %v: %s", file, err.line, err.column, err.kind, err.message)
 	}
 	return false
+}
+
+// Writes what a failed check read and expected, after its error:
+// ": read 4, expected one of 1, 2", or nothing for another error.
+@(private = "file")
+write_check_values :: proc(w: io.Writer, err: rdr.Parse_Error) {
+	if err.value != "" do fmt.wprintf(w, ": read %s", err.value)
+	if err.expected == "" do return
+	fmt.wprint(w, err.value != "" ? ", expected " : ": expected ")
+	#partial switch err.kind {
+	case .Less_Than_Min:
+		fmt.wprint(w, "at least ")
+	case .Greater_Than_Max:
+		fmt.wprint(w, "at most ")
+	case .Not_Any_Of, .Not_In_Enum:
+		fmt.wprint(w, "one of ")
+	}
+	fmt.wprint(w, err.expected)
 }

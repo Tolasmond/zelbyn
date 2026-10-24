@@ -45,7 +45,7 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `zelbyn/expression/` | The expression parser, resolver, direct-form classifier and printer |
 | `zelbyn/ksy/` | The `.ksy` compiler |
 | `zelbyn/metadata/` | The plan: `File_Format`, `Node`, counts, lengths, terminators, checks and expression nodes |
-| `zelbyn/field/` | The value tree: `Value`, `Instance`, `Span` and `Value_Tree` |
+| `zelbyn/field/` | The value tree: `Value`, `Instance`, `Span` and `Value_Tree`, and `write_value`, which writes a value as the text dump and error messages show it |
 | `zelbyn/reader/` | The decoder, the expression evaluator and the string decoders |
 | `zelbyn/dump/` | The text and JSON writers |
 | `formats/` | `gif.ksy` (from `kaitai_struct_formats`, unchanged, CC0-1.0) and `gif89a.ksy` |
@@ -586,6 +586,8 @@ As the official compiler does, the compiler marks every attribute that follows a
 
 `fail(d, kind, offset)` records only the first error. It stores the error's kind, its offset in the input (`base + offset`), and the path formatted as `Name[i].Name[i]...`. The path is allocated with `context.allocator`, and `destroy_parse_error` frees it. A `Parse_Error` also carries an `os.Error` for `File_Read_Failed`.
 
+A failed check is recorded by `fail_check`, which adds the value read and what the check expected (`Parse_Error.value` and `expected`), as `field.write_value` writes them, also with `context.allocator`: the constant of `eq` or `contents`, the bound of `min` or `max`, or the values of `any-of` or of the enum of `in-enum`, the first `LIST_PREVIEW` (16) followed by `...`. A string shows its first `STRING_PREVIEW` (64) characters and a blob its first 16 bytes, followed by ` ...`. An `expr` expects nothing it can show, and a set's value is not shown. A bound given by an expression is in a `Valid_Expr` check, `_ == x`, `_ >= x`, `_ <= x` or an `or` of `==`s: `fail_check` evaluates each `x` again, and shows no expected value if one fails then. An error from evaluating a check, such as `Absent_Field`, is recorded as any other, with neither. The command line writes them after the error: `: read 3, expected one of 1, 2`, with `at least`, `at most` or `one of` as the kind needs.
+
 The kinds are those of `data.Read_Error`, each documented where it is declared: from reads and offsets (`Unexpected_EOF`, `Offset_Out_Of_Range`, also for a `pos` outside its stream), counts and lengths, expressions, checks (§7.7), nesting (`Too_Deep`, §7.5), the limits (`Memory_Limit` and `Step_Limit`, §7.11), casts, an `endian` `switch-on` that matches no case, `process: zlib`, the root's arguments, and reading the file.
 
 ### 7.11 Limits
@@ -655,6 +657,8 @@ Both writers walk the plan and the value tree together, from `format.root` and `
   - strings quoted;
   - blobs as `<N bytes>` followed by their first 16 bytes in hex, and ` ...` when longer.
 
+  `field.write_value` writes each, as error messages show a failed check's value too (§7.10).
+
   With `offsets`, which needs a tree read with spans, each line ends with ` @0x` and the value's offset in uppercase hex. The path is built in one `strings.Builder` and truncated back after each child.
 - **`write_json`** writes compact JSON on one line, followed by a newline. A set instance is an object whose keys are its field names in schema order, each followed by its bit fields' names, then its parse instances' names, and every field's value is an array. Blobs are lowercase hex strings, encoded in 1 KB chunks. NaN and infinities are `null`. Strings that are printable ASCII without `"` or `\` are written as they are; any other string is escaped as `json.marshal` escapes it, except that a byte that is not part of valid UTF-8 is written `\u00NN`, so the output is always valid JSON.
 
@@ -687,7 +691,7 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | Plan (`File_Format`) | `File_Format.arena` | `metadata.destroy_file_format` | The YAML trees' strings, in the same arena |
 | Value tree, with its decoded strings | `Value_Tree.arena` | `field.destroy_value_tree` | Its input: owned when it came from `read`, borrowed when it came from `read_from_bytes` |
 | Decoder's `path`, `frames`, `streams`, `kept`, `cache` and arguments | The tree's arena, within its limit (§7.11) | With the tree | — |
-| Error messages, `ksy.Error.path` and `Parse_Error.path` | `context.allocator` | The matching `destroy_error` / `destroy_parse_error` | — |
+| Error messages, `ksy.Error.path`, and `Parse_Error.path`, `value` and `expected` | `context.allocator` | The matching `destroy_error` / `destroy_parse_error` | — |
 
 `Value_Tree` and `File_Format` each hold their `Arena` by value, so a copy shares its blocks: only one copy may be destroyed, and a block that one copy adds is unknown to the other. They are filled in place, through a pointer, and the tests' `Decoded`, which embeds a tree, is never returned by value. Because the tree does not refer to the plan (§6.7), the plan can be destroyed before the tree. The test `value_tree_outlives_schema` checks this. The test `value_tree_from_read_outlives_file` checks that a tree from `read` survives the deletion of its file.
 
@@ -701,22 +705,22 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | `golden_test.odin` | The text and JSON dumps of all six samples, from trees read with and without spans, compared byte for byte with `tests/golden/` (from `gif.ksy`) and `tests/golden/gif89a/` (from `gif89a.ksy`). With `-define:GOLDEN_RECORD=true` the dumps are re-recorded instead. |
 | `decode_samples_test.odin` | Per-sample values: dimensions, colour-table sizes, block counts, trailer |
 | `decode_malformed_test.odin` | Truncated and malformed inputs, their error kinds, offsets and paths; truncation sweeps over the samples; counts larger than the input; negative counts and lengths |
-| `memory_test.odin` | That decoding, with and without spans and with `process: zlib`, `read` and `ksy.compile` make no heap allocations; that errors allocate only their message or path; tree lifetime and reuse after destroy |
-| `checks_test.odin` | Byte order, `valid` checks and bit fields, on hand-built plans |
+| `memory_test.odin` | That decoding, with and without spans and with `process: zlib`, `read` and `ksy.compile` make no heap allocations; that errors allocate only their message or path, and a failed check's value and expected; tree lifetime and reuse after destroy |
+| `checks_test.odin` | Byte order, `valid` checks and bit fields, on hand-built plans, with the value and the expected value each failed check reports, shortened when long |
 | `expression_parse_test.odin` | Parsing, precedence and syntax errors, and type errors, also of floats |
 | `expression_walks_test.odin` | That every procedure switching on an expression's variant is in the inventory of §5.2, exhaustive or not as it says, and that every variant of `Expr_Variant` is compiled, decoded and printed, those of type `Struct`, `Stream` and `Array` through the walks of their type, in a schema the official runtime also decodes |
 | `expression_eval_test.odin` | Evaluation on hand-built plans: field references, `_parent`, `_index`, conditions, methods, floats and their mixing with integers, `?:` over byte arrays, `.substring` and `.as<bytes>`, the size of other streams, integers above `max(int)` |
 | `expression_direct_test.odin` | That direct forms and the tree evaluator give the same results and errors (§7.9) |
 | `ksy_test.odin` | The `.ksy` compiler end to end: compile errors with their kinds, lines and columns, and each Kaitai feature of the subset and each extension compiled and decoded, alone and in the combinations that have needed care: types that contain themselves and the depth limits, imports, params (also of the top-level type), parse and value instances, `switch-on`, `valid`, expressions and their methods and casts, encodings, `process: zlib`, and `endian` `switch-on`s. The comment of each test says what it covers. |
 | `yaml_test.odin` | The YAML parser's node trees and errors; escapes at the edge of the Unicode range and beyond it; characters allowed raw and those that are not, and bytes that are not UTF-8; comments right after flow punctuation and a block scalar's indicators, and `#` inside a plain scalar; a flow key and its `:` on two lines; a duplicate key after 63, 64, 65 and 100,000 others, block and flow, in ASCII and not, within a timeout |
-| `cli_test.odin` | The command line, run in the test process (`cli.execute`): `--help`, the usage errors, `--offsets` with `--dump json`, `--param` in both forms with an argument of each type and each of its errors, `--max-memory` and `--max-steps` and their errors, the errors of loading and decoding, and output that cannot be written, each with its exit code and with nothing on stdout when it fails |
+| `cli_test.odin` | The command line, run in the test process (`cli.execute`): `--help`, the usage errors, `--offsets` with `--dump json`, `--param` in both forms with an argument of each type and each of its errors, `--max-memory` and `--max-steps` and their errors, the errors of loading and decoding, each failed check's message with what it read and expected, and output that cannot be written, each with its exit code and with nothing on stdout when it fails |
 | `limits_test.odin` | The limits of §7.11: counts far beyond the input, the steps counted, `Step_Limit` and `Memory_Limit` at their limits and below them, never past `max_memory`, from bytes and from a file, also the decoder's own records, and each nesting limit at it and one past it, with its error |
 | `literal_item_test.odin` | That an index of a constant array literal, which evaluates only the item it gives, decodes as the whole array does, with every item type, nested, through value instances and with failing indexes; which array literals are constant; and that an error in an unused item of any other fails the expression |
 | `imports_test.odin` | That every import of one of zelbyn's packages names it as §3 says |
 | `layout_test.odin` | The layout of the arena and the value tree, on the addresses themselves: alignment of `arena_make` and of the allocator up to a page, also in a block of its own; growth in place of the most recent allocation, past a commit, and moving otherwise, with its bytes; block rollover, the doubling target and a block for a large allocation; `make_instance`'s block, with and without spans, and empty slots in a decoded tree (unread, read no times, a parse instance whose `if` is false); and spans after slots grow, by `repeat: eos` and past the bytes left, of sets, cells and `-bits` fields |
 | `file_test.odin` | `file.read_entire_file` with injected `read` failures, at once and after partial reads, and `EINTR`: the error kept, and nothing left allocated, with the heap or an arena (Linux, macOS and the BSDs) |
 | `data_reader_test.odin` | `data.Reader` reads and bounds checks, and bit reads in both orders |
-| `dump_test.odin` | Dump format details |
+| `dump_test.odin` | Dump format details, and `field.write_value` |
 
 Hand-built plans in the tests are made with `plan_node`, which sets `slot_count` from the children it is given. Bit fields are set on a child before the parent is built. `tests/schemas/` holds the schemas that the import, params and recursive-type tests read from files.
 

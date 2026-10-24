@@ -5,6 +5,8 @@ import dat "../zelbyn/data"
 import dmp "../zelbyn/dump"
 import fld "../zelbyn/field"
 import mdata "../zelbyn/metadata"
+import rdr "../zelbyn/reader"
+import "core:fmt"
 import "core:slice"
 import "core:strings"
 import "core:testing"
@@ -38,40 +40,44 @@ decode_byte_order :: proc(t: ^testing.T) {
 }
 
 // One field f of type, with count elements, a fixed length for String and
-// Blob, and check valid, decoded from input.
+// Blob, and check valid, decoded from input, and the error it gives.
 @(private = "file")
 Check_Case :: struct {
-	name:   string,
-	type:   dat.Data_Type,
-	count:  int,
-	length: int,
-	valid:  mdata.Valid,
-	input:  []byte,
-	err:    dat.Read_Error,
-	path:   string, // where err is reported, at the start of the element
-	offset: int,
+	name:     string,
+	type:     dat.Data_Type,
+	count:    int,
+	length:   int,
+	valid:    mdata.Valid,
+	input:    []byte,
+	err:      dat.Read_Error,
+	path:     string, // where err is reported, at the start of the element
+	offset:   int,
+	value:    string, // what the error shows as read (Parse_Error.value)
+	expected: string, // and as expected
 }
 
 @(private = "file")
 CHECK_CASES := [?]Check_Case {
-	{"eq", .UInt8, 1, 0, mdata.Valid_Eq{u8(33)}, {33}, .None, "", 0},
-	{"not eq", .UInt8, 1, 0, mdata.Valid_Eq{u8(33)}, {34}, .Not_Equal, "r[0].f[0]", 0},
-	{"second element", .UInt8, 2, 0, mdata.Valid_Eq{u8(7)}, {7, 8}, .Not_Equal, "r[0].f[1]", 1},
-	{"min", .Int16, 1, 0, mdata.Valid_Range{i16(-5), i16(5)}, {0xfb, 0xff}, .None, "", 0},
-	{"below min", .Int16, 1, 0, mdata.Valid_Range{i16(-5), i16(5)}, {0xfa, 0xff}, .Less_Than_Min, "r[0].f[0]", 0},
-	{"above max", .Int16, 1, 0, mdata.Valid_Range{i16(-5), i16(5)}, {0x06, 0x00}, .Greater_Than_Max, "r[0].f[0]", 0},
-	{"min only", .UInt32, 1, 0, mdata.Valid_Range{min = u32(10)}, {9, 0, 0, 0}, .Less_Than_Min, "r[0].f[0]", 0},
-	{"max only", .UInt32, 1, 0, mdata.Valid_Range{max = u32(10)}, {0xff, 0, 0, 0}, .Greater_Than_Max, "r[0].f[0]", 0},
-	{"any of", .UInt8, 1, 0, mdata.Valid_Any_Of{{u8(1), u8(3)}}, {3}, .None, "", 0},
-	{"none of", .UInt8, 1, 0, mdata.Valid_Any_Of{{u8(1), u8(3)}}, {2}, .Not_Any_Of, "r[0].f[0]", 0},
-	{"float in range", .Float32, 1, 0, mdata.Valid_Range{f32(0), f32(1)}, {0x00, 0x00, 0x00, 0x3f}, .None, "", 0}, // 0.5
-	{"NaN in no range", .Float32, 1, 0, mdata.Valid_Range{f32(0), f32(1)}, {0x00, 0x00, 0xc0, 0x7f}, .Less_Than_Min, "r[0].f[0]", 0},
-	{"string eq", .String, 1, 3, mdata.Valid_Eq{"GIF"}, {'G', 'I', 'F'}, .None, "", 0},
-	{"string not eq", .String, 1, 3, mdata.Valid_Eq{"GIF"}, {'G', 'I', 'G'}, .Not_Equal, "r[0].f[0]", 0},
-	{"contents", .Blob, 1, 2, mdata.Valid_Eq{[]byte{1, 2}}, {1, 2}, .None, "", 0},
-	{"not contents", .Blob, 1, 2, mdata.Valid_Eq{[]byte{1, 2}}, {1, 3}, .Not_Equal, "r[0].f[0]", 0},
-	{"blob any of", .Blob, 1, 1, mdata.Valid_Any_Of{{[]byte{1}, []byte{2}}}, {2}, .None, "", 0},
-	{"blob none of", .Blob, 1, 1, mdata.Valid_Any_Of{{[]byte{1}, []byte{2}}}, {3}, .Not_Any_Of, "r[0].f[0]", 0},
+	{"eq", .UInt8, 1, 0, mdata.Valid_Eq{u8(33)}, {33}, .None, "", 0, ``, ``},
+	{"not eq", .UInt8, 1, 0, mdata.Valid_Eq{u8(33)}, {34}, .Not_Equal, "r[0].f[0]", 0, `34`, `33`},
+	{"second element", .UInt8, 2, 0, mdata.Valid_Eq{u8(7)}, {7, 8}, .Not_Equal, "r[0].f[1]", 1, `8`, `7`},
+	{"min", .Int16, 1, 0, mdata.Valid_Range{i16(-5), i16(5)}, {0xfb, 0xff}, .None, "", 0, ``, ``},
+	{"below min", .Int16, 1, 0, mdata.Valid_Range{i16(-5), i16(5)}, {0xfa, 0xff}, .Less_Than_Min, "r[0].f[0]", 0, `-6`, `-5`},
+	{"above max", .Int16, 1, 0, mdata.Valid_Range{i16(-5), i16(5)}, {0x06, 0x00}, .Greater_Than_Max, "r[0].f[0]", 0, `6`, `5`},
+	{"min only", .UInt32, 1, 0, mdata.Valid_Range{min = u32(10)}, {9, 0, 0, 0}, .Less_Than_Min, "r[0].f[0]", 0, `9`, `10`},
+	{"max only", .UInt32, 1, 0, mdata.Valid_Range{max = u32(10)}, {0xff, 0, 0, 0}, .Greater_Than_Max, "r[0].f[0]", 0, `255`, `10`},
+	{"any of", .UInt8, 1, 0, mdata.Valid_Any_Of{{u8(1), u8(3)}}, {3}, .None, "", 0, ``, ``},
+	{"none of", .UInt8, 1, 0, mdata.Valid_Any_Of{{u8(1), u8(3)}}, {2}, .Not_Any_Of, "r[0].f[0]", 0, `2`, `1, 3`},
+	{"float in range", .Float32, 1, 0, mdata.Valid_Range{f32(0), f32(1)}, {0x00, 0x00, 0x00, 0x3f}, .None, "", 0, ``, ``}, // 0.5
+	{"NaN in no range", .Float32, 1, 0, mdata.Valid_Range{f32(0), f32(1)}, {0x00, 0x00, 0xc0, 0x7f}, .Less_Than_Min, "r[0].f[0]", 0, `NaN`, `0`},
+	{"string eq", .String, 1, 3, mdata.Valid_Eq{"GIF"}, {'G', 'I', 'F'}, .None, "", 0, ``, ``},
+	{"string not eq", .String, 1, 3, mdata.Valid_Eq{"GIF"}, {'G', 'I', 'G'}, .Not_Equal, "r[0].f[0]", 0, `"GIG"`, `"GIF"`},
+	{"contents", .Blob, 1, 2, mdata.Valid_Eq{[]byte{1, 2}}, {1, 2}, .None, "", 0, ``, ``},
+	{"not contents", .Blob, 1, 2, mdata.Valid_Eq{[]byte{1, 2}}, {1, 3}, .Not_Equal, "r[0].f[0]", 0, `<2 bytes> 01 03`, `<2 bytes> 01 02`},
+	{"blob any of", .Blob, 1, 1, mdata.Valid_Any_Of{{[]byte{1}, []byte{2}}}, {2}, .None, "", 0, ``, ``},
+	{"blob none of", .Blob, 1, 1, mdata.Valid_Any_Of{{[]byte{1}, []byte{2}}}, {3}, .Not_Any_Of, "r[0].f[0]", 0, `<1 bytes> 03`, `<1 bytes> 01, <1 bytes> 02`},
+	{"in enum", .UInt8, 1, 0, mdata.Valid_In_Enum{{0, 5}}, {5}, .None, "", 0, ``, ``},
+	{"not in enum", .UInt8, 1, 0, mdata.Valid_In_Enum{{0, 5}}, {2}, .Not_In_Enum, "r[0].f[0]", 0, `2`, `0, 5`},
 }
 
 @(test)
@@ -93,10 +99,55 @@ decode_checks :: proc(t: ^testing.T) {
 
 		testing.expectf(
 			t,
-			d.err.kind == c.err && d.err.path == c.path && d.err.offset == c.offset,
-			"%s: %v at %v (%q), want %v at %v (%q)",
-			c.name, d.err.kind, d.err.offset, d.err.path, c.err, c.offset, c.path,
+			d.err.kind == c.err && d.err.path == c.path && d.err.offset == c.offset && d.err.value == c.value && d.err.expected == c.expected,
+			"%s: %v at %v (%q), read %q, expected %q; want %v at %v (%q), read %q, expected %q",
+			c.name, d.err.kind, d.err.offset, d.err.path, d.err.value, d.err.expected, c.err, c.offset, c.path, c.value, c.expected,
 		)
+	}
+}
+
+// A failed check shows a string's first STRING_PREVIEW characters, a
+// blob's first BLOB_PREVIEW bytes and a list's first LIST_PREVIEW values,
+// each followed by " ..." or ", ..." when there are more, and only those.
+@(test)
+decode_check_values_shortened :: proc(t: ^testing.T) {
+	long_string := strings.repeat("é", rdr.STRING_PREVIEW + 1, context.temp_allocator)
+	long_blob := make([]byte, fld.BLOB_PREVIEW + 1, context.temp_allocator)
+	for &b, i in long_blob do b = byte(i)
+	list := make([]mdata.Scalar, rdr.LIST_PREVIEW + 1, context.temp_allocator)
+	for &x, i in list do x = u8(i)
+	exact := make([]mdata.Scalar, rdr.LIST_PREVIEW, context.temp_allocator)
+	for &x, i in exact do x = u8(i)
+	digits := make([]string, rdr.LIST_PREVIEW, context.temp_allocator)
+	for &x, i in digits do x = fmt.tprint(i)
+
+	Case :: struct {
+		name:            string,
+		type:            dat.Data_Type,
+		valid:           mdata.Valid,
+		input:           []byte,
+		value, expected: string,
+	}
+	cases := [?]Case {
+		{"a string", .String, mdata.Valid_Eq{"x"}, transmute([]byte)long_string, fmt.tprintf("%q ...", long_string[:2 * rdr.STRING_PREVIEW]), `"x"`},
+		{"a blob", .Blob, mdata.Valid_Eq{[]byte{1}}, long_blob, "<17 bytes> 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f ...", "<1 bytes> 01"},
+		{"a list", .UInt8, mdata.Valid_Any_Of{list}, {200}, "200", strings.concatenate({strings.join(digits, ", ", context.temp_allocator), ", ..."}, context.temp_allocator)},
+		{"a list of LIST_PREVIEW", .UInt8, mdata.Valid_Any_Of{exact}, {200}, "200", strings.join(digits, ", ", context.temp_allocator)},
+	}
+	for c in cases {
+		ff: mdata.File_Format
+		defer mdata.destroy_file_format(&ff)
+		a := arn.arena_allocator(&ff.arena)
+		f := plan_node("f", c.type, a)
+		f.count = mdata.Fixed_Count{n = 1}
+		f.valid = c.valid
+		if c.type != .UInt8 do f.length = mdata.Fixed_Length{len(c.input)}
+		ff.root = plan_node("r", .Set, a, f)
+
+		d: Decoded
+		defer destroy_decoded(&d)
+		decode_bytes(&ff, c.input, &d)
+		testing.expectf(t, d.err.value == c.value && d.err.expected == c.expected, "%s: read %q, expected %q; want %q and %q", c.name, d.err.value, d.err.expected, c.value, c.expected)
 	}
 }
 
@@ -172,7 +223,8 @@ decode_bit_fields :: proc(t: ^testing.T) {
 	)
 }
 
-// A bit field's check fails at the start of the integer it is part of.
+// A bit field's check fails at the start of the integer it is part of,
+// with the bit field's value.
 @(test)
 decode_bit_field_check :: proc(t: ^testing.T) {
 	ff: mdata.File_Format
@@ -187,4 +239,6 @@ decode_bit_field_check :: proc(t: ^testing.T) {
 	testing.expect_value(t, d.err.kind, dat.Read_Error.Greater_Than_Max)
 	testing.expect_value(t, d.err.offset, 1)
 	testing.expect_value(t, d.err.path, "r[0].lo[1]")
+	testing.expect_value(t, d.err.value, "15")
+	testing.expect_value(t, d.err.expected, "14")
 }

@@ -245,6 +245,13 @@ direct_field :: #force_inline proc(d: ^Decoder, f: mdata.Direct_Field, element: 
 	return
 }
 
+// e, an expression of a valid check, whose _ is element, element index of
+// a repeat, or -1.
+@(private, require_results)
+eval_check_operand :: proc(d: ^Decoder, e: ^mdata.Expr, index: int, element: fld.Value) -> (v: Eval_Value, err: dat.Read_Error) {
+	return eval(d, e, {index = index, element = element})
+}
+
 @(private = "file", require_results)
 eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, err: dat.Read_Error) {
 	switch x in e.variant {

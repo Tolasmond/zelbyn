@@ -13,7 +13,23 @@ Parse_Error :: struct {
 	offset:   int,      // in the input: where the failing read started, or the reader position for peeks and computed lengths
 	path:     string,   // owned (context.allocator); "" on success; free with destroy_parse_error
 	os_error: os.Error, // set only when kind == .File_Read_Failed
+	// When a check fails (Not_Equal, Less_Than_Min, Greater_Than_Max,
+	// Not_Any_Of, Not_In_Enum, Expr_False), the value read, and what the
+	// check expected, as field.write_value writes them, a string shortened to
+	// STRING_PREVIEW characters: the constant (Not_Equal), the bound
+	// (Less_Than_Min, Greater_Than_Max), or the values allowed, separated by
+	// ", ", the first LIST_PREVIEW followed by ", ..." when there are more
+	// (Not_Any_Of, Not_In_Enum). Each is "" when there is none to show: the
+	// value of a set, what an Expr_False expected, and for any other error.
+	// Owned, as path is.
+	value:    string,
+	expected: string,
 }
+
+// The characters of a string, and the values of a list, that a Parse_Error
+// shows.
+STRING_PREVIEW :: 64
+LIST_PREVIEW :: 16
 
 Path_Segment :: struct {
 	name:  string, // borrowed from the plan
@@ -130,5 +146,7 @@ format_path :: proc(segments: []Path_Segment, allocator := context.allocator) ->
 
 destroy_parse_error :: proc(err: ^Parse_Error) {
 	delete(err.path)
-	err.path = ""
+	delete(err.value)
+	delete(err.expected)
+	err.path, err.value, err.expected = "", "", ""
 }
