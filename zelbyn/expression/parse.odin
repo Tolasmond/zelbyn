@@ -387,6 +387,7 @@ int_literal_value :: proc(text: string) -> (value: u64, base: int, status: Int_L
 	}
 
 	n := 0 // digits seen
+	too_large := false
 	for i in digits ..< len(text) {
 		c := text[i]
 		if c == '_' && i > digits && text[i - 1] != '_' do continue
@@ -401,11 +402,16 @@ int_literal_value :: proc(text: string) -> (value: u64, base: int, status: Int_L
 			d = int(c - 'A') + 10
 		}
 		if d >= base do return value, base, .Invalid, i
-		if value > (max(u64) - u64(d)) / u64(base) do return value, base, .Too_Large, -1
-		value = value * u64(base) + u64(d)
+		// the rest is still checked: 18446744073709551616x is no literal
+		if too_large || value > (max(u64) - u64(d)) / u64(base) {
+			too_large = true
+		} else {
+			value = value * u64(base) + u64(d)
+		}
 		n += 1
 	}
 	if n == 0 || text[len(text) - 1] == '_' do return value, base, .Invalid, len(text)
+	if too_large do return value, base, .Too_Large, -1
 	if base == 10 && n > 1 && text[0] == '0' do return value, base, .Leading_Zero, -1
 	return value, base, .Ok, -1
 }

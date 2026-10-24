@@ -370,7 +370,7 @@ A `Switch` holds an `Int`, `Bool` or `String` expression `on`, a list of `Switch
 | Integer | Range | Why |
 |---|---|---|
 | A literal in an expression | 0 to 2^64 − 1; one above `max(int)` is a `Big_Literal`, one above 2^64 − 1 `Unsupported` | The range, with a negation for the negative half |
-| A literal in a YAML scalar (`parse_int`: an enum value, a byte, a `valid` bound, a `-bits` number) | The same literal, with an optional sign; `010` and one above 2^64 − 1 are no integer, and in `contents` an error, not a string | One literal syntax; YAML 1.1 reads `010` as octal |
+| A literal in a YAML scalar (`parse_int`: an enum value, a byte, a `valid` bound, a `-bits` number) | The same literal, with an optional sign; `010`, `1__0` and one above 2^64 − 1 are no integer. In a list of bytes and strings (`contents`), an item that YAML 1.1 reads as an integer (`yaml_int`) must be one, else it is an error; any other item, `0o17` or `08` among them, is text | One literal syntax; a `contents` item means what it means to the official tools, which read the YAML as YAML 1.1 does, and is never silently text where they read a number |
 | The result of an operation, evaluated or folded (`eval_binary`, `expression.constant`) | The range, each step too | One set of rules, in `int_binary`; `eval_binary` takes a path of its own for two `int`s, which falls back to it when a result does not fit one |
 | A size, count, offset or index | An `int`; a larger one is `Integer_Overflow` (an index `Index_Out_Of_Range`), and a folded one is not a constant size | Memory and positions are `int`s |
 | A `switch-on` value and its cases | The range | The value is compared in full (`eval_wide`), so an `u8` above `max(int)` chooses its case or the default |
