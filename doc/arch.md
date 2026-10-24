@@ -36,7 +36,8 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 
 | Path | Contents |
 |---|---|
-| `main.odin` | The command-line program (package `main`) |
+| `main.odin` | The program (package `main`): runs `cli` on the process's arguments, stdout and stderr |
+| `zelbyn/cli/` | The command line: its options, `--param`, the decode and the dump, writing to the writers it is given |
 | `zelbyn/arena/` | `Arena`: the lock-free arena that the plan, the YAML trees and the value tree are allocated in |
 | `zelbyn/data/` | `Data_Type`, and `Reader`: a bounds-checked cursor over a byte slice, with bit reads |
 | `zelbyn/file/` | `read_entire_file`, which reads a schema file with the system calls it needs |
@@ -70,7 +71,8 @@ All packages also import from Odin's `core` library. The internal imports are:
 | `ksy` | `arena`, `data`, `expression`, `file`, `metadata`, `yaml` |
 | `reader` | `arena`, `data`, `field`, `metadata`; `core:compress/zlib` |
 | `dump` | `field`, `metadata` |
-| `main` | `dump`, `field`, `ksy`, `metadata`, `reader` |
+| `cli` | `dump`, `field`, `ksy`, `metadata`, `reader` |
+| `main` | `cli` |
 
 `metadata` imports `field` for one procedure, `instance_set` (§6.7), which reads the case that a value-tree instance records. `reader` and `dump` do not import `ksy` or `yaml`: they see only the plan.
 
@@ -568,9 +570,9 @@ Both writers walk the plan and the value tree together, from `format.root` and `
 
 Both write to an `io.Writer`. A writer's error stops the dump and is returned.
 
-## 10. The program (`main.odin`)
+## 10. The program (`main.odin` and `cli`)
 
-`main` parses the command line, whose options doc/usage.md (Running) gives, with `core:flags`. `parse_args` takes `--param` out before `core:flags` parses the rest, and `write_usage` adds its line to the usage.
+`cli.execute(args, stdout, stderr)` runs a command line, whose options doc/usage.md (Running) gives, and returns its exit code; `main` calls it with the process's arguments, stdout and stderr. Everything it writes goes to the writers it is given, so `tests/cli_test.odin` runs it in the test process, on writers of its own, one of which fails. It parses the command line with `core:flags`, whose errors `print_flags_error` writes as `flags.print_errors` does, which writes to the process's own stdout and stderr. `parse_args` takes `--param` out before `core:flags` parses the rest, and `write_usage` adds its line to the usage.
 
 *Reason for parsing `--param` apart:* as a list field of the options, `core:flags` costs every run some 7,000 instructions, given or not, 0.3% of decoding a small file.
 - `--help` prints the usage and exits 0.
@@ -584,7 +586,7 @@ Both write to an `io.Writer`. A writer's error stops the dump and is returned.
 
 Errors go to stderr, and nothing reaches stdout unless decoding succeeds. A schema error names its file, line and column. A load, read, decode or write error exits 1. `main` sets `context.logger` to a logger that writes to stderr, at level `Warning` and above.
 
-In debug builds (`ODIN_DEBUG`), `run` executes under a `mem.Tracking_Allocator`. Leaked or doubly freed memory is reported on stderr and turns exit code 0 into 1. The program frees everything it allocates before it exits, so that this check holds.
+In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_Allocator`. Leaked or doubly freed memory is reported on stderr and turns exit code 0 into 1. The program frees everything it allocates before it exits, so that this check holds.
 
 ## 11. Memory and ownership
 
@@ -616,6 +618,7 @@ In debug builds (`ODIN_DEBUG`), `run` executes under a `mem.Tracking_Allocator`.
 | `expression_direct_test.odin` | That direct forms and the tree evaluator give the same results and errors (§7.9) |
 | `ksy_test.odin` | The `.ksy` compiler end to end: compile errors with their kinds, lines and columns, and each Kaitai feature of the subset and each extension compiled and decoded, alone and in the combinations that have needed care: types that contain themselves and the depth limits, imports, params (also of the top-level type), parse and value instances, `switch-on`, `valid`, expressions and their methods and casts, encodings, `process: zlib`, and `endian` `switch-on`s. The comment of each test says what it covers. |
 | `yaml_test.odin` | The YAML parser's node trees and errors; escapes at the edge of the Unicode range and beyond it; characters allowed raw and those that are not, and bytes that are not UTF-8; comments right after flow punctuation and a block scalar's indicators, and `#` inside a plain scalar; a flow key and its `:` on two lines |
+| `cli_test.odin` | The command line, run in the test process (`cli.execute`): `--help`, the usage errors, `--offsets` with `--dump json`, `--param` in both forms with an argument of each type and each of its errors, the errors of loading and decoding, and output that cannot be written, each with its exit code and with nothing on stdout when it fails |
 | `file_test.odin` | `file.read_entire_file` with injected `read` failures, at once and after partial reads, and `EINTR`: the error kept, and nothing left allocated, with the heap or an arena (Linux, macOS and the BSDs) |
 | `data_reader_test.odin` | `data.Reader` reads and bounds checks, and bit reads in both orders |
 | `dump_test.odin` | Dump format details |
