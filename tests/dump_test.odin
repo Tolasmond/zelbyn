@@ -9,61 +9,67 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 
-// Decodes path and dumps it into b as JSON (as_json) or text. Fails the
-// test and returns false on any error.
-dump_sample :: proc(t: ^testing.T, path: string, as_json: bool, b: ^strings.Builder, source := Schema_Source.Ported, spans := false) -> bool {
+// Decodes data with SAMPLE_KSY and dumps it into b as JSON (as_json) or
+// text. Fails the test and returns false on any error.
+dump_sample :: proc(t: ^testing.T, data: []byte, as_json: bool, b: ^strings.Builder, spans := false) -> bool {
 	ff: mdata.File_Format
 	defer mdata.destroy_file_format(&ff)
-	if !load_gif_from(t, source, &ff) do return false
+	if !load_sample(t, &ff) do return false
 
 	d: Decoded
-	decode_file(&ff, path, &d, spans)
+	decode_bytes(&ff, data, &d, spans)
 	defer destroy_decoded(&d)
-	if !testing.expectf(t, d.err.kind == .None, "%s: %v at 0x%08X in %s", path, d.err.kind, d.err.offset, d.err.path) do return false
+	if !testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path) do return false
 
 	w := strings.to_writer(b)
 	err := as_json ? dmp.write_json(w, &ff, &d.tree) : dmp.write_text(w, &ff, &d.tree)
-	return testing.expectf(t, err == .None, "%s: dump failed: %v", path, err)
+	return testing.expectf(t, err == .None, "dump failed: %v", err)
 }
 
+// Each dump of a tree read with spans is the same as without them.
 @(test)
-dump_text_855 :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 10 * time.Second)
+dump_sample_exact :: proc(t: ^testing.T) {
+	data := sample_input(4)
+	defer delete(data)
 
-	b := strings.builder_make()
-	defer strings.builder_destroy(&b)
-	if !dump_sample(t, SAMPLE_855.path, false, &b) do return
+	want_text := `sample[0].magic[0] = <4 bytes> 53 4d 50 4c
+sample[0].name[0] = "sample"
+sample[0].num_colors[0] = 3
+sample[0].colors[0].r[0] = 255
+sample[0].colors[0].g[0] = 0
+sample[0].colors[0].b[0] = 0
+sample[0].colors[1].r[0] = 0
+sample[0].colors[1].g[0] = 255
+sample[0].colors[1].b[0] = 0
+sample[0].colors[2].r[0] = 0
+sample[0].colors[2].g[0] = 0
+sample[0].colors[2].b[0] = 255
+sample[0].records[0].kind[0] = 1
+sample[0].records[0].len[0] = 8
+sample[0].records[0].body[0].text[0] = "record 0"
+sample[0].records[1].kind[0] = 2
+sample[0].records[1].len[0] = 3
+sample[0].records[1].body[0].hi[0] = 0
+sample[0].records[1].body[0].lo[0] = 1
+sample[0].records[1].body[0].rest[0] = <2 bytes> ab cd
+sample[0].records[2].kind[0] = 7
+sample[0].records[2].len[0] = 3
+sample[0].records[2].body[0] = <3 bytes> 02 03 04
+sample[0].records[3].kind[0] = 1
+sample[0].records[3].len[0] = 8
+sample[0].records[3].body[0].text[0] = "record 3"
+sample[0].last[0] = 51
+`
+	want_json := `{"sample":[{"magic":["534d504c"],"name":["sample"],"num_colors":[3],"colors":[{"r":[255],"g":[0],"b":[0]},{"r":[0],"g":[255],"b":[0]},{"r":[0],"g":[0],"b":[255]}],"records":[{"kind":[1],"len":[8],"body":[{"text":["record 0"]}]},{"kind":[2],"len":[3],"body":[{"hi":[0],"lo":[1],"rest":["abcd"]}]},{"kind":[7],"len":[3],"body":["020304"]},{"kind":[1],"len":[8],"body":[{"text":["record 3"]}]}],"last":[51]}]}` + "\n"
 
-	want := [?]string{
-		`GIF89a[0].Signature[0] = "GIF"`,
-		`GIF89a[0].Version[0] = "89a"`,
-		`GIF89a[0].Logical Screen Descriptor[0].Logical Screen Width[0] = 500`,
-		`GIF89a[0].Logical Screen Descriptor[0].Logical Screen Height[0] = 228`,
-		`GIF89a[0].Logical Screen Descriptor[0].Logical Screen Descriptor Packed Fields[0] = 246`,
-		`GIF89a[0].Logical Screen Descriptor[0].Size of Global Color Table[0] = 6`,
-		`GIF89a[0].Logical Screen Descriptor[0].Sort Flag[0] = 0`,
-		`GIF89a[0].Logical Screen Descriptor[0].Color Resolution[0] = 7`,
-		`GIF89a[0].Logical Screen Descriptor[0].Global Color Table Flag[0] = 1`,
-		`GIF89a[0].Logical Screen Descriptor[0].Background Color Index[0] = 127`,
-		`GIF89a[0].Logical Screen Descriptor[0].Pixel Aspect Ratio[0] = 0`,
-		`GIF89a[0].Global Color Table[0].Red[0] = 252`,
-		`GIF89a[0].Global Color Table[0].Green[0] = 243`,
-		`GIF89a[0].Global Color Table[0].Blue[0] = 233`,
-		`GIF89a[0].Global Color Table[1].Red[0] = 93`,
-	}
-
-	text := strings.to_string(b)
-	testing.expect(t, strings.has_suffix(text, "\n"), "text dump does not end in a newline")
-
-	lines := strings.split_lines(strings.trim_suffix(text, "\n"))
-	defer delete(lines)
-
-	// one line per per-value "Read" line in the debug log of the run before
-	// bit fields were decoded, and one per bit field value
-	testing.expect_value(t, len(lines), 8114 + 214)
-	for line, i in want {
-		if i >= len(lines) do break
-		testing.expectf(t, lines[i] == line, "line %v = %q, want %q", i + 1, lines[i], line)
+	for as_json in ([?]bool{false, true}) {
+		for spans in ([?]bool{false, true}) {
+			b := strings.builder_make()
+			defer strings.builder_destroy(&b)
+			if !dump_sample(t, data[:], as_json, &b, spans) do continue
+			want := as_json ? want_json : want_text
+			testing.expectf(t, strings.to_string(b) == want, "json %v, spans %v:\ngot:\n%s\nwant:\n%s", as_json, spans, strings.to_string(b), want)
+		}
 	}
 }
 
@@ -95,40 +101,24 @@ field_write_value :: proc(t: ^testing.T) {
 	}
 }
 
+// The JSON dump of a large tree parses.
 @(test)
-dump_json_855 :: proc(t: ^testing.T) {
+dump_json_large_parses :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
+	data := sample_input(20000)
+	defer delete(data)
 
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
-	if !dump_sample(t, SAMPLE_855.path, true, &b) do return
-
-	text := strings.to_string(b)
-	prefix := `{"GIF89a":[{"Signature":["GIF"],"Version":["89a"],"Logical Screen Descriptor":[{"Logical Screen Width":[500],"Logical Screen Height":[228],`
-	testing.expectf(t, strings.has_prefix(text, prefix), "JSON starts %q, want %q", text[:min(len(text), len(prefix))], prefix)
-	testing.expect(t, strings.has_suffix(text, "}\n"), "JSON does not end in }\\n")
-
-	check_json_parses(t, SAMPLE_855.path, text)
-}
-
-@(test)
-dump_json_samples_parse :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 10 * time.Second)
-
-	for s in ([?]Sample{SAMPLE_89AILLUS, SAMPLE_BOB_89A, SAMPLE_CG89A, SAMPLE_STIGR9, SAMPLE_TEXTTST}) {
-		b := strings.builder_make()
-		defer strings.builder_destroy(&b)
-		if !dump_sample(t, s.path, true, &b) do continue
-
-		check_json_parses(t, s.path, strings.to_string(b))
-	}
+	if !dump_sample(t, data[:], true, &b) do return
+	check_json_parses(t, strings.to_string(b))
 }
 
 @(private = "file")
-check_json_parses :: proc(t: ^testing.T, path: string, text: string) {
+check_json_parses :: proc(t: ^testing.T, text: string) {
 	v, err := json.parse_string(text, .JSON)
 	defer json.destroy_value(v)
-	testing.expectf(t, err == .None, "%s: JSON does not parse: %v", path, err)
+	testing.expectf(t, err == .None, "JSON does not parse: %v", err)
 }
 
 // A string is written as valid JSON whatever its bytes: escapes as

@@ -5,42 +5,109 @@ import ksy "../zelbyn/ksy"
 import mdata "../zelbyn/metadata"
 import rdr "../zelbyn/reader"
 import "base:intrinsics"
+import "core:fmt"
 import "core:reflect"
 import "core:testing"
 
-// The GIF schema ported field for field from the SQLite schema (step 5),
-// with its dumps.
-KSY_PATH :: "formats/gif89a.ksy"
+// A schema with the shapes the decoder's tests need, none of them from a
+// real format: contents, a strz, a repeat-expr and a repeat-eos of user
+// types, an enum, a switch-on type of a sized field, with raw bytes where
+// no case matches, bit fields, a size-eos string and bytes, and a parse
+// instance. sample_input makes its inputs.
+SAMPLE_KSY :: `meta:
+  id: sample
+  endian: le
+  encoding: ASCII
+seq:
+  - id: magic
+    contents: SMPL
+  - id: name
+    type: strz
+  - id: num_colors
+    type: u1
+  - id: colors
+    type: color
+    repeat: expr
+    repeat-expr: num_colors
+  - id: records
+    type: record
+    repeat: eos
+instances:
+  last:
+    pos: _io.size - 1
+    type: u1
+types:
+  color:
+    seq:
+      - id: r
+        type: u1
+      - id: g
+        type: u1
+      - id: b
+        type: u1
+  record:
+    seq:
+      - id: kind
+        type: u1
+        enum: kind
+      - id: len
+        type: u1
+      - id: body
+        size: len
+        type:
+          switch-on: kind
+          cases:
+            'kind::text': text_body
+            'kind::flags': flags_body
+  text_body:
+    seq:
+      - id: text
+        type: str
+        size-eos: true
+  flags_body:
+    seq:
+      - id: hi
+        type: b3
+      - id: lo
+        type: b5
+      - id: rest
+        size-eos: true
+enums:
+  kind:
+    1: text
+    2: flags
+`
 
-// gif.ksy from kaitai_struct_formats, unchanged (step 6).
-GIF_KSY_PATH :: "formats/gif.ksy"
-
-// The GIF schemas: the port of the SQLite schema, and gif.ksy.
-Schema_Source :: enum {
-	Ported,
-	Kaitai,
-}
-
-// Loads the ported GIF schema. Fails the test and returns false on error.
-load_gif :: proc(t: ^testing.T, ff: ^mdata.File_Format) -> bool {
-	return load_ksy(t, KSY_PATH, ff)
-}
-
-// Loads the .ksy schema at path. Fails the test and returns false on error.
-load_ksy :: proc(t: ^testing.T, path: string, ff: ^mdata.File_Format) -> bool {
-	err := ksy.read_file_format(path, ff)
+// Compiles SAMPLE_KSY. Fails the test and returns false on error.
+load_sample :: proc(t: ^testing.T, ff: ^mdata.File_Format) -> bool {
+	err := ksy.compile(SAMPLE_KSY, ff)
 	defer ksy.destroy_error(&err)
-	return testing.expectf(t, err.kind == .None, "loading %s: %v at %v:%v: %s", path, err.kind, err.line, err.column, err.message)
+	return testing.expectf(t, err.kind == .None, "compiling SAMPLE_KSY: %v at %v:%v: %s", err.kind, err.line, err.column, err.message)
 }
 
-load_gif_from :: proc(t: ^testing.T, source: Schema_Source, ff: ^mdata.File_Format) -> bool {
-	switch source {
-	case .Ported:
-		return load_ksy(t, KSY_PATH, ff)
-	case .Kaitai:
-		return load_ksy(t, GIF_KSY_PATH, ff)
+// An input of SAMPLE_KSY with n records, which take turns: a text, flags,
+// and a kind with no case, of 1 to 5 raw bytes. The caller deletes it.
+sample_input :: proc(n: int) -> [dynamic]byte {
+	data: [dynamic]byte
+	append(&data, "SMPL")
+	append(&data, "sample\x00")
+	append(&data, 3, 255, 0, 0, 0, 255, 0, 0, 0, 255)
+	for i in 0 ..< n {
+		switch i % 3 {
+		case 0:
+			buf: [32]byte
+			text := fmt.bprintf(buf[:], "record %v", i)
+			append(&data, 1, byte(len(text)))
+			append(&data, text)
+		case 1:
+			append(&data, 2, 3, byte(i), 0xab, 0xcd)
+		case 2:
+			m := i % 5 + 1
+			append(&data, 7, byte(m))
+			for k in 0 ..< m do append(&data, byte(i + k))
+		}
 	}
-	return false
+	return data
 }
 
 Decoded :: struct {

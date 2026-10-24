@@ -10,11 +10,13 @@ With Odin `dev-2026-10` or newer:
 
 ```
 odin build . -out:build/zelbyn
-build/zelbyn formats/gif.ksy data/855.gif
-build/zelbyn formats/gif.ksy data/855.gif --dump json
+git clone https://github.com/kaitai-io/kaitai_struct_formats ../kaitai_struct_formats
+git clone https://github.com/kaitai-io/kaitai_struct_samples ../kaitai_struct_samples
+build/zelbyn ../kaitai_struct_formats/image/png.ksy ../kaitai_struct_samples/image/png/atch-plain.png
+build/zelbyn ../kaitai_struct_formats/image/png.ksy ../kaitai_struct_samples/image/png/atch-plain.png --dump json
 ```
 
-On Windows the build is `build\zelbyn.exe`. It has no other dependencies.
+On Windows the build is `build\zelbyn.exe`. It has no other dependencies. The repository holds no schemas or sample files of real formats, so the examples use those of the Kaitai Project's [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) and [kaitai_struct_samples](https://github.com/kaitai-io/kaitai_struct_samples).
 
 ## What a schema can use
 
@@ -32,10 +34,14 @@ Not yet: other processes (`xor`, `rotate`, custom ones), other encodings (such a
 
 ## How it is checked
 
-All 190 schemas in [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) compile, at the commit `tools/ksy_corpus/expected.txt` records. Separately, decodes are compared with the official runtime's (0.11), value for value and offset for offset: on the GIF samples in `data/`, which all agree, and on the 43 samples of the 18 formats that have samples in [kaitai_struct_samples](https://github.com/kaitai-io/kaitai_struct_samples), at the commit [doc/development.md](doc/development.md#corpus-check) gives. 41 of those agree. Two fail: a malformed one, in both decoders, and one whose schema tests a field it never read, which the JavaScript runtime takes as 0 and zelbyn, like the Python and Java runtimes, rejects. Development is on Linux; the Windows build is untested.
+All 190 schemas in [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) compile, at the commit `tools/ksy_corpus/expected.txt` records. Separately, decodes are compared with the official runtime's (0.11), value for value and offset for offset, on the 43 samples of the 18 formats that have samples in [kaitai_struct_samples](https://github.com/kaitai-io/kaitai_struct_samples), at the commit [doc/development.md](doc/development.md#corpus-check) gives. 41 of those agree. Two fail: a malformed one, in both decoders, and one whose schema tests a field it never read, which the JavaScript runtime takes as 0 and zelbyn, like the Python and Java runtimes, rejects. Development is on Linux; the Windows build is untested.
 
 ## Documentation
 
 - [Usage](doc/usage.md): building, the command line, the output, errors and exit codes, and the supported subset of Kaitai Struct.
-- [Development](doc/development.md): the checks a change must pass, the golden dumps, the benchmark, and the comparisons with the official runtime and with libyaml.
+- [Development](doc/development.md): the checks a change must pass, the benchmark, and the comparisons with the official runtime and with libyaml.
 - [Architecture](doc/arch.md): how the implementation works, and why.
+
+## License
+
+zelbyn is under the MIT License; see [LICENSE](LICENSE). It reads the [Kaitai Struct](https://kaitai.io/) language of the Kaitai Project, with which it is not affiliated, and adapts code of its C++ runtime; [THIRD_PARTY.md](THIRD_PARTY.md) gives the notices.

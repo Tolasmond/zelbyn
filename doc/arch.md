@@ -48,9 +48,7 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `zelbyn/field/` | The value tree: `Value`, `Instance`, `Span` and `Value_Tree`, and `write_value`, which writes a value as the text dump and error messages show it |
 | `zelbyn/reader/` | The decoder, the expression evaluator and the string decoders |
 | `zelbyn/dump/` | The text and JSON writers |
-| `formats/` | `gif.ksy` (from `kaitai_struct_formats`, unchanged, CC0-1.0) and `gif89a.ksy` |
-| `data/` | Six GIF sample files and `GifSpec.txt` |
-| `tests/` | The test package, the golden dumps (`tests/golden/`, `tests/golden/gif89a/`) and the schemas the import, params and recursive-type tests read (`tests/schemas/`) |
+| `tests/` | The test package and the schemas the import, params and recursive-type tests read (`tests/schemas/`) |
 | `tools/bench/` | The cold benchmark and its optional Kaitai Struct C++ reference |
 | `tools/kaitai_compare/` | A comparison of decodes, and of offsets, with the official Kaitai Struct JavaScript runtime |
 | `tools/ksy_corpus/` | The corpus test: every schema of `kaitai_struct_formats` compiled, against a record, and the samples of `kaitai_struct_samples` compared with the official runtime |
@@ -58,7 +56,7 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `tools/check.py` | The checks a change must pass, in one command, and the optional corpus checks |
 | `.github/workflows/check.yml` | CI: `tools/check.py` on each push to `main` and each pull request |
 
-`.gitattributes` normalizes text files to LF. It marks everything under `data/` and `tests/golden/` as binary, so that the samples and golden dumps are stored byte for byte.
+`.gitattributes` normalizes text files to LF. The repository holds no schemas or sample files of real formats; the tools that need them use clones of `kaitai_struct_formats` and `kaitai_struct_samples` kept outside it (§13).
 
 ## 3. Package dependencies
 
@@ -109,7 +107,7 @@ An `Arena` is a list of `virtual.Memory_Block`s: address space reserved up front
 *Reasons for an arena of its own:*
 - **No general heap.** Compiling and decoding make no allocation through `context.allocator` (tested in `memory_test.odin`), and freeing a plan or a tree is one call that releases a few blocks.
 - **No lock.** `core:mem/virtual`'s `Arena` takes a mutex on every allocation, and on Linux each lock also runs valgrind client requests, even in release builds. One thread uses each arena.
-- **No interface call per value.** `mem.Allocator` dispatches through a procedure pointer and a switch on the allocation mode. The decoder allocates once or more per set instance and per array, so `arena_make` does not go through that interface. When the decoder allocated through it, a slot's dynamic array and its `reserve` at a time, allocation took 35–40% of decoding `855.gif`; allocating each instance in one block, directly, made its cold decode 40% faster and its tree 23% smaller.
+- **No interface call per value.** `mem.Allocator` dispatches through a procedure pointer and a switch on the allocation mode. The decoder allocates once or more per set instance and per array, so `arena_make` does not go through that interface. When the decoder allocated through it, a slot's dynamic array and its `reserve` at a time, allocation took 35–40% of decoding a 900 KB GIF with `gif.ksy`; allocating each instance in one block, directly, made its cold decode 40% faster and its tree 23% smaller.
 - **1 MB commits.** Committing from nothing in small steps takes a system call each time. Committing a whole 4 MB block lets Linux back it with 2 MB huge pages, which it zeroes whole on first touch; that made a small compile take more than twice as long. 1 MB stays below a huge page.
 
 ### 4.2 `data`
@@ -203,7 +201,7 @@ Errors (`expression.Error`) carry a byte offset into the expression's text. `ksy
 
 The decoder evaluates a direct form without walking the tree (§7.9). The tree stays in place, and the decoder still uses it whenever the direct form cannot give a result.
 
-*Reason for direct forms:* the decoder evaluates a size, count, condition, `switch-on` or `repeat-until` expression once for every element it applies to. In `gif.ksy`, the expressions evaluated per element are exactly the three forms above. Evaluating the tree means a recursive call and a type switch for every node, and for a field reference also a look-up through the frame stack. A direct form is one slot read, plus one comparison for `Direct_Compare`. Keeping the tree beside the direct form means the evaluator alone defines the errors (§7.9). The tree evaluator took 31% of decoding `855.gif` and now takes about 1%, and its cold decode is 23% faster. Compiling every expression to bytecode would cover more expressions, but is a larger change that `gif.ksy` would not use.
+*Reason for direct forms:* the decoder evaluates a size, count, condition, `switch-on` or `repeat-until` expression once for every element it applies to. In `gif.ksy`, the expressions evaluated per element are exactly the three forms above. Evaluating the tree means a recursive call and a type switch for every node, and for a field reference also a look-up through the frame stack. A direct form is one slot read, plus one comparison for `Direct_Compare`. Keeping the tree beside the direct form means the evaluator alone defines the errors (§7.9). The tree evaluator took 31% of decoding a 900 KB GIF and now takes about 1%, and its cold decode is 23% faster. Compiling every expression to bytecode would cover more expressions, but is a larger change that `gif.ksy` would not use.
 
 **Printing.** `to_string(e)` writes an expression with every operation parenthesized, and a field reference as its path. The tests use it to check how an expression was grouped.
 
@@ -281,7 +279,7 @@ A type is compiled again for every field that uses it, so every field has its ow
 
 The instances of the set and of those nodes are of one type at different depths, and their expressions are evaluated in both. An `Instance` with `up` reaches a different instance from each, so `note_escapes`, called on every expression compiled, records in each set's `Set_Type` the first expression in it, or in a set inside it, that reaches out of it through `_parent`, or, in a value instance, through an imported schema's `_root`. A set reused by a field whose chain, but for the field, differs from the set's own (`reused_deeper`) is `Unsupported` with such an expression, at the expression, once every expression is compiled, the value instances put off among them (`compile_schema`). A field reused with the same chain, as `parent: _parent` gives `elf.ksy`'s `next`, has the same instances enclosing it, of the same sets, and so may. `_root` of the schema decoded is the first frame for all of them, an imported schema's `_root` is the outermost frame read as its top-level set, which the decoder finds at any depth outside a value instance (§7.9), and the `_io` of an enclosing instance is found from the instance the decoder reaches, so none of them is recorded. A value instance can be evaluated once those frames are gone, so it reaches an imported `_root` through `up`, as it does `_parent`. The official compiler rejects the same field accesses, since `_parent` of such a type has no single type, unless a `parent` gives it one.
 
-*Reason for reusing the set:* a type that contains itself would be compiled without end. Reusing the set keeps the plan finite, and fields are still found by slot. Copying the members onto each node that reuses it keeps the decoder and the dumps from following `recursive` for every instance, which cost about 70,000 instructions on `855.gif`.
+*Reason for reusing the set:* a type that contains itself would be compiled without end. Reusing the set keeps the plan finite, and fields are still found by slot. Copying the members onto each node that reuses it keeps the decoder and the dumps from following `recursive` for every instance, which cost about 70,000 instructions on that GIF.
 
 *Reason for compiling a type once per field:* expressions in a type can use `_parent` and `_root`, which resolve against the chain of sets enclosing that particular field, and the type's params take that field's arguments. Each field's copy is resolved in its own chain. It also guarantees that no plan node belongs to two sets. The value tree's layout relies on that: a set's slot count, and each child's slot, are properties of that set alone (§6.3).
 
@@ -345,7 +343,7 @@ The instances enclosing the argument's are not those the decoder reaches through
 
 The context of an error message ("attribute a") is formatted only when there is an error.
 
-**Extensions.** `-orig-id`, `-peek`, `-while-peek`, `-until-peek` and `-bits` exist so that `formats/gif89a.ksy` can describe the format of the SQLite schema zelbyn used before `.ksy`. With them, it reproduces that schema's dumps byte for byte (`tests/golden/gif89a/`). The "Schemas" section of `doc/usage.md` gives their exact meaning, and how each is written in standard Kaitai.
+**Extensions.** `-orig-id`, `-peek`, `-while-peek`, `-until-peek` and `-bits` were made so that a port of the SQLite schema zelbyn used before `.ksy` could describe its format and reproduce its dumps byte for byte. The "Schemas" section of `doc/usage.md` gives their exact meaning, and how each is written in standard Kaitai.
 
 ## 6. The plan (`metadata`)
 
@@ -541,7 +539,7 @@ As the official compiler does, the compiler marks every attribute that follows a
 
 `check_valid` checks a value, given the element's index for `_index`. A `Valid_Expr` evaluates each check with `eval_bool`, with the value as `_`, and fails with the error of the first that is false; an error in an expression is the check's. A `Valid_In_Enum` searches the enum's values for the value, as an `int`. The other three go to `check_constant`, which compares the value with the constants of its own type; bit fields use it directly. Range comparisons are written `!(lo <= v)` and `!(v <= hi)`, so that a NaN fails every range. Blobs support equality and `any-of`. A failure is `Not_Equal`, `Less_Than_Min`, `Greater_Than_Max`, `Not_Any_Of`, `Not_In_Enum` or `Expr_False`, reported at the offset where the element started.
 
-*Reason for not calling `check_valid` without a check:* most fields have none, and the call for every element was 5–9% of the decode instructions of the GIF samples.
+*Reason for not calling `check_valid` without a check:* most fields have none, and the call for every element was 5–9% of the decode instructions of GIF files with `gif.ksy`.
 
 ### 7.8 Counting rules
 
@@ -609,7 +607,7 @@ Memory and time are bounded by `Limits`, which `read` and `read_from_bytes` take
 - **`max_memory`** (`DEFAULT_LIMITS`: 1 GiB, some 300 times the largest tree of the samples, 3.3 MB of a PNG with Exif) sets the tree's `Arena.limit` to the bytes used once the input is read, plus it. Every allocation of the tree goes through `arena_make` (`tree_make`, `make_values`, `reserve_exactly`, `reserve_growing`, `make_instance`) or `arena_allocator`, and a failure is `Memory_Limit`. So do the decoder's own records, its path, frames, streams, maps and the parse instances it keeps (`keep_pending`), whose frames, streams and path it copies, as many as a schema has parse instances for each instance, however few steps they take: each append (`push_record`), copy (`clone_dynamic`) and map insert reports a failure. An append to the path just before an error is reported is not checked, as the error it reports is the decode's. `process_bytes` gives inflate the arena through `Failure_Recorder`, which records whether an allocation failed: inflate reports some of those as another error, which is then `Memory_Limit` too, not `Decompression_Failed`. A count larger than the input reserves only what the input can hold, and an element that adds no value takes no room (§7.4).
 - **`max_steps`** (`DEFAULT_LIMITS`: 100,000,000) is taken by `read_element`, once an element of a field, set instance or parse instance; by `eval_value_ref`, once a value instance evaluated, so that a chain whose links each use the next twice, which doubles the work with each, ends; and by `take_steps` for each item of an array literal, of `values_to_bytes` and of `.min` and `.max`, also each string that string `+` (`join_strings`) copies. A decode that passes it fails with `Step_Limit`. Every other loop of the decoder and evaluator is bounded by the input or by one of these.
 
-0 lifts either limit. *Reason for the defaults:* they are far beyond any input of the corpus, and bound a decode to seconds and its tree to less than the memory of a machine that runs it. A `repeat-expr` of far more elements than `max_steps`, each of which reads nothing, stops with `Step_Limit` in 0.7 s; the elements of `gif.ksy`'s samples are read at about 40 million a second, so its steps would take some 3 s. One whose elements each add a value stops with `Memory_Limit` at 1 GiB, in 900 MB of resident memory, as the arena commits only what it hands out.
+0 lifts either limit. *Reason for the defaults:* they are far beyond any input of the corpus, and bound a decode to seconds and its tree to less than the memory of a machine that runs it. A `repeat-expr` of far more elements than `max_steps`, each of which reads nothing, stops with `Step_Limit` in 0.7 s; the elements of GIF files are read with `gif.ksy` at about 40 million a second, so its steps would take some 3 s. One whose elements each add a value stops with `Memory_Limit` at 1 GiB, in 900 MB of resident memory, as the arena commits only what it hands out.
 
 A compile takes time linear in its schema's size but in one case. A name that must be unique, or is looked up, is compared with each of the others while there are fewer than 64 (`INDEX_FROM`), and found in a map from then on: a key among its mapping's (`yaml`'s `check_key`), and an id among its type's (`claim_id`), a type or an enum among those of the type that declares it (`Type_Def.type_index`, `enum_index`) and a value among its enum's (`build_enums`). A node's column is its byte offset in its line when the source has no multibyte character, which `check_characters` notes; else the parser counts it on from the last it counted on that line (`char_column`), so a flow mapping of many keys on one line is linear too. Each schema of 100,000 types or instances compiles, or is rejected, in under 0.1 s with `-o:speed`, where comparing each key with every other took up to 37 s; `yaml_duplicate_among_many`, `ksy_many_names` and `limits_compile_nesting` time out if that comes back. The case: the resolver looks a name up among the members of its set one by one (`resolve_field`), and an enum constant among its enum's values, so n expressions that each name one of n members take time in n², some 4 s for 40,000.
 
@@ -645,7 +643,7 @@ In a tree read with spans:
 
 `value_span(instance, k, i)` gives the span of value `i` of slot `k`, and `root_span(tree, i)` that of a root value. Params, which are not read, have no span. When it records the span of a value in a cell, the decoder finds the instance from the innermost frame.
 
-*Reason for this layout:* a span is found from the slot alone, so no instance or array needs a pointer to its spans. A first layout that gave every value its own array, with its spans before it, made the tree of the samples 73% bigger; keeping the spans of single values next to the cells makes it 38–44% bigger, and decoding with spans 29–31% slower (12% on the smallest sample).
+*Reason for this layout:* a span is found from the slot alone, so no instance or array needs a pointer to its spans. A first layout that gave every value its own array, with its spans before it, made the tree of GIF files with `gif.ksy` 73% bigger; keeping the spans of single values next to the cells makes it 38–44% bigger, and decoding with spans 29–31% slower (12% on the smallest sample).
 
 ## 9. Output (`dump`)
 
@@ -701,10 +699,8 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 
 | File | What it covers |
 |---|---|
-| `helpers.odin` | Loading the GIF schemas; decoding helpers, with or without spans; finding a field's slot and values by name |
-| `golden_test.odin` | The text and JSON dumps of all six samples, from trees read with and without spans, compared byte for byte with `tests/golden/` (from `gif.ksy`) and `tests/golden/gif89a/` (from `gif89a.ksy`). With `-define:GOLDEN_RECORD=true` the dumps are re-recorded instead. |
-| `decode_samples_test.odin` | Per-sample values: dimensions, colour-table sizes, block counts, trailer |
-| `decode_malformed_test.odin` | Truncated and malformed inputs, their error kinds, offsets and paths; truncation sweeps over the samples; counts larger than the input; negative counts, which read nothing, and lengths |
+| `helpers.odin` | `SAMPLE_KSY`, a schema of no real format with the shapes the decoder's tests need, and `sample_input`, which makes its inputs of any size; decoding helpers, with or without spans; finding a field's slot and values by name |
+| `decode_malformed_test.odin` | Empty, malformed and truncated inputs and a missing file, their error kinds, offsets and paths; counts larger than the input; negative counts, which read nothing, and lengths |
 | `memory_test.odin` | That decoding, with and without spans and with `process: zlib`, `read` and `ksy.compile` make no heap allocations; that errors allocate only their message or path, and a failed check's value and expected; tree lifetime and reuse after destroy |
 | `checks_test.odin` | Byte order, `valid` checks and bit fields, on hand-built plans, with the value and the expected value each failed check reports, shortened when long |
 | `expression_parse_test.odin` | Parsing, precedence and syntax errors, and type errors, also of floats |
@@ -720,7 +716,7 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | `layout_test.odin` | The layout of the arena and the value tree, on the addresses themselves: alignment of `arena_make` and of the allocator up to a page, also in a block of its own; growth in place of the most recent allocation, past a commit, and moving otherwise, with its bytes; block rollover, the doubling target and a block for a large allocation; `make_instance`'s block, with and without spans, and empty slots in a decoded tree (unread, read no times, a parse instance whose `if` is false); and spans after slots grow, by `repeat: eos` and past the bytes left, of sets, cells and `-bits` fields |
 | `file_test.odin` | `file.read_entire_file` with injected `read` failures, at once and after partial reads, and `EINTR`: the error kept, and nothing left allocated, with the heap or an arena (Linux, macOS and the BSDs) |
 | `data_reader_test.odin` | `data.Reader` reads and bounds checks, and bit reads in both orders |
-| `dump_test.odin` | Dump format details, and `field.write_value` |
+| `dump_test.odin` | The text and JSON dumps of `SAMPLE_KSY`, exactly, from trees read with and without spans, and the JSON of a large tree parsing; dump format details, and `field.write_value` |
 
 Hand-built plans in the tests are made with `plan_node`, which sets `slot_count` from the children it is given. Bit fields are set on a child before the parent is built. `tests/schemas/` holds the schemas that the import, params and recursive-type tests read from files.
 
@@ -730,7 +726,7 @@ These are not part of the program's build.
 
 - **`tools/bench/`** measures cold runs: one fresh process per measurement, as zelbyn is run (§1).
   - `main.odin` is a one-shot program. It compiles the schema, reads the file, decodes it with `read_from_bytes` (with spans after `--spans`), and writes the JSON dump to memory. It prints each phase's time, the page faults taken during the decode, and the tree's size. `faults_posix.odin` counts page faults with `getrusage`. `faults_windows.odin` returns -1, selected by `#+build` tags.
-  - `bench.py` builds zelbyn and the one-shot program with `-o:speed`. It runs them 200 times per sample, interleaved, and prints medians, including the whole-process time of the CLI (with `--dump json`, or with `--offsets` after `--spans`) and of a process that exits at once.
+  - `bench.py` builds zelbyn and the one-shot program with `-o:speed`. It runs them 200 times per file it is given, interleaved, and prints medians, including the whole-process time of the CLI (with `--dump json`, or with `--offsets` after `--spans`) and of a process that exits at once.
   - `cpp/` builds an optional reference with the official Kaitai Struct C++ runtime. `generate.js` runs the pinned compiler's `cpp_stl` target, `build.py` compiles the result with `oneshot.cpp`, and the output goes to the ignored `cpp/build/`.
 - **`tools/kaitai_compare/`** checks zelbyn's decode against the official Kaitai Struct runtime; doc/development.md gives its use and the runtime's own errors, and the comments at the top of `compare.py` and `decode.js` the details. `compare.py` converts a schema and the schemas it imports to JSON with PyYAML, and `decode.js` decodes the files with the official compiler and JavaScript runtime, pinned at 0.11.0 in `package.json`, in debug mode, which records where each value was read. `compare.py` compares the result value by value with zelbyn's `--dump json`, or with `--offsets` the start of every value that is not a set instance with zelbyn's `--offsets` dump. Two things it must know of each value come from the runtime's side:
   - **Its name.** Fields are matched by the names zelbyn writes, the `-orig-id` where there is one. `decode.js` names each field of the runtime's from the spec of the type its object was generated from, which it finds by the object's class (`CLASSES`), so a name belongs to one type, and nested or imported types that share a short name keep their own params and parse instances. A name can be any string: fields are held in objects without a prototype, and each result is in an envelope, `{"value": ...}` or `{"error": ...}`. Attributes of one type that share an `-orig-id` under exclusive conditions are one field (`merge_fields`).

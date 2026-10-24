@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds the Kaitai Struct C++ reference for tools/bench/bench.py.
 
-    python3 tools/bench/cpp/build.py <runtime_dir> [--schema formats/gif.ksy]
+    python3 tools/bench/cpp/build.py <runtime_dir> --schema <schema.ksy>
 
 Run from the repository root, after `npm ci --prefix tools/kaitai_compare`.
 runtime_dir is a clone of kaitai_struct_cpp_stl_runtime at tag 0.11, kept
@@ -31,7 +31,7 @@ RUNTIME_TAG = '0.11'
 def main():
     p = argparse.ArgumentParser(description='Builds the Kaitai Struct C++ reference for bench.py.')
     p.add_argument('runtime_dir', help='a clone of kaitai_struct_cpp_stl_runtime at tag ' + RUNTIME_TAG)
-    p.add_argument('--schema', default='formats/gif.ksy')
+    p.add_argument('--schema', required=True)
     args = p.parse_args()
 
     if not os.path.isdir(NODE_MODULES):

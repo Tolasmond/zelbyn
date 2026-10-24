@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measures zelbyn cold, one fresh process per measurement.
 
-    python3 tools/bench/bench.py [--runs N] [--schema S] [--spans] [--cpp BIN] [file ...]
+    python3 tools/bench/bench.py --schema S [--runs N] [--spans] [--cpp BIN] file ...
 
 Run from the repository root; needs Odin. Builds zelbyn and the one-shot
 program in tools/bench with -o:speed, then runs each of these RUNS times
@@ -20,13 +20,11 @@ programs:
   reads the file and decodes it with the official runtime.
 
 With --spans the one-shot program decodes with spans. Prints the median
-of every figure. The files default to the samples in
-data/, and the schema to formats/gif.ksy; the C++ reference must have been
-built from the same schema. A program that fails stops the run.
+of every figure. The C++ reference must have been built from the same
+schema. A program that fails stops the run.
 """
 
 import argparse
-import glob
 import os
 import statistics
 import subprocess
@@ -58,13 +56,13 @@ def median(rows, name):
 
 def main():
     p = argparse.ArgumentParser(description='Measures zelbyn cold, one fresh process per measurement.')
-    p.add_argument('files', nargs='*')
+    p.add_argument('files', nargs='+')
     p.add_argument('--runs', type=int, default=200)
-    p.add_argument('--schema', default='formats/gif.ksy')
+    p.add_argument('--schema', required=True)
     p.add_argument('--spans', action='store_true', help='decode with spans; the CLI writes the text dump with --offsets')
     p.add_argument('--cpp', help='the Kaitai Struct C++ reference, from cpp/build.py')
     args = p.parse_args()
-    files = args.files or sorted(f for f in glob.glob('data/*') if f.lower().endswith('.gif'))
+    files = args.files
 
     with tempfile.TemporaryDirectory() as tmp:
         cli, oneshot = os.path.join(tmp, 'zelbyn' + EXE), os.path.join(tmp, 'bench_oneshot' + EXE)

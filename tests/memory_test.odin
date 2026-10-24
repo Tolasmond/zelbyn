@@ -12,17 +12,16 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 
-// With spans or without.
+// With spans or without, a small tree and a large one.
 @(test)
 decode_uses_only_arena :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
 	ff: mdata.File_Format
 	defer mdata.destroy_file_format(&ff)
-	if !load_gif(t, &ff) do return
+	if !load_sample(t, &ff) do return
 
-	for s in ([]Sample{SAMPLE_855, SAMPLE_CG89A}) do for spans in ([?]bool{false, true}) {
-		data, read_err := os.read_entire_file(s.path, context.allocator)
-		if !testing.expectf(t, read_err == nil, "reading %s: %v", s.path, read_err) do continue
+	for records in ([?]int{4, 20000}) do for spans in ([?]bool{false, true}) {
+		data := sample_input(records)
 		defer delete(data)
 
 		d: Decoded
@@ -34,13 +33,13 @@ decode_uses_only_arena :: proc(t: ^testing.T) {
 		{
 			context.allocator = mem.tracking_allocator(&track)
 			context.logger = log.nil_logger()
-			decode_bytes(&ff, data, &d, spans)
+			decode_bytes(&ff, data[:], &d, spans)
 		}
 
-		testing.expectf(t, d.err.kind == .None, "%s: %v at 0x%08X in %s", s.path, d.err.kind, d.err.offset, d.err.path)
-		testing.expectf(t, d.consumed == s.consumed, "%s: consumed %v, want %v", s.path, d.consumed, s.consumed)
-		testing.expectf(t, track.total_allocation_count == 0, "%s, spans %v: %v heap allocations, want 0", s.path, spans, track.total_allocation_count)
-		testing.expectf(t, d.tree.arena.block != nil && d.tree.arena.block.used > 0, "%s: arena unused", s.path)
+		testing.expectf(t, d.err.kind == .None, "%v records: %v at 0x%08X in %s", records, d.err.kind, d.err.offset, d.err.path)
+		testing.expectf(t, d.consumed == len(data), "%v records: consumed %v, want %v", records, d.consumed, len(data))
+		testing.expectf(t, track.total_allocation_count == 0, "%v records, spans %v: %v heap allocations, want 0", records, spans, track.total_allocation_count)
+		testing.expectf(t, d.tree.arena.block != nil && d.tree.arena.block.used > 0, "%v records: arena unused", records)
 	}
 }
 
@@ -80,7 +79,15 @@ read_uses_only_arena :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
 	ff: mdata.File_Format
 	defer mdata.destroy_file_format(&ff)
-	if !load_gif(t, &ff) do return
+	if !load_sample(t, &ff) do return
+
+	data := sample_input(20000)
+	size := len(data)
+	path, ok := write_temp_file(t, data[:])
+	delete(data)
+	if !ok do return
+	defer delete(path)
+	defer os.remove(path)
 
 	d: Decoded
 	defer destroy_decoded(&d)
@@ -91,12 +98,12 @@ read_uses_only_arena :: proc(t: ^testing.T) {
 	{
 		context.allocator = mem.tracking_allocator(&track)
 		context.logger = log.nil_logger()
-		decode_file(&ff, SAMPLE_855.path, &d)
+		decode_file(&ff, path, &d)
 	}
 
 	testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path)
 	testing.expect_value(t, track.total_allocation_count, 0)
-	testing.expectf(t, d.tree.arena.block != nil && d.tree.arena.block.used > uint(SAMPLE_855.file_size), "the arena does not hold the file")
+	testing.expectf(t, d.tree.arena.block != nil && d.tree.arena.block.used > uint(size), "the arena does not hold the file")
 }
 
 @(test)
@@ -104,9 +111,9 @@ decode_error_allocates_only_its_strings :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
 	ff: mdata.File_Format
 	defer mdata.destroy_file_format(&ff)
-	if !load_gif(t, &ff) do return
+	if !load_sample(t, &ff) do return
 
-	text := "hello world, not a gif at all"
+	text := "hello world, not a sample at all"
 
 	// recorded inside the block, asserted after it: the tracker frees the path
 	kind: dat.Read_Error
@@ -124,65 +131,65 @@ decode_error_allocates_only_its_strings :: proc(t: ^testing.T) {
 		d: Decoded
 		decode_bytes(&ff, transmute([]byte)text, &d)
 		kind = d.err.kind
-		path_ok = d.err.path == "GIF89a[0].Signature[0]" && d.err.value == `"hel"` && d.err.expected == `"GIF"`
+		path_ok = d.err.path == "sample[0].magic[0]" && d.err.value == "<4 bytes> 68 65 6c 6c" && d.err.expected == "<4 bytes> 53 4d 50 4c"
 		live_with_error = len(track.allocation_map)
 		destroy_decoded(&d)
 
 		md: Decoded
-		decode_file(&ff, "data/does_not_exist.gif", &md)
+		decode_file(&ff, "tests/does_not_exist.bin", &md)
 		missing_kind = md.err.kind
 		destroy_decoded(&md)
 	}
 
 	testing.expect_value(t, kind, .Not_Equal)
-	testing.expect(t, path_ok, "the error should be in GIF89a[0].Signature[0], reading \"hel\", expecting \"GIF\"")
+	testing.expect(t, path_ok, "the error should be in sample[0].magic[0], reading 68 65 6c 6c, expecting 53 4d 50 4c")
 	testing.expect_value(t, live_with_error, 3) // only Parse_Error.path, value and expected
 	testing.expect_value(t, missing_kind, .File_Read_Failed)
 	testing.expect_value(t, len(track.allocation_map), 0)
 }
 
-// The GIF that the tests below decode: a comment "abc", then the trailer.
+// Writes data to a new temporary file and returns its path, which the
+// caller deletes, and removes the file.
 @(private = "file")
-comment_gif :: proc() -> [dynamic]byte {
-	return with_header({0x21, 0xFE, 0x03, 'a', 'b', 'c', 0x00, 0x3B})
-}
-
-// The slots of the fields of comment_gif that check_comment_gif looks at,
-// found while the schema exists.
-@(private = "file")
-Comment_Slots :: struct {
-	signature, version, blocks: int,
-	path:                       [5]int, // blocks, extensions, comment, its data, the bytes
-}
-
-@(private = "file")
-comment_slots :: proc(ff: ^mdata.File_Format) -> (s: Comment_Slots) {
-	s.signature, s.version, s.blocks = slot_by_name(ff.root, "signature"), slot_by_name(ff.root, "version"), slot_by_name(ff.root, "blocks")
-	path := [len(s.path)]string{"blocks", "extensions", "comment_extension", "comment_data", "data_sub_block_values"}
-	set := ff.root
-	for name, i in path {
-		s.path[i] = slot_by_name(set, name)
-		if i + 1 < len(path) do set = set.children[child_index(set, name)]
+write_temp_file :: proc(t: ^testing.T, data: []byte) -> (path: string, ok: bool) {
+	f, create_err := os.create_temp_file("", "zelbyn_test_*.bin")
+	if !testing.expectf(t, create_err == nil, "creating a temporary file: %v", create_err) do return
+	path = strings.clone(os.name(f))
+	_, write_err := os.write(f, data)
+	os.close(f)
+	if !testing.expectf(t, write_err == nil, "writing %s: %v", path, write_err) {
+		_ = os.remove(path)
+		delete(path)
+		return "", false
 	}
-	return
+	return path, true
 }
 
-// Checks the tree of comment_gif without the schema; returns its blob.
+// The slots of the fields of sample_input(4) that check_sample_tree looks
+// at, found while the schema exists.
 @(private = "file")
-check_comment_gif :: proc(t: ^testing.T, d: ^Decoded, s: Comment_Slots) -> (blob: []byte) {
+Sample_Slots :: struct {
+	name, records, body: int,
+}
+
+@(private = "file")
+sample_slots :: proc(ff: ^mdata.File_Format) -> Sample_Slots {
+	record := ff.root.children[child_index(ff.root, "records")]
+	return {slot_by_name(ff.root, "name"), slot_by_name(ff.root, "records"), slot_by_name(record, "body")}
+}
+
+// Checks the tree of sample_input(4) without the schema; returns the raw
+// body of its third record.
+@(private = "file")
+check_sample_tree :: proc(t: ^testing.T, d: ^Decoded, s: Sample_Slots) -> (blob: []byte) {
 	if !testing.expectf(t, d.err.kind == .None, "%v at 0x%08X in %s", d.err.kind, d.err.offset, d.err.path) do return
 
-	g := d.tree.root[0].(^fld.Instance)
-	testing.expect_value(t, g.slots[s.signature][0].(string), "GIF")
-	testing.expect_value(t, g.slots[s.version][0].(string), "89a")
-
-	if !testing.expect_value(t, len(g.slots[s.blocks]), 1) do return
-	instance := g
-	for i in 0 ..< len(s.path) - 1 {
-		instance = instance.slots[s.path[i]][0].(^fld.Instance)
-	}
-	blob = instance.slots[s.path[len(s.path) - 1]][0].([]byte)
-	testing.expect_value(t, string(blob), "abc")
+	root := d.tree.root[0].(^fld.Instance)
+	testing.expect_value(t, root.slots[s.name][0].(string), "sample")
+	if !testing.expect_value(t, len(root.slots[s.records]), 4) do return
+	record := root.slots[s.records][2].(^fld.Instance)
+	blob = record.slots[s.body][0].([]byte)
+	testing.expect_value(t, string(blob), "\x02\x03\x04")
 	return
 }
 
@@ -192,12 +199,12 @@ check_comment_gif :: proc(t: ^testing.T, d: ^Decoded, s: Comment_Slots) -> (blob
 value_tree_outlives_schema :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
 	ff: mdata.File_Format
-	if !load_gif(t, &ff) {
+	if !load_sample(t, &ff) {
 		mdata.destroy_file_format(&ff)
 		return
 	}
 
-	data := comment_gif()
+	data := sample_input(4)
 	defer delete(data)
 
 	d: Decoded
@@ -213,10 +220,10 @@ value_tree_outlives_schema :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, track.total_allocation_count, 0)
 
-	slots := comment_slots(&ff)
+	slots := sample_slots(&ff)
 	mdata.destroy_file_format(&ff)
 
-	blob := check_comment_gif(t, &d, slots)
+	blob := check_sample_tree(t, &d, slots)
 	start, end := uintptr(raw_data(data)), uintptr(raw_data(data)) + uintptr(len(data))
 	testing.expect(t, len(blob) > 0 && uintptr(raw_data(blob)) >= start && uintptr(raw_data(blob)) + uintptr(len(blob)) <= end, "the blob is not a view of the input")
 }
@@ -227,28 +234,19 @@ value_tree_outlives_schema :: proc(t: ^testing.T) {
 value_tree_from_read_outlives_file :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
 	ff: mdata.File_Format
-	if !load_gif(t, &ff) {
+	if !load_sample(t, &ff) {
 		mdata.destroy_file_format(&ff)
 		return
 	}
 
-	data := comment_gif()
-	f, create_err := os.create_temp_file("", "zelbyn_test_*.gif")
-	if !testing.expectf(t, create_err == nil, "creating a temporary file: %v", create_err) {
-		delete(data)
-		mdata.destroy_file_format(&ff)
-		return
-	}
-	path := strings.clone(os.name(f))
-	defer delete(path)
-	_, write_err := os.write(f, data[:])
-	os.close(f)
+	data := sample_input(4)
+	path, ok := write_temp_file(t, data[:])
 	delete(data)
-	if !testing.expectf(t, write_err == nil, "writing %s: %v", path, write_err) {
-		_ = os.remove(path)
+	if !ok {
 		mdata.destroy_file_format(&ff)
 		return
 	}
+	defer delete(path)
 
 	d: Decoded
 	defer destroy_decoded(&d)
@@ -263,12 +261,12 @@ value_tree_from_read_outlives_file :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, track.total_allocation_count, 0)
 
-	slots := comment_slots(&ff)
+	slots := sample_slots(&ff)
 	mdata.destroy_file_format(&ff)
 	remove_err := os.remove(path)
 	testing.expectf(t, remove_err == nil, "removing %s: %v", path, remove_err)
 
-	check_comment_gif(t, &d, slots)
+	check_sample_tree(t, &d, slots)
 }
 
 // A string argument of a type's param, from a literal of the schema, part
@@ -364,9 +362,9 @@ value_tree_reuse_after_destroy :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
 	ff: mdata.File_Format
 	defer mdata.destroy_file_format(&ff)
-	if !load_gif(t, &ff) do return
+	if !load_sample(t, &ff) do return
 
-	data := with_header({0x3B})
+	data := sample_input(4)
 	defer delete(data)
 
 	d: Decoded
@@ -402,15 +400,16 @@ value_tree_reuse_after_destroy :: proc(t: ^testing.T) {
 	testing.expect_value(t, first_kind, .None)
 	testing.expect(t, reset_ok, "destroy_value_tree did not reset the tree")
 	testing.expect_value(t, second_kind, .None)
-	testing.expect_value(t, second_consumed, 14)
+	testing.expect_value(t, second_consumed, len(data))
 }
 
 @(test)
 schema_compile_uses_only_arena :: proc(t: ^testing.T) {
-	for path in ([?]string{KSY_PATH, GIF_KSY_PATH}) {
-		src, read_err := os.read_entire_file(path, context.allocator)
-		if !testing.expectf(t, read_err == nil, "reading %s: %v", path, read_err) do continue
-		defer delete(src)
+	Schema :: struct {
+		path, src: string, // path names it
+	}
+	for schema in ([?]Schema{{"SAMPLE_KSY", SAMPLE_KSY}, {"STRING_ARGS_KSY", STRING_ARGS_KSY}}) {
+		path, src := schema.path, schema.src
 
 		ff: mdata.File_Format
 		defer mdata.destroy_file_format(&ff)
@@ -424,7 +423,7 @@ schema_compile_uses_only_arena :: proc(t: ^testing.T) {
 		{
 			context.allocator = mem.tracking_allocator(&track)
 			context.logger = log.nil_logger()
-			err = ksy.compile(string(src), &ff)
+			err = ksy.compile(src, &ff)
 		}
 
 		testing.expectf(t, err.kind == .None, "%s: %v at %v:%v: %s", path, err.kind, err.line, err.column, err.message)
@@ -493,7 +492,7 @@ destroy_file_format_resets :: proc(t: ^testing.T) {
 		mdata.destroy_file_format(&ff) // never loaded
 	}
 
-	if !load_gif(t, &ff) {
+	if !load_sample(t, &ff) {
 		mdata.destroy_file_format(&ff)
 		return
 	}

@@ -70,8 +70,8 @@ CHECK_CASES := [?]Check_Case {
 	{"none of", .UInt8, 1, 0, mdata.Valid_Any_Of{{u8(1), u8(3)}}, {2}, .Not_Any_Of, "r[0].f[0]", 0, `2`, `1, 3`},
 	{"float in range", .Float32, 1, 0, mdata.Valid_Range{f32(0), f32(1)}, {0x00, 0x00, 0x00, 0x3f}, .None, "", 0, ``, ``}, // 0.5
 	{"NaN in no range", .Float32, 1, 0, mdata.Valid_Range{f32(0), f32(1)}, {0x00, 0x00, 0xc0, 0x7f}, .Less_Than_Min, "r[0].f[0]", 0, `NaN`, `0`},
-	{"string eq", .String, 1, 3, mdata.Valid_Eq{"GIF"}, {'G', 'I', 'F'}, .None, "", 0, ``, ``},
-	{"string not eq", .String, 1, 3, mdata.Valid_Eq{"GIF"}, {'G', 'I', 'G'}, .Not_Equal, "r[0].f[0]", 0, `"GIG"`, `"GIF"`},
+	{"string eq", .String, 1, 3, mdata.Valid_Eq{"ABC"}, {'A', 'B', 'C'}, .None, "", 0, ``, ``},
+	{"string not eq", .String, 1, 3, mdata.Valid_Eq{"ABC"}, {'A', 'B', 'D'}, .Not_Equal, "r[0].f[0]", 0, `"ABD"`, `"ABC"`},
 	{"contents", .Blob, 1, 2, mdata.Valid_Eq{[]byte{1, 2}}, {1, 2}, .None, "", 0, ``, ``},
 	{"not contents", .Blob, 1, 2, mdata.Valid_Eq{[]byte{1, 2}}, {1, 3}, .Not_Equal, "r[0].f[0]", 0, `<2 bytes> 01 03`, `<2 bytes> 01 02`},
 	{"blob any of", .Blob, 1, 1, mdata.Valid_Any_Of{{[]byte{1}, []byte{2}}}, {2}, .None, "", 0, ``, ``},
