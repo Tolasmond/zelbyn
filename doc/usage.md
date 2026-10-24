@@ -4,7 +4,7 @@ How to build and run zelbyn, what it writes, and the subset of Kaitai Struct it 
 
 ## Building
 
-Requires Odin `dev-2026-10` or newer. Build and run from the repository root:
+Each [release](https://github.com/Tolasmond/zelbyn/releases) has binaries for Linux and Windows (x86-64), with no dependencies but the C library. Building it requires Odin `dev-2026-10` or newer. Build and run from the repository root:
 
 ```
 odin build . -out:build/zelbyn

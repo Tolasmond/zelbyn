@@ -40,7 +40,7 @@ import sys
 import tempfile
 
 # The Odin release the checks are run with, here and in CI
-# (.github/workflows/check.yml): dev-2026-10, commit 84bc3fc.
+# (.github/actions/install-odin): dev-2026-10, commit 84bc3fc.
 ODIN_VERSION = 'dev-2026-10'
 ODIN_COMMIT = '84bc3fc'
 

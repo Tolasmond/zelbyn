@@ -1,0 +1,95 @@
+# Publishes a GitHub release when a version tag (v*) is pushed: zelbyn
+# built with -o:speed on Linux and Windows x86-64, the platforms check.yml
+# tests, once tools/check.py passes on the tagged commit. Each archive holds
+# the binary, LICENSE, THIRD_PARTY.md and README.md; SHA256SUMS lists the
+# archives' checksums. A pull request that changes this file or
+# actions/install-odin builds and packages without publishing
+# (doc/development.md, "Releases").
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/actions/install-odin/**
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # the oldest supported Ubuntu runner, for the oldest glibc
+          - os: ubuntu-22.04
+            target: linux-amd64
+            python: python3
+          - os: windows-2025
+            target: windows-amd64
+            python: python
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/install-odin
+
+      - name: Checks
+        run: ${{ matrix.python }} tools/check.py
+
+      - name: Name the archive
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then version="$GITHUB_REF_NAME"; else version="dev-${GITHUB_SHA::7}"; fi
+          echo "PACKAGE=zelbyn-$version-${{ matrix.target }}" >> "$GITHUB_ENV"
+
+      - name: Build and package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "dist/$PACKAGE"
+          odin build . -o:speed -out:"dist/$PACKAGE/zelbyn"
+          cp LICENSE THIRD_PARTY.md README.md "dist/$PACKAGE/"
+          tar -czf "dist/$PACKAGE.tar.gz" -C dist "$PACKAGE"
+
+      - name: Build and package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "dist\$($env:PACKAGE)" | Out-Null
+          odin build . -o:speed "-out:dist\$($env:PACKAGE)\zelbyn.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item LICENSE, THIRD_PARTY.md, README.md "dist\$($env:PACKAGE)\"
+          Compress-Archive -Path "dist\$($env:PACKAGE)" -DestinationPath "dist\$($env:PACKAGE).zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # a tag with a hyphen (v0.2.0-rc.1) is a pre-release
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum zelbyn-* > SHA256SUMS
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${prerelease[@]}" zelbyn-* SHA256SUMS

@@ -1,0 +1,37 @@
+# Installs the Odin release that zelbyn is pinned to (tools/check.py checks
+# the commit), checked against its SHA-256, and puts it on the PATH. Used
+# by check.yml and release.yml, so the pin is kept here alone.
+name: Install Odin
+description: Installs Odin dev-2026-10 (commit 84bc3fc) on Linux or Windows x86-64.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Odin dev-2026-10 (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        curl -fsSL -o odin.tar.gz https://github.com/odin-lang/Odin/releases/download/dev-2026-10/odin-linux-amd64-dev-2026-10.tar.gz
+        echo "c3c8b095621fd0c75f7f73e3a0829f1b4d45324225f20ba11ed8dc4da310a8ab  odin.tar.gz" | sha256sum -c -
+        mkdir "$RUNNER_TEMP/odin"
+        tar -xzf odin.tar.gz -C "$RUNNER_TEMP/odin" --strip-components=1
+        rm odin.tar.gz
+        echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
+
+    - name: Install Odin dev-2026-10 (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri https://github.com/odin-lang/Odin/releases/download/dev-2026-10/odin-windows-amd64-dev-2026-10.zip -OutFile odin.zip
+        $hash = (Get-FileHash odin.zip -Algorithm SHA256).Hash
+        if ($hash -ne 'B6B2E426A8B6F147B74EC7E18BEF8DF27CF40FE16193159DF7CA09A0CC0C2011') { throw "odin.zip: SHA-256 $hash" }
+        Expand-Archive odin.zip -DestinationPath "$env:RUNNER_TEMP\odin"
+        Remove-Item odin.zip
+        Add-Content -Path $env:GITHUB_PATH -Value "$env:RUNNER_TEMP\odin\dist"
+
+    - name: Fail on another platform
+      if: runner.os != 'Linux' && runner.os != 'Windows'
+      shell: bash
+      run: |
+        echo "install-odin: no pinned Odin for $RUNNER_OS" >&2
+        exit 1

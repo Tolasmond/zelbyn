@@ -55,6 +55,8 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `tools/yaml_corpus/` | A comparison of the YAML parser with libyaml |
 | `tools/check.py` | The checks a change must pass, in one command, and the optional corpus checks |
 | `.github/workflows/check.yml` | CI: `tools/check.py` on each push to `main` and each pull request |
+| `.github/workflows/release.yml` | A GitHub release of the binaries for Linux and Windows on each tag `v*` |
+| `.github/actions/install-odin/` | Installs the pinned Odin release, for both workflows |
 
 `.gitattributes` normalizes text files to LF. The repository holds no schemas or sample files of real formats; the tools that need them use clones of `kaitai_struct_formats` and `kaitai_struct_samples` kept outside it (§13).
 
