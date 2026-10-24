@@ -1,9 +1,14 @@
 #+build linux, darwin, freebsd, openbsd, netbsd
 package file
 
+import "core:c"
 import "core:mem"
 import "core:os"
 import "core:sys/posix"
+
+// The read system call, as read_entire_file makes it: posix.read, or in a
+// test, one that fails as the system's can.
+Read_Proc :: #type proc "c" (fd: posix.FD, buf: [^]byte, nbyte: c.size_t) -> c.ssize_t
 
 // Reads the whole of the file at path into memory allocated with
 // allocator, as os.read_entire_file does, but with only the system calls
@@ -11,9 +16,10 @@ import "core:sys/posix"
 // which costs a cold process more than reading a schema does. A file that
 // is not a regular one, or whose size is not known, a path longer than
 // the buffer for it, and an empty file are read with os.read_entire_file.
-// Errors are those os would give.
+// Errors are those os would give; on one, nothing allocated is left. read
+// makes the read calls, which tests replace to inject failures.
 @(require_results)
-read_entire_file :: proc(path: string, allocator: mem.Allocator) -> (data: []byte, err: os.Error) {
+read_entire_file :: proc(path: string, allocator: mem.Allocator, read: Read_Proc = posix.read) -> (data: []byte, err: os.Error) {
 	buf: [1024]byte
 	if len(path) >= len(buf) do return os.read_entire_file(path, allocator)
 	copy(buf[:], path)
@@ -32,10 +38,13 @@ read_entire_file :: proc(path: string, allocator: mem.Allocator) -> (data: []byt
 	data = make([]byte, int(st.st_size), allocator) or_return
 	total := 0
 	for total < len(data) {
-		n := posix.read(fd, raw_data(data[total:]), uint(len(data)) - uint(total))
+		n := read(fd, raw_data(data[total:]), uint(len(data)) - uint(total))
 		if n < 0 {
-			if posix.errno() == .EINTR do continue
-			return nil, platform_error(posix.errno())
+			errno := posix.errno()
+			if errno == .EINTR do continue
+			// the caller has no slice to free; an arena's free does nothing
+			delete(data, allocator)
+			return nil, platform_error(errno)
 		}
 		if n == 0 do break
 		total += int(n)
