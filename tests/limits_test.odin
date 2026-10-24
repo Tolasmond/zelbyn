@@ -24,7 +24,8 @@ LIMITS_HEAD :: "meta:\n  id: t\n  endian: le\n"
 // The result of decoding input with src and limits, "ok" or "error: <kind>
 // in <path>", or the compile error, and the bytes the tree's arena held
 // beyond the input. With from_file, read decodes it from a temporary file,
-// which it puts in the arena too.
+// which it puts in the arena too, named by the test (see temp_file in
+// cli_test.odin).
 @(private = "file")
 decode_limited :: proc(t: ^testing.T, src: string, input: []byte, limits: rdr.Limits, from_file := false, loc := #caller_location) -> (result: string, used: uint) {
 	ff: mdata.File_Format
@@ -37,7 +38,7 @@ decode_limited :: proc(t: ^testing.T, src: string, input: []byte, limits: rdr.Li
 	defer fld.destroy_value_tree(&tree)
 	err: rdr.Parse_Error
 	if from_file {
-		f, create_err := os.create_temp_file("", "zelbyn_limits_*.bin")
+		f, create_err := os.create_temp_file("", fmt.tprintf("zelbyn_%s_*.bin", loc.procedure))
 		if create_err != nil do return fmt.tprintf("creating a temporary file: %v", create_err), 0
 		path := strings.clone(os.name(f), context.temp_allocator)
 		_, write_err := os.write(f, input)

@@ -12,6 +12,7 @@ odin check . -vet -strict-style -debug
 odin check tests -vet -strict-style -no-entry-point
 odin test tests -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_LEVEL=warning
 odin test tests -o:speed -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_LEVEL=warning
+odin test tests -debug -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_LEVEL=warning
 odin check tools/bench -vet -strict-style
 odin check tools/ksy_corpus -vet -strict-style
 odin check tools/yaml_corpus -vet -strict-style
@@ -29,7 +30,7 @@ The checks that need what the repository does not hold run only when asked: `--f
 python3 tools/check.py --formats ../kaitai_struct_formats --samples ../kaitai_struct_samples --yaml-corpus --compare-tests
 ```
 
-`.github/workflows/check.yml` runs `tools/check.py` on every push to `main` and every pull request, with the Odin release it is pinned to, checked against its SHA-256. The optional checks are not run there.
+`.github/workflows/check.yml` runs `tools/check.py` on every push to `main` and every pull request, on Linux and on Windows, with the Odin release it is pinned to, checked against its SHA-256. The debug build of the tests uses the most stack, and on Windows checks the stack limits against the 1 MB stack they are sized for (arch.md §7.5). The optional checks are not run there.
 
 Debug builds (`odin build . -debug -out:build/zelbyn`) run under a tracking allocator and exit 1 if anything leaks or is freed twice.
 
