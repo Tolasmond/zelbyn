@@ -6,7 +6,10 @@ import "core:mem/virtual"
 // An arena: blocks of virtual memory, reserved up front and committed as
 // they are used, like virtual.Arena's growing kind, but without its mutex,
 // since one thread uses each arena (a decoded tree, a compiled plan, a
-// parsed YAML document). Each block reserves twice the one before. Memory
+// parsed YAML document). The first block reserves the size arena_init
+// sets, or ARENA_BLOCK_SIZE, and that target doubles with each block; a
+// block for an allocation larger than the target reserves that allocation
+// instead, so it can be larger than the next block. Memory
 // is handed out fresh from the operating system, so it is zero; the most
 // recent allocation grows in place, as arrays do while a repeat is read.
 Arena :: struct {

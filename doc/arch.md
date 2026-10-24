@@ -1,6 +1,8 @@
 # zelbyn: software architecture
 
-This document describes the implementation in the repository `zelbyn`, at commit `17c58a7`. It states what the code does and how its parts fit together. Where a mechanism is more involved than its task makes obvious, a paragraph marked *Reason* gives the requirement that makes it necessary. Sections are cited by number (§).
+This document describes the implementation in the repository `zelbyn`, as of the commit it is part of: a change to the code updates it. It states what the code does and how its parts fit together. Where a mechanism is more involved than its task makes obvious, a paragraph marked *Reason* gives the requirement that makes it necessary. Sections are cited by number (§).
+
+Figures in the *Reason* paragraphs, times, percentages and instruction counts, are historical observations: each was measured when its decision was made, during development on Linux. The machine, the build options and the Odin version of each were not recorded with it, and none has been measured again since, so they show the size of an effect at the time, not current performance, which `tools/bench` measures (doc/development.md, Benchmark).
 
 Paths are relative to the repository root unless they say otherwise.
 
@@ -77,7 +79,7 @@ All packages also import from Odin's `core` library. The internal imports are:
 ### 4.1 `arena`
 
 An `Arena` is a list of `virtual.Memory_Block`s: address space reserved up front and committed as it is used.
-- **Blocks.** The first block's size is set by `arena_init`, or is 4 MB (`ARENA_BLOCK_SIZE`). Each later block reserves twice the one before. A block commits at least 1 MB at a time (`COMMIT_SIZE`).
+- **Blocks.** A new block reserves a target size: that set by `arena_init`, or 4 MB (`ARENA_BLOCK_SIZE`), for the first block, doubled for each block after it. An allocation larger than the target gets a block of its own size, plus its alignment, instead, so that block can be larger than the target, and larger than the block after it, whose target has only doubled. A block commits at least 1 MB at a time (`COMMIT_SIZE`).
 - **Zero memory.** Memory comes fresh from the operating system and is never reused before the arena is destroyed, so every allocation is zero.
 - **`arena_make(a, T, n)`** allocates `n` values of `T` directly. It bumps the current block's `used` inline when the block has enough committed memory, and otherwise commits more or adds a block. It panics when the operating system has no memory left or the size overflows.
 - **`arena_allocator(a)`** presents the arena as a `mem.Allocator`, for dynamic arrays, maps and strings. It supports allocation and resizing; the most recent allocation is resized in place when its block has room. Freeing single allocations is not supported.
@@ -676,7 +678,7 @@ In debug builds (`ODIN_DEBUG`), `run` executes under a `mem.Tracking_Allocator`.
 | Decoder's `path`, `frames`, `streams`, `kept`, `cache` and arguments | The tree's arena | With the tree | — |
 | Error messages, `ksy.Error.path` and `Parse_Error.path` | `context.allocator` | The matching `destroy_error` / `destroy_parse_error` | — |
 
-Because the tree does not refer to the plan (§6.7), the plan can be destroyed before the tree. The test `value_tree_outlives_schema` checks this. The test `value_tree_from_read_outlives_file` checks that a tree from `read` survives the deletion of its file.
+`Value_Tree` and `File_Format` each hold their `Arena` by value, so a copy shares its blocks: only one copy may be destroyed, and a block that one copy adds is unknown to the other. They are filled in place, through a pointer, and the tests' `Decoded`, which embeds a tree, is never returned by value. Because the tree does not refer to the plan (§6.7), the plan can be destroyed before the tree. The test `value_tree_outlives_schema` checks this. The test `value_tree_from_read_outlives_file` checks that a tree from `read` survives the deletion of its file.
 
 ## 12. Tests
 
