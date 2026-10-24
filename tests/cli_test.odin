@@ -1,6 +1,7 @@
 package tests
 
 import "../zelbyn/cli"
+import "core:fmt"
 import "core:io"
 import "core:os"
 import "core:strings"
@@ -89,11 +90,14 @@ failing_write :: proc(data: rawptr, mode: io.Stream_Mode, p: []byte, offset: i64
 	return 0, .Empty
 }
 
-// Writes data to a new temporary file named as pattern, whose path it
-// returns, in context.temp_allocator; "" when it cannot.
+// Writes data to a new temporary file with extension ext, whose path it
+// returns, in context.temp_allocator; "" when it cannot. The file is named
+// by the test that makes it, as every test draws the same random names: on
+// Windows, a test cannot create a file of the name another has just
+// deleted.
 @(private = "file")
-temp_file :: proc(t: ^testing.T, pattern: string, data: string) -> string {
-	f, err := os.create_temp_file("", pattern)
+temp_file :: proc(t: ^testing.T, ext: string, data: string, loc := #caller_location) -> string {
+	f, err := os.create_temp_file("", fmt.tprintf("zelbyn_%s_*%s", loc.procedure, ext))
 	if !testing.expectf(t, err == nil, "creating a temporary file: %v", err) do return ""
 	path := strings.clone(os.name(f), context.temp_allocator)
 	_, write_err := os.write(f, transmute([]byte)data)
@@ -118,9 +122,9 @@ Cli_Case :: struct {
 // with stdout empty whenever the run fails.
 @(test)
 cli_command_line :: proc(t: ^testing.T) {
-	schema := temp_file(t, "zelbyn_cli_*.ksy", PARAMS_SCHEMA)
-	input := temp_file(t, "zelbyn_cli_*.bin", PARAMS_INPUT)
-	bad_schema := temp_file(t, "zelbyn_cli_*.ksy", "meta:\n  id: p\nseq:\n  - id: a\n    type: nope\n")
+	schema := temp_file(t, ".ksy", PARAMS_SCHEMA)
+	input := temp_file(t, ".bin", PARAMS_INPUT)
+	bad_schema := temp_file(t, ".ksy", "meta:\n  id: p\nseq:\n  - id: a\n    type: nope\n")
 	defer {
 		for path in ([]string{schema, input, bad_schema}) do if path != "" do os.remove(path)
 	}
@@ -216,8 +220,8 @@ cli_check_failures :: proc(t: ^testing.T) {
 		{"an expression that fails", "    type: u1\n    valid:\n      expr: _ == v\ninstances:\n  v:\n    value: 1\n    if: false\n", "\x00\x03", `Absent_Field at 0x00000001 in t[0].a[0]`},
 	}
 	for c in cases {
-		schema := temp_file(t, "zelbyn_cli_*.ksy", strings.concatenate({HEAD, c.attr}, context.temp_allocator))
-		input := temp_file(t, "zelbyn_cli_*.bin", c.input)
+		schema := temp_file(t, ".ksy", strings.concatenate({HEAD, c.attr}, context.temp_allocator))
+		input := temp_file(t, ".bin", c.input)
 		defer {
 			for path in ([]string{schema, input}) do if path != "" do os.remove(path)
 		}

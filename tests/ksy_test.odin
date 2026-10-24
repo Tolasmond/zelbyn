@@ -6,6 +6,7 @@ import ksy "../zelbyn/ksy"
 import mdata "../zelbyn/metadata"
 import rdr "../zelbyn/reader"
 import "core:fmt"
+import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "core:testing"
@@ -47,7 +48,7 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{"meta:\n  id: t\n  imports: a\n", .Invalid, 3, 12, "imports must be a sequence"},
 	{"meta:\n  id: t\n  imports: ['']\n", .Invalid, 3, 13, "imports: an import is empty"},
 	{"meta:\n  id: t\n  imports: [/common/x]\n", .Invalid, 3, 13, "imports: /common/x is in none of the import paths"},
-	{"meta:\n  id: t\n  imports: [tests/schemas/imports/does_not_exist]\n", .Invalid, 3, 13, "imports: cannot read tests/schemas/imports/does_not_exist.ksy"},
+	{"meta:\n  id: t\n  imports: [tests/schemas/imports/does_not_exist]\n", .Invalid, 3, 13, "imports: cannot read tests" + filepath.SEPARATOR_STRING + "schemas" + filepath.SEPARATOR_STRING + "imports" + filepath.SEPARATOR_STRING + "does_not_exist.ksy"},
 	{"meta:\n  id: t\n  ks-debug: true\n", .Unsupported, 3, 3, "meta: ks-debug is not supported"},
 	{"meta:\n  id: t\n  name: x\n", .Invalid, 3, 3, `meta: unknown key "name"`},
 	{"meta:\n  id: t\n  -peek: [1]\n", .Invalid, 3, 3, "the extension -peek does not apply here"},
@@ -1094,7 +1095,8 @@ paths[0].by_param[0] = <2 bytes> dd ee
 paths[0].by_root[0] = <2 bytes> ff 11
 `)
 
-	// an error in an imported schema names its file
+	// an error in an imported schema names its file, by the path joined
+	// with the system's separator
 	Case :: struct {
 		path:         string,
 		kind:         ksy.Error_Kind,
@@ -1117,11 +1119,15 @@ paths[0].by_root[0] = <2 bytes> ff 11
 		defer mdata.destroy_file_format(&ff)
 		err := ksy.read_file_format(c.path, &ff)
 		defer ksy.destroy_error(&err)
+		in_file := c.in_file
+		if in_file != c.path {
+			in_file, _ = strings.replace_all(in_file, "/", filepath.SEPARATOR_STRING, context.temp_allocator)
+		}
 		testing.expectf(
 			t,
-			err.kind == c.kind && err.path == c.in_file && err.line == c.line && err.column == c.column && strings.contains(err.message, c.message),
+			err.kind == c.kind && err.path == in_file && err.line == c.line && err.column == c.column && strings.contains(err.message, c.message),
 			"%s:\n  got  %v at %s:%v:%v: %s\n  want %v at %s:%v:%v: ...%s...",
-			c.path, err.kind, err.path, err.line, err.column, err.message, c.kind, c.in_file, c.line, c.column, c.message)
+			c.path, err.kind, err.path, err.line, err.column, err.message, c.kind, in_file, c.line, c.column, c.message)
 	}
 }
 
