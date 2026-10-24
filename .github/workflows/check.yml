@@ -1,0 +1,31 @@
+# The checks a change must pass (tools/check.py), with the Odin release
+# they are pinned to. The corpus checks need clones of kaitai_struct_formats
+# and kaitai_struct_samples, and Node.js, and are run by hand
+# (doc/development.md).
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Odin dev-2026-10 (commit 84bc3fc)
+        run: |
+          curl -fsSL -o odin.tar.gz https://github.com/odin-lang/Odin/releases/download/dev-2026-10/odin-linux-amd64-dev-2026-10.tar.gz
+          echo "c3c8b095621fd0c75f7f73e3a0829f1b4d45324225f20ba11ed8dc4da310a8ab  odin.tar.gz" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/odin"
+          tar -xzf odin.tar.gz -C "$RUNNER_TEMP/odin" --strip-components=1
+          rm odin.tar.gz
+          echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
+
+      - name: Checks
+        run: python3 tools/check.py
