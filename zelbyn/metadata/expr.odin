@@ -1,7 +1,7 @@
 package metadata
 
-// A node of a parsed expression (§6.3). The parser (package expression)
-// gives every node a syntax variant; resolving the expression replaces the
+// A node of a parsed expression (doc/arch.md §5.2, and in the plan, §6.8).
+// The parser (package expression) gives every node a syntax variant; resolving the expression replaces the
 // names and member accesses with the resolved variants and sets type. The
 // decoder only sees resolved expressions.
 Expr :: struct {
@@ -292,8 +292,10 @@ To_S :: struct {
 
 // .to_i of a String: the decimal integer it is, with an optional sign;
 // Invalid_Number when it is not one, Integer_Overflow when it does not fit.
-// Of a Bool: 1 or 0. Of a Float: its integer part, rounded toward zero;
-// Integer_Overflow when it does not fit, or is not a number.
+// Of a Bool: 1 or 0. Of a Float: its integer part, rounded toward zero, an
+// integer from -2^63 to 2^64 - 1 as any Int expression; Integer_Overflow
+// beyond them, or when it is not a number. As a size, count or offset, the
+// result must also fit an int.
 To_I :: struct {
 	operand: ^Expr,
 }
@@ -343,7 +345,8 @@ Value_Ref :: struct {
 }
 
 // A form of a whole expression that the decoder evaluates without walking
-// the tree (§10.5), kept alongside it. It gives what the tree gives
+// the tree, kept alongside it (doc/arch.md §5.2, and how the decoder
+// evaluates it, §7.9). It gives what the tree gives
 // whenever the field it reads has a value that fits an int; otherwise the
 // decoder evaluates the tree, which reports the error.
 Direct :: union {

@@ -30,8 +30,12 @@ destroy_error :: proc(err: ^Error) {
 // Every binary operator is left-associative, except that ?: is
 // right-associative and a comparison cannot be an operand of another
 // comparison. Integer literals are decimal, 0x hex, 0b binary or 0o octal,
-// with _ allowed between digits; string literals are as String_Literal
-// describes. Float literals and method calls are rejected as Unsupported.
+// with _ allowed between digits; one above max(int), up to max(u64), is a
+// Big_Literal. Float literals are 1.5, 2., 1e3 and 1.5e-3; string literals
+// are as String_Literal describes. A member followed by arguments,
+// a.name(args), is a Call, and .as<t>, sizeof<t> and bitsizeof<t> are
+// Cast and Size_Of: which methods and casts exist, and on what, is for
+// resolution to decide.
 @(require_results)
 parse :: proc(text: string, allocator: mem.Allocator) -> (e: ^mdata.Expr, err: Error) {
 	p := Parser{text = text, allocator = allocator}

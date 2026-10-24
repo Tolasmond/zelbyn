@@ -78,7 +78,8 @@ import "core:strings"
 // Not supported yet (Unsupported): other encodings, instances without pos or
 // value that read bytes, params of other types (struct, io, any), and of a
 // user type with params on the top-level type of the schema compiled, % of a
-// float, ?: of arrays of sets or arrays, valid on a float, min and max on a
+// float, ?: of arrays of sets or arrays, valid on a float other than its
+// expr (eq, min, max and any-of), min and max on a
 // type other than an integer, an endian that is a switch-on on the top-level
 // type or in a type that contains itself, a bit-endian that is a switch-on,
 // imports in a type, parent other than _parent, _parent._parent and so on,
@@ -2572,8 +2573,12 @@ compile_bound :: proc(c: ^Compiler, n: ^yml.Node, id: string, type: dat.Data_Typ
 		return b, true
 	}
 
-	// an integer literal is read here too, since one beyond an int does
-	// not parse as an expression
+	// an integer literal is read here, as text, so that its value is taken
+	// in the field's own type (int_scalar) and one that does not fit it
+	// (300 for a u1, -1 for a u8) is an error when the schema is compiled,
+	// rather than a check that no value passes. Its expression form, for
+	// an expr, is kept only for a value that fits an int; one above, up to
+	// max(u64), is checked by its Scalar alone.
 	v, is_int := parse_int(text)
 	if !is_int {
 		b.e = compile_expr(c, n, "valid", scope, .Int) or_return
