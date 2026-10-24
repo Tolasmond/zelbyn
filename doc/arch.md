@@ -188,6 +188,26 @@ The decoder evaluates a direct form without walking the tree (§7.9). The tree s
 
 **Printing.** `to_string(e)` writes an expression with every operation parenthesized, and a field reference as its path. The tests use it to check how an expression was grouped.
 
+**Walks over expressions.** These procedures switch on an expression's variant, each with its own way through the tree, so there is no visitor that they share. Those that walk the whole tree switch on every variant: a variant added fails to compile until each of them handles it. The others follow an expression of one type, or look for one shape, and handle the variants that it can be; a variant added of that type must be added to each of them. `tests/expression_walks_test.odin` keeps this table true: `expression_walks_inventory` finds every such switch in `zelbyn/`, and fails on one not listed here, or listed as exhaustive and `#partial`; `expression_variants_walked` requires a check for every variant of `Expr_Variant`, in a schema that puts each variant of type `Struct`, `Stream` and `Array` through the walks of its type, and compiles, decodes and prints it.
+
+| Procedure | File | Variants | What it does |
+|---|---|---|---|
+| `resolve` | `expression/resolve.odin` | All | Resolves a parsed tree in place |
+| `write` | `expression/print.odin` | All | Prints a tree (`to_string`) |
+| `reach_of` | `expression/resolve.odin` | All | The most levels above its instance a value instance reaches |
+| `note_escapes` | `ksy/types.odin` | All | The first expression in a set that reaches out of it (§5.3) |
+| `eval` | `reader/eval.odin` | All | Evaluates a tree (§7.9) |
+| `depth`, `struct_node`, `through_param`, `through_indirect` | `expression/resolve.odin` | Those of type `Struct`: `Instance`, `Field_Ref`, `Index`, `Array_Method`, `Switch_Cast`, `Repeat_Element`, `Value_Ref`, `Ternary` | The level of the instance an expression gives, its set, and whether it is reached through a param or a `?:` |
+| `enclosing` | `reader/eval.odin` | Those of type `Struct` | The instance levels above the one an expression gives (§7.9) |
+| `keep_streams` | `expression/resolve.odin` | Those of type `Stream`: `Io`, `Ternary` | Marks the sets whose streams a value instance uses |
+| `eval_stream`, `stream_reader` | `reader/eval.odin` | Those of type `Stream` | The stream an expression gives |
+| `array_item_type`, `first_item` | `expression/resolve.odin` | Those of type `Array`: `Field_Ref`, `Array_Literal`, `Value_Ref`, `Ternary`, and `Index` and `Array_Method` of an array of arrays; `first_item` all but `Field_Ref` and `Ternary`, as it is asked only of an array of arrays, whose items are array literals | The type of an array's items, and the first item of an array of arrays |
+| `eval_kept` | `reader/eval.odin` | `Field_Ref`, `Ternary` and `Value_Ref` of type `Array` | A cached value instance's array as its field's slot |
+| `direct_form`, `direct_field` | `expression/resolve.odin` | A literal, a `Field_Ref`, a comparison | The direct forms |
+| `constant_wide`, `is_constant` | `expression/resolve.odin` | Integer literals and operators; literals and array literals | A constant's value, and whether an array literal is constant |
+| `resolve_member_size_of`, `resolve_cast` | `expression/resolve.odin` | The operand of `_sizeof` and `.as<t>` | What the size or the cast is of |
+| `int_literal` | `ksy/constants.odin` | Integer literals and their negations | A `switch-on` case or `valid` bound |
+
 ### 5.3 `ksy`: the compiler
 
 `ksy.read_file_format(path, &ff, import_paths)` reads a `.ksy` file with `file.read_entire_file` and calls `ksy.compile(src, &ff, path, import_paths)`.
@@ -642,6 +662,7 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | `memory_test.odin` | That decoding, with and without spans and with `process: zlib`, `read` and `ksy.compile` make no heap allocations; that errors allocate only their message or path; tree lifetime and reuse after destroy |
 | `checks_test.odin` | Byte order, `valid` checks and bit fields, on hand-built plans |
 | `expression_parse_test.odin` | Parsing, precedence and syntax errors, and type errors, also of floats |
+| `expression_walks_test.odin` | That every procedure switching on an expression's variant is in the inventory of §5.2, exhaustive or not as it says, and that every variant of `Expr_Variant` is compiled, decoded and printed, those of type `Struct`, `Stream` and `Array` through the walks of their type, in a schema the official runtime also decodes |
 | `expression_eval_test.odin` | Evaluation on hand-built plans: field references, `_parent`, `_index`, conditions, methods, floats and their mixing with integers, `?:` over byte arrays, `.substring` and `.as<bytes>`, the size of other streams, integers above `max(int)` |
 | `expression_direct_test.odin` | That direct forms and the tree evaluator give the same results and errors (§7.9) |
 | `ksy_test.odin` | The `.ksy` compiler end to end: compile errors with their kinds, lines and columns, and each Kaitai feature of the subset and each extension compiled and decoded, alone and in the combinations that have needed care: types that contain themselves and the depth limits, imports, params (also of the top-level type), parse and value instances, `switch-on`, `valid`, expressions and their methods and casts, encodings, `process: zlib`, and `endian` `switch-on`s. The comment of each test says what it covers. |
