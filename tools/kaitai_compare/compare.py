@@ -12,9 +12,15 @@ array of its values, set instances objects, byte arrays hex. Parse
 instances (instances with pos) are compared as fields. A field with no
 values (not read because of if or switch-on, or an empty repeat) is left
 out on both sides, as are value instances and params, which zelbyn does
-not dump. Field names are compared as the generated code spells them,
-from their ids: zelbyn's names, which are the -orig-id where there is
-one, are mapped back to the id. Integers beyond 2^53, which the
+not dump. Field names are compared as zelbyn writes them, the -orig-id
+where there is one, else the id: decode.js gives each field of the
+runtime's the name its attribute has in the type the field's object was
+generated from, so names are only those of one type, and two types can
+give one -orig-id to different attributes. Attributes of one type that
+share an -orig-id, each read under its own condition, are one field,
+with the values of the one read. The root is named by its meta -orig-id,
+else its id, as zelbyn names it. Its helpers are tested by
+test_compare.py. Integers beyond 2^53, which the
 JavaScript runtime holds as doubles, are compared as doubles. A float is
 compared as a number, as the runtime writes one with an integer value as
 an integer, and zelbyn writes an f4 with the shortest digits that give
@@ -52,54 +58,54 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def camel(name):
-    """A .ksy id as the JavaScript compiler names it: lower_camel_case. The
-    name of an attribute without an id, _unnamed and its index, is kept."""
-    if name.startswith('_unnamed'):
-        return name
-    first, *rest = name.split('_')
-    return first + ''.join(p[:1].upper() + p[1:] for p in rest)
+class Result:
+    """A decode of one file: its value, or the error it failed with. Kept
+    apart from the value, as a decoded field, or the root, can be named
+    error."""
+
+    def __init__(self, value=None, error=None):
+        self.value, self.error = value, error
 
 
-# The id of each -orig-id in the schema and its imports, and every id
-# (orig_ids).
-ORIG_IDS = {}
-IDS = set()
+def display_name(spec, id):
+    """The name zelbyn shows for an attribute, an instance or a schema's
+    meta, with spec its mapping: its -orig-id, unless it has none or a list
+    of them, else id. decode.js's displayName is the same."""
+    orig = spec.get('-orig-id') if isinstance(spec, dict) else None
+    return orig if isinstance(orig, str) and orig else id
 
 
-def orig_ids(ksy):
-    """Adds the -orig-id of every attribute and instance of ksy, and of its
-    types, to ORIG_IDS, mapped to its id, and every id to IDS."""
-    entries = [(a.get('id'), a) for a in ksy.get('seq') or [] if isinstance(a, dict)]
-    entries += list((ksy.get('instances') or {}).items())
-    for id, spec in entries:
-        IDS.add(id)
-        orig = isinstance(spec, dict) and spec.get('-orig-id')
-        if not orig or orig == id:
-            continue
-        if ORIG_IDS.setdefault(orig, id) != id:
-            sys.exit('-orig-id %s is given to %s and %s, which this script cannot tell apart' % (orig, ORIG_IDS[orig], id))
-    for t in (ksy.get('types') or {}).values():
-        if isinstance(t, dict):
-            orig_ids(t)
+def merge_fields(pairs):
+    """A set instance of zelbyn's JSON dump from its fields, as
+    json.loads's object_pairs_hook. Attributes of one type that share an
+    -orig-id, as elf.ksy's flags32 and flags64 share p_flags, each of them
+    read under a condition, are each written, so a name can occur twice:
+    its values are those of the one that has any. Both having values is an
+    error, as no name tells them apart."""
+    out = {}
+    for k, v in pairs:
+        if k in out and out[k] and v:
+            raise ValueError('two fields are named %s, and both have values' % k)
+        if k not in out or v:
+            out[k] = v
+    return out
 
 
-def name(dumped):
-    """A name in zelbyn's dump as the generated code spells it."""
-    return camel(ORIG_IDS.get(dumped, dumped))
-
-
-def ours(value):
-    """zelbyn's JSON dump of a set instance in decode.js's shape."""
+def present(value):
+    """A dump of a set instance, zelbyn's or decode.js's, without its fields
+    that have no values."""
     if isinstance(value, dict):
-        return {name(k): [ours(x) for x in v] for k, v in value.items() if v}
+        return {k: [present(x) for x in v] for k, v in value.items() if v}
     return value
 
 
-def theirs(value):
-    if isinstance(value, dict):
-        return {k: [theirs(x) for x in v] for k, v in value.items() if v}
-    return value
+def root_of(dump, ksy):
+    """The root set instance of zelbyn's JSON dump, read with ksy: under the
+    name zelbyn gives it, its meta -orig-id or id."""
+    root = display_name(ksy['meta'], ksy['meta']['id'])
+    if list(dump) != [root]:
+        raise KeyError('the dump has %s, not the root %s' % (', '.join(dump) or 'nothing', root))
+    return dump[root][0]
 
 
 def read_imports(path, ksy, import_paths, out, seen):
@@ -181,16 +187,13 @@ def first_difference(a, b, path):
 
 
 def dump_offsets(text):
-    """The offsets in zelbyn's text dump with --offsets, by path, with
-    names as the generated code spells them."""
+    """The offsets in zelbyn's text dump with --offsets, by path."""
     out = {}
     for line in text.splitlines():
         path = line.split(' = ', 1)[0]
-        segments = []
-        for s in path.split('.'):
-            field, index = s.split('[', 1)
-            segments.append(name(field) + '[' + index)
-        out['.'.join(segments)] = int(line.rsplit(' @0x', 1)[1], 16)
+        if path in out:
+            raise ValueError('two values are at %s' % path)
+        out[path] = int(line.rsplit(' @0x', 1)[1], 16)
     return out
 
 
@@ -219,14 +222,9 @@ def main():
 
     with open(schema, 'rb') as f:
         ksy = yaml.safe_load(f)
-    root_name = ksy['meta']['id']
+    root_name = display_name(ksy['meta'], ksy['meta']['id'])
     imports = {}
     read_imports(schema, ksy, import_paths, imports, {})
-    for k in [ksy] + list(imports.values()):
-        orig_ids(k)
-    for orig in ORIG_IDS:
-        if orig in IDS:
-            sys.exit('%s is both an id and an -orig-id, which this script cannot tell apart' % orig)
 
     with tempfile.TemporaryDirectory() as tmp:
         schema_json = os.path.join(tmp, 'schema.json')
@@ -238,7 +236,9 @@ def main():
         params = ['--params', json.dumps(root_args(ksy, args.param))] if args.param else []
         out = subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema_json, '--imports', imports_json] + params + (['--offsets'] if args.offsets else []) + files,
                              check=True, capture_output=True, text=True).stdout
-        reference = [json.loads(line) for line in out.splitlines()]
+        # decode.js's envelope, {"value": ...} or {"error": ...}, as a
+        # field can be named error
+        reference = [Result(**json.loads(line)) for line in out.splitlines()]
 
         tool = os.path.join(tmp, 'zelbyn')
         subprocess.run(['odin', 'build', '.', '-out:' + tool], check=True)
@@ -251,23 +251,33 @@ def main():
                 cmd += ['--param', param]
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode != 0:
-                mine.append({'error': r.stderr.strip()})
-            else:
-                mine.append(dump_offsets(r.stdout) if args.offsets else json.loads(r.stdout))
+                mine.append(Result(error=r.stderr.strip()))
+                continue
+            try:
+                mine.append(Result(dump_offsets(r.stdout) if args.offsets else json.loads(r.stdout, object_pairs_hook=merge_fields)))
+            except ValueError as e:
+                mine.append(Result(error='comparison: %s' % e))
 
     failed = 0
-    for path, a, b in zip(files, mine, reference):
-        if 'error' in a or 'error' in b:
+    for path, ra, rb in zip(files, mine, reference):
+        if ra.error is not None or rb.error is not None:
             failed += 1
-            print('FAILED: %s\n  zelbyn: %s\n  kaitai:  %s' % (path, a.get('error', 'ok'), b.get('error', 'ok')))
+            print('FAILED: %s\n  zelbyn: %s\n  kaitai:  %s' % (path, ra.error or 'ok', rb.error or 'ok'))
             continue
+        a, b = ra.value, rb.value
         if args.offsets:
             offsets_difference.values = 0
             d = offsets_difference(a, b)
             values = '%d offsets' % offsets_difference.values
         else:
+            try:
+                ours = root_of(a, ksy)
+            except KeyError as e:
+                failed += 1
+                print('FAILED: %s\n  zelbyn: %s' % (path, e.args[0]))
+                continue
             first_difference.values = 0
-            d = first_difference(ours(a[root_name][0]), theirs(b), root_name)
+            d = first_difference(present(ours), present(b), root_name)
             values = '%d values' % first_difference.values
         if d:
             failed += 1
