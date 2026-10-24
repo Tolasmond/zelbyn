@@ -50,7 +50,7 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `zelbyn/dump/` | The text and JSON writers |
 | `formats/` | `gif.ksy` (from `kaitai_struct_formats`, unchanged, CC0-1.0) and `gif89a.ksy` |
 | `data/` | Six GIF sample files and `GifSpec.txt` |
-| `tests/` | The test package, the limits' tests (`tests/limits/`), the golden dumps (`tests/golden/`, `tests/golden/gif89a/`) and the schemas the import, params and recursive-type tests read (`tests/schemas/`) |
+| `tests/` | The test package, the golden dumps (`tests/golden/`, `tests/golden/gif89a/`) and the schemas the import, params and recursive-type tests read (`tests/schemas/`) |
 | `tools/bench/` | The cold benchmark and its optional Kaitai Struct C++ reference |
 | `tools/kaitai_compare/` | A comparison of decodes, and of offsets, with the official Kaitai Struct JavaScript runtime |
 | `tools/ksy_corpus/` | The corpus test: every schema of `kaitai_struct_formats` compiled, against a record, and the samples of `kaitai_struct_samples` compared with the official runtime |
@@ -609,6 +609,8 @@ Memory and time are bounded by `Limits`, which `read` and `read_from_bytes` take
 
 0 lifts either limit. *Reason for the defaults:* they are far beyond any input of the corpus, and bound a decode to seconds and its tree to less than the memory of a machine that runs it. A `repeat-expr` of far more elements than `max_steps`, each of which reads nothing, stops with `Step_Limit` in 0.7 s; the elements of `gif.ksy`'s samples are read at about 40 million a second, so its steps would take some 3 s. One whose elements each add a value stops with `Memory_Limit` at 1 GiB, in 900 MB of resident memory, as the arena commits only what it hands out.
 
+A compile takes time linear in its schema's size but in one case. A name that must be unique, or is looked up, is compared with each of the others while there are fewer than 64 (`INDEX_FROM`), and found in a map from then on: a key among its mapping's (`yaml`'s `check_key`), and an id among its type's (`claim_id`), a type or an enum among those of the type that declares it (`Type_Def.type_index`, `enum_index`) and a value among its enum's (`build_enums`). A node's column is its byte offset in its line when the source has no multibyte character, which `check_characters` notes; else the parser counts it on from the last it counted on that line (`char_column`), so a flow mapping of many keys on one line is linear too. Each schema of 100,000 types or instances compiles, or is rejected, in under 0.1 s with `-o:speed`, where comparing each key with every other took up to 37 s; `yaml_duplicate_among_many`, `ksy_many_names` and `limits_compile_nesting` time out if that comes back. The case: the resolver looks a name up among the members of its set one by one (`resolve_field`), and an enum constant among its enum's values, so n expressions that each name one of n members take time in n², some 4 s for 40,000.
+
 ## 8. The value tree (`field`)
 
 ### 8.1 `Value`, `Instance` and `Value_Tree`
@@ -691,7 +693,7 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 
 ## 12. Tests
 
-`tests/` is one package, `tests`, and `tests/limits/` another, `limits`, whose tests take minutes and run only when asked. `doc/development.md` lists the commands that must pass before a commit: four `odin check` runs with `-vet -strict-style`, and the tests built without and with `-o:speed`, with `ODIN_TEST_FAIL_ON_BAD_MEMORY`.
+`tests/` is one package, `tests`. `doc/development.md` lists the commands that must pass before a commit: three `odin check` runs with `-vet -strict-style`, and the tests built without and with `-o:speed`, with `ODIN_TEST_FAIL_ON_BAD_MEMORY`.
 
 | File | What it covers |
 |---|---|
@@ -706,9 +708,9 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | `expression_eval_test.odin` | Evaluation on hand-built plans: field references, `_parent`, `_index`, conditions, methods, floats and their mixing with integers, `?:` over byte arrays, `.substring` and `.as<bytes>`, the size of other streams, integers above `max(int)` |
 | `expression_direct_test.odin` | That direct forms and the tree evaluator give the same results and errors (§7.9) |
 | `ksy_test.odin` | The `.ksy` compiler end to end: compile errors with their kinds, lines and columns, and each Kaitai feature of the subset and each extension compiled and decoded, alone and in the combinations that have needed care: types that contain themselves and the depth limits, imports, params (also of the top-level type), parse and value instances, `switch-on`, `valid`, expressions and their methods and casts, encodings, `process: zlib`, and `endian` `switch-on`s. The comment of each test says what it covers. |
-| `yaml_test.odin` | The YAML parser's node trees and errors; escapes at the edge of the Unicode range and beyond it; characters allowed raw and those that are not, and bytes that are not UTF-8; comments right after flow punctuation and a block scalar's indicators, and `#` inside a plain scalar; a flow key and its `:` on two lines |
+| `yaml_test.odin` | The YAML parser's node trees and errors; escapes at the edge of the Unicode range and beyond it; characters allowed raw and those that are not, and bytes that are not UTF-8; comments right after flow punctuation and a block scalar's indicators, and `#` inside a plain scalar; a flow key and its `:` on two lines; a duplicate key after 63, 64, 65 and 100,000 others, block and flow, in ASCII and not, within a timeout |
 | `cli_test.odin` | The command line, run in the test process (`cli.execute`): `--help`, the usage errors, `--offsets` with `--dump json`, `--param` in both forms with an argument of each type and each of its errors, `--max-memory` and `--max-steps` and their errors, the errors of loading and decoding, and output that cannot be written, each with its exit code and with nothing on stdout when it fails |
-| `limits/limits_test.odin` | Its own package, `limits`, which `tools/check.py --limits` runs and the build does not (doc/development.md). The limits of §7.11: counts far beyond the input, the steps counted, `Step_Limit` and `Memory_Limit` at their limits and below them, never past `max_memory`, from bytes and from a file, also the decoder's own records, and each nesting limit at it and one past it, with its error |
+| `limits_test.odin` | The limits of §7.11: counts far beyond the input, the steps counted, `Step_Limit` and `Memory_Limit` at their limits and below them, never past `max_memory`, from bytes and from a file, also the decoder's own records, and each nesting limit at it and one past it, with its error |
 | `literal_item_test.odin` | That an index of a constant array literal, which evaluates only the item it gives, decodes as the whole array does, with every item type, nested, through value instances and with failing indexes; which array literals are constant; and that an error in an unused item of any other fails the expression |
 | `imports_test.odin` | That every import of one of zelbyn's packages names it as §3 says |
 | `layout_test.odin` | The layout of the arena and the value tree, on the addresses themselves: alignment of `arena_make` and of the allocator up to a page, also in a block of its own; growth in place of the most recent allocation, past a commit, and moving otherwise, with its bytes; block rollover, the doubling target and a block for a large allocation; `make_instance`'s block, with and without spans, and empty slots in a decoded tree (unread, read no times, a parse instance whose `if` is false); and spans after slots grow, by `repeat: eos` and past the bytes left, of sets, cells and `-bits` fields |
