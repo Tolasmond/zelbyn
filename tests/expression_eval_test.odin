@@ -311,6 +311,72 @@ expression_eval :: proc(t: ^testing.T) {
 	}
 }
 
+// expression.constant, with which the compiler folds a size and a count
+// (_sizeof), gives what the evaluator gives: each text is folded, and
+// evaluated in a decode. A text it folds evaluates to that value; one it
+// does not either fails or is beyond an int, as a size must fit one. Both
+// follow mdata.int_binary and int_unary, so steps beyond an int are exact.
+@(test)
+expression_constant_as_eval :: proc(t: ^testing.T) {
+	Case :: struct {
+		text:   string,
+		folded: bool, // constant gives a value
+	}
+	cases := [?]Case {
+		{"7 / 2", true},
+		{"7 / -2", true},
+		{"-7 % 3", true},
+		{"7 % -3", true},
+		{"~0", true},
+		{"0xff & -1", true},
+		{"-1 ^ 0", true},
+		{"1 << 62 >> 1", true},
+		{"-9223372036854775808", true},
+		{"(9223372036854775807 + 1) - 1", true},
+		{"0xffff_ffff_ffff_ffff - 0xffff_ffff_ffff_fff0", true},
+		{"(-9223372036854775807 - 1) / -1 - 1", true},
+		{"18446744073709551615 >> 1", true},
+		{"9223372036854775807 + 1", false},
+		{"1 << 63", false},
+		{"18446744073709551615", false},
+		{"18446744073709551615 + 1", false},
+		{"~18446744073709551615", false},
+		{"-(-9223372036854775807 - 2)", false},
+		{"1 / 0", false},
+		{"1 % 0", false},
+		{"1 << 64", false},
+		{"1 << -1", false},
+		{"3 << 63", false},
+	}
+	for c in cases {
+		p: Expr_Plan
+		defer mdat.destroy_file_format(&p.ff)
+		make_expr_plan(t, &p)
+
+		parsed, parse_err := expr.parse(c.text, arn.arena_allocator(&p.ff.arena))
+		if !testing.expectf(t, parse_err.kind == .None, "%q: %v", c.text, parse_err.kind) {
+			expr.destroy_error(&parse_err)
+			continue
+		}
+		v, folded := expr.constant(parsed)
+		testing.expectf(t, folded == c.folded, "%q: constant gives %v (%v), want it folded: %v", c.text, v, folded, c.folded)
+
+		// data is 1 byte when the evaluator agrees, 2 when it does not
+		check := folded ? fmt.tprintf("(%s) == %v ? 1 : 2", c.text, v) : fmt.tprintf("(%s) > 9223372036854775807 ? 1 : 2", c.text)
+		e := must_compile(t, &p.ff, check, p.root)
+		if e == nil do continue
+		p.data.length = mdat.Rule_Length{expr = e}
+		d: Decoded
+		defer destroy_decoded(&d)
+		decode_bytes(&p.ff, EXPR_INPUT, &d)
+		if folded {
+			testing.expectf(t, d.err.kind == .None && d.consumed == DATA_POS + 2, "%q: constant gives %v, the evaluator %v (consumed %v)", c.text, v, d.err.kind, d.consumed)
+		} else {
+			testing.expectf(t, d.err.kind != .None || d.consumed == DATA_POS + 2, "%q: constant gives none, the evaluator a value within an int", c.text)
+		}
+	}
+}
+
 // A field read past the end of the input fails with the reader's error,
 // and a reference to a field whose value is absent fails with Absent_Field.
 @(test)

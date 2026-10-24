@@ -52,6 +52,17 @@ eval_int :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (n: int, err: dat.
 	return i, .None
 }
 
+// Evaluates e, an Int expression, as eval_int does, to any integer an
+// expression has, also one above max(int), as a switch-on is compared.
+@(private, require_results)
+eval_wide :: proc(d: ^Decoder, e: ^mdata.Expr, index := -1) -> (n: i128, err: dat.Read_Error) {
+	assert(e.type == .Int)
+	if value, ok := eval_direct(d, e.direct, nil); ok do return i128(value), .None
+	v := eval(d, e, {index = index}) or_return
+	n, _ = as_wide(v)
+	return n, .None
+}
+
 // Evaluates e, a Bool expression, as eval_int does. element is _, the
 // element of a repeat-until just read.
 @(private, require_results)
@@ -279,10 +290,10 @@ eval :: proc(d: ^Decoder, e: ^mdata.Expr, ctx: Eval_Context) -> (v: Eval_Value, 
 		case .Neg:
 			if f, is_float := operand.(f64); is_float do return -f, .None
 			n, _ := as_wide(operand)
-			return from_wide(-n)
+			return from_wide(mdata.int_unary(.Neg, n) or_return)
 		case .Bit_Not:
 			n, _ := as_wide(operand)
-			return from_wide(~n)
+			return from_wide(mdata.int_unary(.Bit_Not, n) or_return)
 		case .Not:
 			return !operand.(bool), .None
 		}
@@ -726,38 +737,12 @@ eval_binary :: proc(d: ^Decoder, x: mdata.Binary, ctx: Eval_Context) -> (v: Eval
 }
 
 // x op y for two integers of which one is above max(int), or whose result
-// does not fit an int, exactly, with the integer rules of eval_binary: a
-// result beyond min(int) to max(u64) is Integer_Overflow.
+// does not fit an int, exactly, by mdata.int_binary, the rules of every
+// integer operation: a result beyond min(int) to max(u64) is
+// Integer_Overflow.
 @(private = "file", require_results)
 eval_binary_wide :: proc(op: mdata.Binary_Op, a, b: i128) -> (v: Eval_Value, err: dat.Read_Error) {
-	n: i128
-	overflow: bool
-	switch op {
-	case .Mul:
-		n, overflow = intrinsics.overflow_mul(a, b)
-	case .Add:
-		n = a + b
-	case .Sub:
-		n = a - b
-	case .Div:
-		if b == 0 do return nil, .Division_By_Zero
-		n = a / b
-		if a % b != 0 && (a < 0) != (b < 0) do n -= 1
-	case .Mod:
-		if b == 0 do return nil, .Division_By_Zero
-		n = b == -1 ? 0 : a %% b
-	case .Shl:
-		if b < 0 || b > 63 do return nil, .Invalid_Shift
-		n = a << uint(b)
-	case .Shr:
-		if b < 0 || b > 63 do return nil, .Invalid_Shift
-		n = a >> uint(b)
-	case .And:
-		n = a & b
-	case .Xor:
-		n = a ~ b
-	case .Or:
-		n = a | b
+	#partial switch op {
 	case .Eq:
 		return a == b, .None
 	case .Ne:
@@ -773,8 +758,7 @@ eval_binary_wide :: proc(op: mdata.Binary_Op, a, b: i128) -> (v: Eval_Value, err
 	case .Logical_And, .Logical_Or:
 		unreachable()
 	}
-	if overflow do return nil, .Integer_Overflow
-	return from_wide(n)
+	return from_wide(mdata.int_binary(op, a, b) or_return)
 }
 
 // v, an Int, as an i128.
