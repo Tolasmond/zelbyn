@@ -2,7 +2,7 @@ package tests
 
 import dmp "../zelbyn/dump"
 import ksy "../zelbyn/ksy"
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import "core:fmt"
 import "core:strings"
 import "core:testing"
@@ -53,15 +53,15 @@ Direct_Counts :: struct {
 }
 
 @(private = "file")
-walk_direct :: proc(node: ^mdat.Node, counts: ^Direct_Counts, clear: bool) {
-	visit :: proc(e: ^mdat.Expr, counts: ^Direct_Counts, clear: bool) {
+walk_direct :: proc(node: ^mdata.Node, counts: ^Direct_Counts, clear: bool) {
+	visit :: proc(e: ^mdata.Expr, counts: ^Direct_Counts, clear: bool) {
 		if e == nil do return
 		switch x in e.direct {
-		case mdat.Direct_Constant:
+		case mdata.Direct_Constant:
 			counts.constant += 1
-		case mdat.Direct_Field:
+		case mdata.Direct_Field:
 			counts.field += 1
-		case mdat.Direct_Compare:
+		case mdata.Direct_Compare:
 			counts.compare += 1
 			if x.field.of_element do counts.element += 1
 		}
@@ -70,12 +70,12 @@ walk_direct :: proc(node: ^mdat.Node, counts: ^Direct_Counts, clear: bool) {
 
 	visit(node.cond, counts, clear)
 	#partial switch c in node.count {
-	case mdat.Rule_Count:
+	case mdata.Rule_Count:
 		visit(c.expr, counts, clear)
-	case mdat.Until_Count:
+	case mdata.Until_Count:
 		visit(c.expr, counts, clear)
 	}
-	if l, ok := node.length.(mdat.Rule_Length); ok do visit(l.expr, counts, clear)
+	if l, ok := node.length.(mdata.Rule_Length); ok do visit(l.expr, counts, clear)
 	for inst in node.instances {
 		visit(inst.cond, counts, clear)
 		visit(inst.expr, counts, clear)
@@ -93,10 +93,10 @@ walk_direct :: proc(node: ^mdat.Node, counts: ^Direct_Counts, clear: bool) {
 // has.
 @(private = "file")
 check_same :: proc(t: ^testing.T, src: string, input: []byte, loc := #caller_location) -> (counts: Direct_Counts) {
-	direct, tree: mdat.File_Format
-	defer mdat.destroy_file_format(&direct)
-	defer mdat.destroy_file_format(&tree)
-	for ff in ([?]^mdat.File_Format{&direct, &tree}) {
+	direct, tree: mdata.File_Format
+	defer mdata.destroy_file_format(&direct)
+	defer mdata.destroy_file_format(&tree)
+	for ff in ([?]^mdata.File_Format{&direct, &tree}) {
 		err := ksy.compile(src, ff)
 		defer ksy.destroy_error(&err)
 		if !testing.expectf(t, err.kind == .None, "%v at %v:%v: %s\n%s", err.kind, err.line, err.column, err.message, src, loc = loc) do return

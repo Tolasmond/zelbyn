@@ -78,6 +78,22 @@ All packages also import from Odin's `core` library. The internal imports are:
 
 `metadata` imports `field` for one procedure, `instance_set` (§6.7), which reads the case that a value-tree instance records. `reader` and `dump` do not import `ksy` or `yaml`: they see only the plan.
 
+Each package is imported under one name in every file, of the packages, `main.odin`, the tests and the tools, so that a name means one package wherever it is read:
+
+| Package | Imported as |
+|---|---|
+| `arena` | `arn` |
+| `data` | `dat` |
+| `dump` | `dmp` |
+| `expression` | `expr` |
+| `field` | `fld` |
+| `metadata` | `mdata` |
+| `reader` | `rdr` |
+| `yaml` | `yml` |
+| `cli`, `file`, `ksy` | their own names |
+
+`tests/imports_test.odin` checks every import against this table.
+
 ## 4. Foundations
 
 ### 4.1 `arena`
@@ -671,6 +687,7 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | `yaml_test.odin` | The YAML parser's node trees and errors; escapes at the edge of the Unicode range and beyond it; characters allowed raw and those that are not, and bytes that are not UTF-8; comments right after flow punctuation and a block scalar's indicators, and `#` inside a plain scalar; a flow key and its `:` on two lines |
 | `cli_test.odin` | The command line, run in the test process (`cli.execute`): `--help`, the usage errors, `--offsets` with `--dump json`, `--param` in both forms with an argument of each type and each of its errors, the errors of loading and decoding, and output that cannot be written, each with its exit code and with nothing on stdout when it fails |
 | `literal_item_test.odin` | That an index of a constant array literal, which evaluates only the item it gives, decodes as the whole array does, with every item type, nested, through value instances and with failing indexes; which array literals are constant; and that an error in an unused item of any other fails the expression |
+| `imports_test.odin` | That every import of one of zelbyn's packages names it as §3 says |
 | `layout_test.odin` | The layout of the arena and the value tree, on the addresses themselves: alignment of `arena_make` and of the allocator up to a page, also in a block of its own; growth in place of the most recent allocation, past a commit, and moving otherwise, with its bytes; block rollover, the doubling target and a block for a large allocation; `make_instance`'s block, with and without spans, and empty slots in a decoded tree (unread, read no times, a parse instance whose `if` is false); and spans after slots grow, by `repeat: eos` and past the bytes left, of sets, cells and `-bits` fields |
 | `file_test.odin` | `file.read_entire_file` with injected `read` failures, at once and after partial reads, and `EINTR`: the error kept, and nothing left allocated, with the heap or an arena (Linux, macOS and the BSDs) |
 | `data_reader_test.odin` | `data.Reader` reads and bounds checks, and bit reads in both orders |

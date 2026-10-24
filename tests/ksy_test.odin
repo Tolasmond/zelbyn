@@ -3,7 +3,7 @@ package tests
 import dmp "../zelbyn/dump"
 import fld "../zelbyn/field"
 import ksy "../zelbyn/ksy"
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import rdr "../zelbyn/reader"
 import "core:fmt"
 import "core:slice"
@@ -310,8 +310,8 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 @(test)
 ksy_errors :: proc(t: ^testing.T) {
 	for c in KSY_ERROR_CASES {
-		ff: mdat.File_Format
-		defer mdat.destroy_file_format(&ff)
+		ff: mdata.File_Format
+		defer mdata.destroy_file_format(&ff)
 		err := ksy.compile(c.src, &ff)
 		defer ksy.destroy_error(&err)
 
@@ -327,8 +327,8 @@ ksy_errors :: proc(t: ^testing.T) {
 // context.temp_allocator), or "error: <kind> at <offset> in <path>".
 @(private = "file")
 ksy_dump :: proc(t: ^testing.T, src: string, input: []byte) -> string {
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile(src, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return ""
@@ -338,8 +338,8 @@ ksy_dump :: proc(t: ^testing.T, src: string, input: []byte) -> string {
 // As ksy_dump, with the schema read from path.
 @(private = "file")
 ksy_file_dump :: proc(t: ^testing.T, path: string, import_paths: []string, input: []byte) -> string {
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.read_file_format(path, &ff, import_paths)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "%s: %v at %s:%v:%v: %s", path, err.kind, err.path, err.line, err.column, err.message) do return ""
@@ -348,7 +348,7 @@ ksy_file_dump :: proc(t: ^testing.T, path: string, import_paths: []string, input
 
 // Decodes input with ff and returns its text dump, as ksy_dump does.
 @(private = "file")
-dump_decoded :: proc(t: ^testing.T, ff: ^mdat.File_Format, input: []byte, args: []fld.Value = nil) -> string {
+dump_decoded :: proc(t: ^testing.T, ff: ^mdata.File_Format, input: []byte, args: []fld.Value = nil) -> string {
 	d: Decoded
 	defer destroy_decoded(&d)
 	decode_bytes(ff, input, &d, args = args)
@@ -1042,8 +1042,8 @@ t[0].h[0] = <3 bytes> 78 79 7a
 // As ksy_dump, but the JSON dump.
 @(private = "file")
 ksy_json :: proc(t: ^testing.T, src: string, input: []byte) -> string {
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile(src, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return ""
@@ -1113,8 +1113,8 @@ paths[0].by_root[0] = <2 bytes> ff 11
 		{DIR + "errors/twins.ksy", .Invalid, DIR + "errors/twins.ksy", 5, 7, "imports: two schemas have the id tag"},
 	}
 	for c in cases {
-		ff: mdat.File_Format
-		defer mdat.destroy_file_format(&ff)
+		ff: mdata.File_Format
+		defer mdata.destroy_file_format(&ff)
 		err := ksy.read_file_format(c.path, &ff)
 		defer ksy.destroy_error(&err)
 		testing.expectf(
@@ -2355,8 +2355,8 @@ types:
 	expect_dump(t, "json", ksy_json(t, src, {5, 'h', 'i', 0, 'o', 'k', 0x20, 0x20, 0x12, 0x0c}), `{"t":[{"tag":[5],"plain":["hi"],"sized":["ok"],"items":[1,2],"last":[12]}]}` + "\n")
 	expect_dump(t, "past the end", ksy_dump(t, src, {2, 0xff}), "error: Unexpected_EOF at 1 in t[0].plain[0]")
 
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile(src, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
@@ -3073,8 +3073,8 @@ types:
         pos: 0
         type: u1
 `
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile(src, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
@@ -3698,8 +3698,8 @@ seq:
     if: name == "x"
 `
 	{
-		ff: mdat.File_Format
-		defer mdat.destroy_file_format(&ff)
+		ff: mdata.File_Format
+		defer mdata.destroy_file_format(&ff)
 		err := ksy.compile(top, &ff)
 		defer ksy.destroy_error(&err)
 		if testing.expectf(t, err.kind == .None, "compile: %s", err.message) {
@@ -3712,8 +3712,8 @@ seq:
 	}
 	{
 		// arguments for a schema whose top-level type has no params
-		ff: mdat.File_Format
-		defer mdat.destroy_file_format(&ff)
+		ff: mdata.File_Format
+		defer mdata.destroy_file_format(&ff)
 		err := ksy.compile(HEAD + "seq:\n  - id: a\n    type: u1\n", &ff)
 		defer ksy.destroy_error(&err)
 		if testing.expectf(t, err.kind == .None, "compile: %s", err.message) {
@@ -3724,8 +3724,8 @@ seq:
 		// a param of a user type on the top-level type is given bytes, read
 		// as an instance of it in a stream of their own, whose _io a parse
 		// instance reads; also _io of a param of a type, and ?: on arrays
-		ff: mdat.File_Format
-		defer mdat.destroy_file_format(&ff)
+		ff: mdata.File_Format
+		defer mdata.destroy_file_format(&ff)
 		err := ksy.compile(HEAD + `params:
   - id: hp
     type: hdr
@@ -3840,8 +3840,8 @@ types:
 `
 	input := []byte{0x12, 'h', 'i', 0, 0x35, 0xaa, 0xbb, 0xcc, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
-	ff: mdat.File_Format
-	defer mdat.destroy_file_format(&ff)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
 	err := ksy.compile(src, &ff)
 	defer ksy.destroy_error(&err)
 	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return

@@ -2,7 +2,7 @@ package tests
 
 import arn "../zelbyn/arena"
 import expr "../zelbyn/expression"
-import mdat "../zelbyn/metadata"
+import mdata "../zelbyn/metadata"
 import "core:mem/virtual"
 import "core:strings"
 import "core:testing"
@@ -184,7 +184,7 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 @(test)
 expression_compile_errors :: proc(t: ^testing.T) {
 	p: Expr_Plan
-	defer mdat.destroy_file_format(&p.ff)
+	defer mdata.destroy_file_format(&p.ff)
 	make_expr_plan(t, &p)
 
 	for c in COMPILE_ERROR_CASES {
@@ -203,7 +203,7 @@ expression_compile_errors :: proc(t: ^testing.T) {
 @(test)
 expression_parent_scope :: proc(t: ^testing.T) {
 	p: Expr_Plan
-	defer mdat.destroy_file_format(&p.ff)
+	defer mdata.destroy_file_format(&p.ff)
 	make_expr_plan(t, &p)
 	a := arn.arena_allocator(&p.ff.arena)
 
