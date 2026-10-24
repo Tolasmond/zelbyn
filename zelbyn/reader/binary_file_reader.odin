@@ -584,10 +584,10 @@ eval_args :: proc(d: ^Decoder, set: ^mdata.Node, index: int) -> (args: []fld.Val
 // The deepest that set instances nest, as frames. Only a recursive type
 // can nest them deeper than CHECK_DEPTH, and an input can then nest them
 // as deeply as it likes, which would overflow the stack. Decoding a level
-// takes about 1.1 KB of it, and writing it 1.3 KB (2.7 KB each in a debug
-// build), so MAX_DEPTH levels fit in the 1 MB of the main thread's stack
-// on Windows.
-MAX_DEPTH :: 256
+// takes about 1 KB of it with -o:speed, and 3.1 KB in a debug build (3.2 KB
+// on Windows), so MAX_DEPTH levels stay within MAX_STACK in every build,
+// and fit in the 1 MB of the main thread's stack on Windows.
+MAX_DEPTH :: 224
 
 // The most stack that decoding uses before an instance is Too_Deep, which
 // bounds what frames do not count: read_parse_instance sets aside the
