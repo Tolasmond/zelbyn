@@ -8,11 +8,12 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 
-// Direct forms (doc/arch.md §5.2 and §7.9) give what the tree evaluator
-// gives: each schema is compiled twice, once with its direct forms cleared, and both decode the
-// same input to the same error, or to the same dump. The schemas use each
-// form on every integer width, with values at the edges of the width,
-// signed and unsigned, and with the field absent.
+// Direct forms (doc/arch.md, "expression: parsing, resolution and direct
+// forms" and "Expression evaluation") give what the tree evaluator gives:
+// each schema is compiled twice, once with its direct forms cleared, and
+// both decode the same input to the same error, or to the same dump. The
+// schemas use each form on every integer width, with values at the edges
+// of the width, signed and unsigned, and with the field absent.
 
 @(private = "file")
 Width :: struct {

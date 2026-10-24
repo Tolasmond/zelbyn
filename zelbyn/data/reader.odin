@@ -12,10 +12,10 @@ Read_Error :: enum {
 	Invalid_Length,        // a computed count or length is negative
 	No_Progress,           // an element of a repeat that must consume input consumed none
 	Division_By_Zero,      // an expression divides by zero, or takes a remainder by zero
-	Integer_Overflow,      // an expression's result, or an integer field it reads, does not fit in an int
+	Integer_Overflow,      // an expression's result is outside -2^63 to 2^64 - 1, or as a size, count or offset does not fit in an int
 	Invalid_Shift,         // an expression shifts by a negative amount or by 64 or more
 	Absent_Field,          // an expression refers to a field that has no value (not read yet, or absent), or to a value instance whose if is false
-	Index_Out_Of_Range,    // an expression indexes an array or bytes outside them
+	Index_Out_Of_Range,    // an expression indexes an array or bytes outside them, also with an index above max(int)
 	Invalid_Number,        // an expression's to_i is of a string that is not a decimal integer
 	Not_Equal,             // a value is not the one its field requires (Kaitai's contents, valid: eq)
 	Less_Than_Min,         // a value is below its field's minimum (valid: min)
