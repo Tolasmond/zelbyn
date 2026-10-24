@@ -16,15 +16,18 @@
 // once), with byte arrays as lowercase hex. The runtime reads a parse
 // instance when it is first accessed, so each is accessed here. Fields
 // that were not read, value instances, params and the runtime's own
-// members (_io, _parent, _root, _raw_*, _m_*) are left out; names are as
-// the generated code spells them (lowerCamelCase, and _unnamed and its
-// index for an attribute without an id). A file that fails to
-// decode prints {"error": "..."}.
+// members (_io, _parent, _root, _raw_*, _m_*) are left out. Names are as
+// zelbyn writes them: an attribute's -orig-id, or else its id (or _unnamed
+// and its index, for an attribute without one), found in the spec of the
+// type of the object, by its generated class, so that two types can give
+// one -orig-id to different attributes, or use as an id another's -orig-id.
+// A file that fails to decode prints {"error": "..."}.
 //
 // With --offsets, the schema is compiled in debug mode, and each line maps
 // the path of every value that is not a set instance, as zelbyn's text
-// dump writes it (root[0].field[i]...), to the offset in the file that
-// the runtime's debug record gives it: where the read of the value
+// dump writes it (root[0].field[i]..., the root by its meta -orig-id or
+// id), to the offset in the file that the runtime's debug record gives it:
+// where the read of the value
 // started. The runtime copies the bytes of a substream whose pad-right it
 // removes or that it cuts at a terminator, and decompresses those of one
 // with process: zlib; a debug record in such a stream gives offsets from
@@ -47,22 +50,53 @@ function lowerCamel(name) {
   return u.slice(0, 1).toLowerCase() + u.slice(1);
 }
 
-// The names of the parse instances, of those of them with io, and of the
-// params of each type in spec, by the name of its generated class, added to
-// out. Types of the same name share their lists.
-function members(spec, name, out) {
-  const cls = upperCamel(name);
-  out[cls] = out[cls] || { parseInstances: [], withIo: new Set(), params: new Set() };
-  for (const [id, inst] of Object.entries(spec.instances || {})) {
-    if (inst.value === undefined) out[cls].parseInstances.push(lowerCamel(id));
-    if (inst.value === undefined && inst.io !== undefined) out[cls].withIo.add(lowerCamel(id));
-  }
-  for (const p of spec.params || []) out[cls].params.add(lowerCamel(p.id));
-  for (const [id, type] of Object.entries(spec.types || {})) members(type, id, out);
-  return out;
+// The name zelbyn shows for an attribute, an instance or a schema's meta:
+// its -orig-id, unless it has none or a list of them, else its id.
+function displayName(spec, id) {
+  const orig = spec && spec["-orig-id"];
+  return typeof orig === "string" && orig !== "" ? orig : id;
 }
 
-let MEMBERS = {};
+// The members of each generated class: the names its fields have in
+// zelbyn's dump, by their names in the class (names), and the names in the
+// class of its parse instances, of those of them with io, and of its
+// params. They are those of the spec the class was generated from, found
+// by the class itself, as nested and imported types can share a name.
+const CLASSES = new Map();
+
+// Adds the members of cls, generated from spec, and of the classes of the
+// types declared in spec, which are properties of cls.
+function addClass(cls, spec) {
+  if (typeof cls !== "function") throw new Error("no generated class for a type of " + JSON.stringify(Object.keys(spec)));
+  const m = { names: new Map(), parseInstances: [], withIo: new Set(), params: new Set() };
+  (spec.seq || []).forEach((a, i) => {
+    m.names.set(a.id === undefined ? "_unnamed" + i : lowerCamel(a.id), a.id === undefined ? "_unnamed" + i : displayName(a, a.id));
+  });
+  for (const [id, inst] of Object.entries(spec.instances || {})) {
+    if (inst.value !== undefined) continue;
+    m.names.set(lowerCamel(id), displayName(inst, id));
+    m.parseInstances.push(lowerCamel(id));
+    if (inst.io !== undefined) m.withIo.add(lowerCamel(id));
+  }
+  for (const p of spec.params || []) m.params.add(lowerCamel(p.id));
+  CLASSES.set(cls, m);
+  for (const [id, type] of Object.entries(spec.types || {})) addClass(cls[upperCamel(id)], type);
+}
+
+// The members of the class of obj; an object of a class that no spec gave
+// would be compared by names that are not zelbyn's, so it is an error.
+function membersOf(obj) {
+  const m = CLASSES.get(obj.constructor);
+  if (!m) throw new Error("no spec for generated class " + obj.constructor.name);
+  return m;
+}
+
+// The name zelbyn shows for key, a member of a class with members m.
+function shown(m, key) {
+  const n = m.names.get(key);
+  if (n === undefined) throw new Error("no attribute or parse instance for member " + key);
+  return n;
+}
 
 // The name the compiler gives an attribute without an id: _unnamed and its
 // index in seq.
@@ -86,7 +120,7 @@ function inInput(io, root) {
 // Adds the offset of every value of obj, whose stream starts at offset pos
 // in the file, to out, by its path. root is the root of the tree.
 function offsets(obj, path, pos, root, out) {
-  const m = MEMBERS[obj.constructor.name] || { parseInstances: [], withIo: new Set(), params: new Set() };
+  const m = membersOf(obj);
   const base = root._io.byteOffset;
   const keys = Object.keys(obj).filter((k) => (!k.startsWith("_") || UNNAMED.test(k)) && !m.params.has(k));
   for (const key of keys.concat(m.parseInstances)) {
@@ -103,11 +137,12 @@ function offsets(obj, path, pos, root, out) {
     }
     values.forEach((x, i) => {
       const d = records ? records[i] : debug;
-      const p = path + "." + key + "[" + i + "]";
+      const p = path + "." + shown(m, key) + "[" + i + "]";
       // a parse instance with io is read in another stream, which is not a
       // copy
       const start = (m.withIo.has(key) ? d.ioOffset - base : pos) + d.start;
       if (typeof x !== "object" || x instanceof Uint8Array) {
+        if (p in out) throw new Error("two values are at " + p);
         out[p] = start;
       } else if (x._io === obj._io) {
         offsets(x, p, pos, root, out);
@@ -120,18 +155,27 @@ function offsets(obj, path, pos, root, out) {
   return out;
 }
 
+// Sets out[name] to values. Attributes of one type can share an -orig-id
+// (elf.ksy's flags32 and flags64, read under exclusive conditions), and
+// zelbyn writes the values of the one read: two with values have no name
+// that tells them apart, which is an error.
+function put(out, name, values) {
+  if (name in out && out[name].length > 0 && values.length > 0) throw new Error("two fields are named " + name + ", and both have values");
+  if (!(name in out) || values.length > 0) out[name] = values;
+}
+
 function instance(obj) {
-  const m = MEMBERS[obj.constructor.name] || { parseInstances: [], params: new Set() };
+  const m = membersOf(obj);
   const out = {};
   for (const key of Object.keys(obj)) {
     const v = obj[key];
     if ((key.startsWith("_") && !UNNAMED.test(key)) || m.params.has(key) || v === undefined || v === null) continue;
-    out[key] = Array.isArray(v) ? v.map(value) : [value(v)];
+    put(out, shown(m, key), Array.isArray(v) ? v.map(value) : [value(v)]);
   }
   for (const key of m.parseInstances) {
     const v = obj[key];
     if (v === undefined || v === null) continue;
-    out[key] = Array.isArray(v) ? v.map(value) : [value(v)];
+    put(out, shown(m, key), Array.isArray(v) ? v.map(value) : [value(v)]);
   }
   return out;
 }
@@ -158,8 +202,6 @@ async function main() {
   }
 
   const ksy = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
-  MEMBERS = members(ksy, ksy.meta.id, {});
-  for (const spec of Object.values(imports)) members(spec, spec.meta.id, MEMBERS);
   const importer = {
     importYaml(name, mode) {
       const spec = imports[mode + ":" + name];
@@ -183,6 +225,14 @@ async function main() {
   };
   const rootName = upperCamel(ksy.meta.id);
   const Root = load("./" + rootName)[rootName];
+  addClass(Root, ksy);
+  // each imported schema's top-level type is the class of its own module
+  for (const spec of Object.values(imports)) {
+    const name = upperCamel(spec.meta.id);
+    if (!(name + ".js" in sources)) throw new Error("no generated module for import " + spec.meta.id);
+    const cls = load("./" + name)[name];
+    if (!CLASSES.has(cls)) addClass(cls, spec);
+  }
   // byte arrays, and the argument of a param of a user type, made of its
   // bytes as the caller of the runtime makes it: an imported schema's
   // top-level type, or by path, a type declared in another
@@ -204,7 +254,7 @@ async function main() {
       if (withOffsets) {
         // in debug mode, the constructor does not read
         root._read();
-        console.log(JSON.stringify(offsets(root, lowerCamel(ksy.meta.id) + "[0]", 0, root, {})));
+        console.log(JSON.stringify(offsets(root, displayName(ksy.meta, ksy.meta.id) + "[0]", 0, root, {})));
       } else {
         console.log(JSON.stringify(instance(root)));
       }
