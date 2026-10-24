@@ -100,7 +100,7 @@ read_uses_only_arena :: proc(t: ^testing.T) {
 }
 
 @(test)
-decode_error_allocates_only_path :: proc(t: ^testing.T) {
+decode_error_allocates_only_its_strings :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 10 * time.Second)
 	ff: mdata.File_Format
 	defer mdata.destroy_file_format(&ff)
@@ -124,7 +124,7 @@ decode_error_allocates_only_path :: proc(t: ^testing.T) {
 		d: Decoded
 		decode_bytes(&ff, transmute([]byte)text, &d)
 		kind = d.err.kind
-		path_ok = d.err.path == "GIF89a[0].Signature[0]"
+		path_ok = d.err.path == "GIF89a[0].Signature[0]" && d.err.value == `"hel"` && d.err.expected == `"GIF"`
 		live_with_error = len(track.allocation_map)
 		destroy_decoded(&d)
 
@@ -135,8 +135,8 @@ decode_error_allocates_only_path :: proc(t: ^testing.T) {
 	}
 
 	testing.expect_value(t, kind, .Not_Equal)
-	testing.expect(t, path_ok, "path should be \"GIF89a[0].Signature[0]\"")
-	testing.expect_value(t, live_with_error, 1) // only Parse_Error.path
+	testing.expect(t, path_ok, "the error should be in GIF89a[0].Signature[0], reading \"hel\", expecting \"GIF\"")
+	testing.expect_value(t, live_with_error, 3) // only Parse_Error.path, value and expected
 	testing.expect_value(t, missing_kind, .File_Read_Failed)
 	testing.expect_value(t, len(track.allocation_map), 0)
 }

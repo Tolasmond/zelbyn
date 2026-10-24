@@ -2,22 +2,18 @@ package dump
 
 import fld "../field"
 import mdata "../metadata"
-import "core:fmt"
 import "core:io"
 import "core:math"
 import "core:strings"
 import "core:unicode/utf8"
 
-// Number of leading bytes write_value shows for a blob.
-BLOB_PREVIEW :: 16
-
 // Writes one line per scalar in tree: its path in reader.format_path form
-// (Name[i].Name[i]..., root included), " = ", then the value as write_value
-// writes it. Sets get no line of their own, and empty arrays write nothing.
-// Children are taken in schema order, each followed by its bit fields, and
-// then the parse instances; those of a switch-on field are those of the
-// case each instance was read as. Value instances are not read, so they
-// are not written. With offsets, which needs a tree read with spans, each
+// (Name[i].Name[i]..., root included), " = ", then the value as
+// field.write_value writes it. Sets get no line of their own, and empty
+// arrays write nothing. Children are taken in schema order, each followed
+// by its bit fields, and then the parse instances; those of a switch-on
+// field are those of the case each instance was read as. Value instances
+// are not read, so they are not written. With offsets, which needs a tree read with spans, each
 // line ends with " @0x" and the value's offset in the input, in hex.
 @(require_results)
 write_text :: proc(w: io.Writer, format: ^mdata.File_Format, tree: ^fld.Value_Tree, offsets := false) -> io.Error {
@@ -39,44 +35,6 @@ write_json :: proc(w: io.Writer, format: ^mdata.File_Format, tree: ^fld.Value_Tr
 	io.write_byte(w, '{') or_return
 	write_json_field(w, format.root.name, set_of(format.root), tree.root[:]) or_return
 	io.write_string(w, "}\n") or_return
-	return .None
-}
-
-// Writes one scalar in text-dump form: integers in decimal, floats with %v,
-// strings with %q, booleans as true or false, and a blob as "<N bytes>" followed by its first
-// BLOB_PREVIEW bytes in hex and " ..." if there are more. Anything else (a
-// set or nil) is .Unsupported.
-@(require_results)
-write_value :: proc(w: io.Writer, v: fld.Value) -> io.Error {
-	switch x in v {
-	case i8:  io.write_i64(w, i64(x)) or_return
-	case i16: io.write_i64(w, i64(x)) or_return
-	case i32: io.write_i64(w, i64(x)) or_return
-	case i64: io.write_i64(w, x) or_return
-	case u8:  io.write_u64(w, u64(x)) or_return
-	case u16: io.write_u64(w, u64(x)) or_return
-	case u32: io.write_u64(w, u64(x)) or_return
-	case u64: io.write_u64(w, x) or_return
-	case f32: write_float(w, x) or_return
-	case f64: write_float(w, x) or_return
-	case string:
-		io.write_quoted_string(w, x) or_return
-	case []byte:
-		io.write_byte(w, '<') or_return
-		io.write_int(w, len(x)) or_return
-		io.write_string(w, " bytes>") or_return
-		for b in x[:min(len(x), BLOB_PREVIEW)] {
-			io.write_byte(w, ' ') or_return
-			write_hex_byte(w, b) or_return
-		}
-		if len(x) > BLOB_PREVIEW do io.write_string(w, " ...") or_return
-	case bool:
-		io.write_string(w, x ? "true" : "false") or_return
-	case ^fld.Instance, []fld.Value:
-		return .Unsupported
-	case:
-		return .Unsupported
-	}
 	return .None
 }
 
@@ -114,7 +72,7 @@ write_text_array :: proc(w: io.Writer, path: ^strings.Builder, name: string, set
 		} else {
 			io.write_string(w, strings.to_string(path^)) or_return
 			io.write_string(w, " = ") or_return
-			write_value(w, v) or_return
+			fld.write_value(w, v) or_return
 			if offsets != nil {
 				span := owner == nil ? fld.root_span(offsets, i) : fld.value_span(owner, k, i)
 				io.write_string(w, " @0x") or_return
@@ -193,7 +151,7 @@ write_json_scalar :: proc(w: io.Writer, v: fld.Value) -> io.Error {
 		return .None
 	}
 	// integers and finite floats read the same in both forms
-	return write_value(w, v)
+	return fld.write_value(w, v)
 }
 
 // Writes bytes as lowercase hex, a chunk at a time: one write per byte
@@ -252,13 +210,6 @@ write_json_string :: proc(w: io.Writer, s: string) -> io.Error {
 @(private = "file", require_results)
 write_null :: proc(w: io.Writer) -> io.Error {
 	_, err := io.write_string(w, "null")
-	return err
-}
-
-@(private = "file", require_results)
-write_float :: proc(w: io.Writer, f: $T) -> io.Error {
-	buf: [64]byte
-	_, err := io.write_string(w, fmt.bprintf(buf[:], "%v", f))
 	return err
 }
 

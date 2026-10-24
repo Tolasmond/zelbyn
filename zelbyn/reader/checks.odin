@@ -4,6 +4,7 @@ import dat "../data"
 import fld "../field"
 import mdata "../metadata"
 import "core:slice"
+import "core:strings"
 
 // Checks value, element index of a field that has valid, against it. The
 // value is already in the tree, so that the expressions of a Valid_Expr see
@@ -62,6 +63,129 @@ check_constant :: proc(value: fld.Value, valid: mdata.Valid) -> dat.Read_Error {
 		panic("check_constant: called for an array")
 	}
 	panic("check_constant: no value")
+}
+
+// Records kind, which checking value, element index of a field, against
+// valid gave, as fail does, at offset in the stream being read. When kind is
+// a check's failure, the error also has the value read and what valid
+// expected (Parse_Error.value and expected); an expression valid compares
+// with is evaluated again for it, and shows nothing if that fails.
+@(private)
+fail_check :: proc(d: ^Decoder, kind: dat.Read_Error, offset: int, value: fld.Value, valid: mdata.Valid, index: int) -> dat.Read_Error {
+	#partial switch kind {
+	case .Not_Equal, .Less_Than_Min, .Greater_Than_Max, .Not_Any_Of, .Not_In_Enum, .Expr_False:
+	case:
+		return fail(d, kind, offset)
+	}
+	if d.err.kind != .None do return kind
+
+	expected := strings.builder_make()
+	switch c in valid {
+	case mdata.Valid_Eq:
+		write_shown(&expected, scalar_value(c.value))
+	case mdata.Valid_Range:
+		write_shown(&expected, scalar_value(kind == .Less_Than_Min ? c.min : c.max))
+	case mdata.Valid_Any_Of:
+		for x, i in c.values {
+			if !write_list_item(&expected, i) do break
+			write_shown(&expected, scalar_value(x))
+		}
+	case mdata.Valid_In_Enum:
+		for x, i in c.values {
+			if !write_list_item(&expected, i) do break
+			strings.write_int(&expected, x)
+		}
+	case mdata.Valid_Expr:
+		for check in c.checks {
+			if check.err != kind do continue
+			items := 0
+			if kind != .Expr_False && !write_operands(d, &expected, check.cond, index, value, &items) {
+				strings.builder_reset(&expected)
+			}
+			break
+		}
+	}
+
+	fail(d, kind, offset)
+	read := strings.builder_make()
+	write_shown(&read, value)
+	d.err.value = strings.to_string(read)
+	d.err.expected = strings.to_string(expected)
+	return kind
+}
+
+// Appends v to b as Parse_Error shows it; nothing for a set.
+@(private = "file")
+write_shown :: proc(b: ^strings.Builder, v: fld.Value) {
+	n := len(b.buf)
+	// a builder's writer fails only on a value write_value does not show
+	if fld.write_value(strings.to_writer(b), v, STRING_PREVIEW) != .None do resize(&b.buf, n)
+}
+
+// Starts item i of a list in b; false when it is past the first
+// LIST_PREVIEW, after ", ..." for the first of those.
+@(private = "file")
+write_list_item :: proc(b: ^strings.Builder, i: int) -> bool {
+	if i > LIST_PREVIEW do return false
+	if i > 0 do strings.write_string(b, ", ")
+	if i == LIST_PREVIEW {
+		strings.write_string(b, "...")
+		return false
+	}
+	return true
+}
+
+// Appends to b, as a list, the value of each operand that cond compares
+// _ with: eq, min and max compare _ with theirs (_ == x, _ >= x, _ <= x),
+// and any-of is an or of such comparisons. items is the number in b so
+// far. False when an operand cannot be evaluated.
+@(private = "file")
+write_operands :: proc(d: ^Decoder, b: ^strings.Builder, cond: ^mdata.Expr, index: int, element: fld.Value, items: ^int) -> bool {
+	x, is_binary := cond.variant.(mdata.Binary)
+	if !is_binary do return true
+	if x.op == .Logical_Or {
+		return write_operands(d, b, x.left, index, element, items) && write_operands(d, b, x.right, index, element, items)
+	}
+	items^ += 1
+	if !write_list_item(b, items^ - 1) do return true
+	v, err := eval_check_operand(d, x.right, index, element)
+	if err != .None do return false
+	write_shown(b, eval_as_value(v))
+	return true
+}
+
+@(private = "file")
+scalar_value :: proc(s: mdata.Scalar) -> fld.Value {
+	switch x in s {
+	case i8:     return x
+	case i16:    return x
+	case i32:    return x
+	case i64:    return x
+	case u8:     return x
+	case u16:    return x
+	case u32:    return x
+	case u64:    return x
+	case f32:    return x
+	case f64:    return x
+	case string: return x
+	case []byte: return x
+	}
+	return nil
+}
+
+// v as a Value write_value shows: an int as an i64; nil for a set or an
+// array.
+@(private = "file")
+eval_as_value :: proc(v: Eval_Value) -> fld.Value {
+	#partial switch x in v {
+	case int:    return i64(x)
+	case u64:    return x
+	case f64:    return x
+	case bool:   return x
+	case []byte: return x
+	case string: return x
+	}
+	return nil
 }
 
 // An integer value as an int; is_int is false for any other value, and for
