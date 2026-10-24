@@ -26,9 +26,10 @@ compared as a number, as the runtime writes one with an integer value as
 an integer. An f8 must be the same double. zelbyn writes an f4 with the
 shortest digits that give it, where the runtime writes the double it
 widens to, so a float that the runtime read as an f4 is also equal when
-zelbyn's rounds to it as an f4: decode.js gives the paths of those, from
-the widths its debug records give the floats it read, so that a switch-on
-with f4 and f8 cases is compared by the case chosen.
+zelbyn's rounds to it as an f4: decode.js gives the paths of those, the
+values that the runtime's f4 readers read, so that a switch-on with cases
+of several types (f4 and f8, or an integer and a float) is compared by the
+case chosen.
 Imports are read relative to the importing schema, or for an absolute one,
 from the directories of --import-path (separated as in PATH), and given to
 both. Each --param is an argument for a param of the schema's top-level
