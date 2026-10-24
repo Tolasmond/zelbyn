@@ -156,6 +156,7 @@ check_characters :: proc(p: ^Parser) -> bool {
 			fail_at(p, .Syntax, m, "control character U+%04X is not allowed", c)
 			return false
 		case:
+			p.multibyte = true
 			r: rune
 			r, size = utf8.decode_rune(src[m.pos:])
 			if r == utf8.RUNE_ERROR && size == 1 {
@@ -174,14 +175,17 @@ check_characters :: proc(p: ^Parser) -> bool {
 
 @(private = "file")
 Parser :: struct {
-	src:        string,
-	pos:        int,
-	line:       int, // of pos, 1-based
-	line_start: int, // offset of the first byte of pos's line
-	allocator:  mem.Allocator,
-	end:        Mark, // where the last scalar or flow collection ended
-	err:        Error,
-	nesting:    int,  // the collections being parsed, at most MAX_NESTING
+	src:            string,
+	pos:            int,
+	line:           int, // of pos, 1-based
+	line_start:     int, // offset of the first byte of pos's line
+	allocator:      mem.Allocator,
+	end:            Mark, // where the last scalar or flow collection ended
+	err:            Error,
+	nesting:        int,  // the collections being parsed, at most MAX_NESTING
+	multibyte:      bool, // whether check_characters has found a multibyte character
+	counted:        Mark, // the last mark whose column char_column counted
+	counted_column: int,  // and that column
 }
 
 // The deepest that collections nest, block or flow: some eight times the
@@ -240,7 +244,7 @@ fail :: proc(p: ^Parser, kind: Error_Kind, pos: int, format: string, args: ..any
 @(private = "file")
 fail_at :: proc(p: ^Parser, kind: Error_Kind, m: Mark, format: string, args: ..any) -> ^Node {
 	if p.err.kind == .None {
-		p.err = Error{kind = kind, line = m.line, column = char_column(p.src, m) + 1, message = fmt.aprintf(format, ..args)}
+		p.err = Error{kind = kind, line = m.line, column = char_column(p, m) + 1, message = fmt.aprintf(format, ..args)}
 	}
 	return nil
 }
@@ -278,19 +282,31 @@ is_flow_indicator :: proc(c: byte) -> bool {
 	return c == ',' || c == '[' || c == ']' || c == '{' || c == '}'
 }
 
-// The 0-based column of m, in characters.
+// The 0-based column of m, in characters: while check_characters has found
+// no multibyte character, its byte offset in its line. Else it counts from
+// the last column it counted on m's line, forward or back, so that the
+// columns of the nodes of a long line, such as a flow mapping of many keys,
+// take time linear in its length.
 @(private = "file")
-char_column :: proc(src: string, m: Mark) -> int {
-	n := 0
-	for i in m.line_start ..< m.pos {
-		if src[i] & 0xc0 != 0x80 do n += 1
+char_column :: proc(p: ^Parser, m: Mark) -> int {
+	if !p.multibyte do return m.pos - m.line_start
+	from, n := m.line_start, 0
+	if p.counted.line_start == m.line_start {
+		from, n = p.counted.pos, p.counted_column
+		for i in m.pos ..< from {
+			if p.src[i] & 0xc0 != 0x80 do n -= 1
+		}
 	}
+	for i in from ..< m.pos {
+		if p.src[i] & 0xc0 != 0x80 do n += 1
+	}
+	p.counted, p.counted_column = m, n
 	return n
 }
 
 @(private = "file")
 column :: proc(p: ^Parser) -> int {
-	return char_column(p.src, mark(p))
+	return char_column(p, mark(p))
 }
 
 // Advances one byte, keeping line and line_start up to date. \r\n is one
@@ -360,7 +376,7 @@ rest_of_line_empty :: proc(p: ^Parser) -> bool {
 @(private = "file")
 new_node :: proc(p: ^Parser, kind: Kind, m: Mark) -> ^Node {
 	n := new(Node, p.allocator)
-	n^ = {kind = kind, line = m.line, column = char_column(p.src, m) + 1}
+	n^ = {kind = kind, line = m.line, column = char_column(p, m) + 1}
 	return n
 }
 
@@ -491,10 +507,12 @@ parse_block_map :: proc(p: ^Parser, col: int, first_key: ^Node) -> ^Node {
 	node := new_node(p, .Map, {})
 	node.line, node.column = first_key.line, first_key.column
 	entries := make([dynamic]Entry, p.allocator)
+	index: map[string]^Node
+	defer if index != nil do delete(index)
 
 	key := first_key
 	for {
-		if !check_key(p, entries[:], key) do return nil
+		if !check_key(p, entries[:], &index, key) do return nil
 		advance(p) // the :
 		value := parse_node(p, col, .Block_Value)
 		if value == nil do return nil
@@ -550,18 +568,37 @@ parse_key :: proc(p: ^Parser) -> ^Node {
 	return key
 }
 
-// Rejects a merge key, and a key already in entries.
+// The keys a mapping has before check_key looks them up in an index:
+// comparing with each is quicker for the few most mappings have, but a
+// mapping of n keys would take n^2 / 2 comparisons.
 @(private = "file")
-check_key :: proc(p: ^Parser, entries: []Entry, key: ^Node) -> bool {
+INDEX_FROM :: 64
+
+// Rejects a merge key, and a key already in entries, the mapping's so far.
+// From INDEX_FROM entries on, it finds one in index, each of their keys by
+// its text, which it builds with context.allocator and then adds key to;
+// the caller deletes it.
+@(private = "file")
+check_key :: proc(p: ^Parser, entries: []Entry, index: ^map[string]^Node, key: ^Node) -> bool {
 	if key.style == .Plain && key.text == "<<" {
 		fail_at_node(p, .Unsupported, key, "merge keys (<<) are not supported")
 		return false
 	}
-	for e in entries {
-		if e.key.text == key.text {
-			fail_at_node(p, .Duplicate_Key, key, "duplicate key %q (first at line %v, column %v)", key.text, e.key.line, e.key.column)
-			return false
+	first: ^Node
+	if len(entries) < INDEX_FROM {
+		for e in entries {
+			if e.key.text == key.text {
+				first = e.key
+				break
+			}
 		}
+	} else {
+		if len(index) == 0 do for e in entries do index[e.key.text] = e.key
+		if first = index[key.text]; first == nil do index[key.text] = key
+	}
+	if first != nil {
+		fail_at_node(p, .Duplicate_Key, key, "duplicate key %q (first at line %v, column %v)", key.text, first.line, first.column)
+		return false
 	}
 	return true
 }
@@ -967,6 +1004,8 @@ parse_flow :: proc(p: ^Parser) -> ^Node {
 
 	entries := make([dynamic]Entry, p.allocator)
 	items := make([dynamic]^Node, p.allocator)
+	index: map[string]^Node
+	defer if index != nil do delete(index)
 
 	for {
 		if !skip_flow_space(p) do return nil
@@ -979,7 +1018,7 @@ parse_flow :: proc(p: ^Parser) -> ^Node {
 			key := parse_flow_node(p)
 			if key == nil do return nil
 			if key.kind != .Scalar do return fail_at_node_nil(p, .Unsupported, key, "complex keys (collections as keys) are not supported")
-			if !check_key(p, entries[:], key) do return nil
+			if !check_key(p, entries[:], &index, key) do return nil
 
 			if !skip_flow_space(p) do return nil
 			if peek(p) != ':' do return fail(p, .Unsupported, p.pos, "a flow mapping entry without a value is not supported")
