@@ -58,6 +58,15 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+class Result:
+    """A decode of one file: its value, or the error it failed with. Kept
+    apart from the value, as a decoded field, or the root, can be named
+    error."""
+
+    def __init__(self, value=None, error=None):
+        self.value, self.error = value, error
+
+
 def display_name(spec, id):
     """The name zelbyn shows for an attribute, an instance or a schema's
     meta, with spec its mapping: its -orig-id, unless it has none or a list
@@ -227,7 +236,9 @@ def main():
         params = ['--params', json.dumps(root_args(ksy, args.param))] if args.param else []
         out = subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema_json, '--imports', imports_json] + params + (['--offsets'] if args.offsets else []) + files,
                              check=True, capture_output=True, text=True).stdout
-        reference = [json.loads(line) for line in out.splitlines()]
+        # decode.js's envelope, {"value": ...} or {"error": ...}, as a
+        # field can be named error
+        reference = [Result(**json.loads(line)) for line in out.splitlines()]
 
         tool = os.path.join(tmp, 'zelbyn')
         subprocess.run(['odin', 'build', '.', '-out:' + tool], check=True)
@@ -240,19 +251,20 @@ def main():
                 cmd += ['--param', param]
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode != 0:
-                mine.append({'error': r.stderr.strip()})
+                mine.append(Result(error=r.stderr.strip()))
                 continue
             try:
-                mine.append(dump_offsets(r.stdout) if args.offsets else json.loads(r.stdout, object_pairs_hook=merge_fields))
+                mine.append(Result(dump_offsets(r.stdout) if args.offsets else json.loads(r.stdout, object_pairs_hook=merge_fields)))
             except ValueError as e:
-                mine.append({'error': 'comparison: %s' % e})
+                mine.append(Result(error='comparison: %s' % e))
 
     failed = 0
-    for path, a, b in zip(files, mine, reference):
-        if 'error' in a or 'error' in b:
+    for path, ra, rb in zip(files, mine, reference):
+        if ra.error is not None or rb.error is not None:
             failed += 1
-            print('FAILED: %s\n  zelbyn: %s\n  kaitai:  %s' % (path, a.get('error', 'ok'), b.get('error', 'ok')))
+            print('FAILED: %s\n  zelbyn: %s\n  kaitai:  %s' % (path, ra.error or 'ok', rb.error or 'ok'))
             continue
+        a, b = ra.value, rb.value
         if args.offsets:
             offsets_difference.values = 0
             d = offsets_difference(a, b)

@@ -9,8 +9,9 @@
 // arguments of the params of the top-level type, as a JSON array, with
 // byte arrays as arrays of integers, and the argument of a param of a user
 // type as {"type": its name, "bytes": an array of integers}, from which it
-// is made. For each file, prints one
-// line of JSON in the shape of zelbyn's --dump json: a set instance is an
+// is made. For each file, prints one line of JSON, {"value": v}, or for a
+// file that fails to decode, {"error": "..."}. v is in the shape of
+// zelbyn's --dump json: a set instance is an
 // object of its seq fields in read order, then its parse instances
 // (instances with pos), each an array of its values (one for a field read
 // once), with byte arrays as lowercase hex. The runtime reads a parse
@@ -21,9 +22,11 @@
 // and its index, for an attribute without one), found in the spec of the
 // type of the object, by its generated class, so that two types can give
 // one -orig-id to different attributes, or use as an id another's -orig-id.
-// A file that fails to decode prints {"error": "..."}.
+// A name can be any string, constructor, __proto__ and error among them,
+// so the objects that hold fields have no prototype, and the envelope
+// keeps a field named error apart from an error.
 //
-// With --offsets, the schema is compiled in debug mode, and each line maps
+// With --offsets, the schema is compiled in debug mode, and v maps
 // the path of every value that is not a set instance, as zelbyn's text
 // dump writes it (root[0].field[i]..., the root by its meta -orig-id or
 // id), to the offset in the file that the runtime's debug record gives it:
@@ -84,10 +87,13 @@ function addClass(cls, spec) {
 }
 
 // The members of the class of obj; an object of a class that no spec gave
-// would be compared by names that are not zelbyn's, so it is an error.
+// would be compared by names that are not zelbyn's, so it is an error. The
+// class is found through the prototype, as a field with the id
+// constructor would hide obj.constructor.
 function membersOf(obj) {
-  const m = CLASSES.get(obj.constructor);
-  if (!m) throw new Error("no spec for generated class " + obj.constructor.name);
+  const cls = Object.getPrototypeOf(obj).constructor;
+  const m = CLASSES.get(cls);
+  if (!m) throw new Error("no spec for generated class " + cls.name);
   return m;
 }
 
@@ -166,7 +172,7 @@ function put(out, name, values) {
 
 function instance(obj) {
   const m = membersOf(obj);
-  const out = {};
+  const out = Object.create(null);
   for (const key of Object.keys(obj)) {
     const v = obj[key];
     if ((key.startsWith("_") && !UNNAMED.test(key)) || m.params.has(key) || v === undefined || v === null) continue;
@@ -254,9 +260,9 @@ async function main() {
       if (withOffsets) {
         // in debug mode, the constructor does not read
         root._read();
-        console.log(JSON.stringify(offsets(root, displayName(ksy.meta, ksy.meta.id) + "[0]", 0, root, {})));
+        console.log(JSON.stringify({ value: offsets(root, displayName(ksy.meta, ksy.meta.id) + "[0]", 0, root, Object.create(null)) }));
       } else {
-        console.log(JSON.stringify(instance(root)));
+        console.log(JSON.stringify({ value: instance(root) }));
       }
     } catch (e) {
       console.log(JSON.stringify({ error: String(e) }));
