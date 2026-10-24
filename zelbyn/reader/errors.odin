@@ -53,7 +53,7 @@ Decoder :: struct {
 	spans:       bool,            // the tree records spans: read_parse_instance is called with SPANS
 	args:        []fld.Value,     // the arguments of the params of the root's set (Root_Arg)
 	steps_left:  int,             // the steps the decode may still take (Limits.max_steps), below 0 once it took too many
-	nesting:     int,             // the parse instances being read, each inside the one before (MAX_INSTANCE_DEPTH)
+	stack:       int,             // the stack that the set instances, parse instances, evaluations and value instances being decoded take, as the build that takes the most takes it (SET_STACK)
 	err:         Parse_Error,
 }
 

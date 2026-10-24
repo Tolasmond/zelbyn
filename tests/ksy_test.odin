@@ -2607,12 +2607,13 @@ t[0].by_flags[0] = <1 bytes> 99
 `)
 }
 
-// Set instances nest at most reader.MAX_DEPTH deep, and parse instances
-// read from expressions of their own type at most
-// reader.MAX_INSTANCE_DEPTH, in every build: the tests are run in a debug
-// build too, where the evaluator's frames take the most stack, also for a
-// level that reads through three value instances or a deeper expression.
-// Deeper ones are Too_Deep.
+// Set instances nest at most reader.MAX_DEPTH deep, and everything that
+// decoding nests, set instances, parse instances read from expressions,
+// evaluations and value instances, only as deep as the stack that
+// reader.Decoder.stack counts for them allows, which is the same in every
+// build: the tests are run in plain, -o:speed and debug builds, which must
+// all give the depths recorded below, and a debug build asserts that the
+// stack really used is within what it counts. Deeper ones are Too_Deep.
 @(test)
 ksy_too_deep :: proc(t: ^testing.T) {
 	nest := "meta:\n  id: nest\nseq:\n  - id: flag\n    type: u1\n  - id: next\n    type: nest\n    if: flag != 0\n  - id: tail\n    type: u1\n"
@@ -2630,28 +2631,46 @@ ksy_too_deep :: proc(t: ^testing.T) {
 	want := fmt.tprintf("error: Too_Deep at %v in nest[0]", rdr.MAX_DEPTH)
 	testing.expectf(t, strings.has_prefix(got, want) && strings.count(got, ".next[0]") == rdr.MAX_DEPTH, "MAX_DEPTH + 1 levels: %.80s", got)
 
-	// each level reads its child, a parse instance, from the if of x, until
-	// the child whose flag is 0
+	// the most levels that decode, of inputs that nest one more level for
+	// each, recorded: a schema's depth changes only with what each frame
+	// counts for (reader.SET_STACK and the others)
 	P_HEAD :: "meta:\n  id: p\nseq:\n  - id: flag\n    type: u1\n  - id: x\n    size: 0\n"
 	P_CHILD :: "  child:\n    pos: _io.pos\n    type: p\n    if: flag != 0\n"
-	through_instances := [?]string {
-		P_HEAD + "    if: flag != 0 and child.flag < 2\ninstances:\n" + P_CHILD,
-		P_HEAD + "    if: flag != 0 and a < 2\ninstances:\n  a:\n    value: b\n  b:\n    value: c\n  c:\n    value: child.flag\n" + P_CHILD,
-		P_HEAD + "    if: flag != 0 and ((((((child.flag + 1) * 2) - 1) / 1) + 0) < 100)\ninstances:\n" + P_CHILD,
+	VALUES :: "  a0:\n    value: a1\n  a1:\n    value: a2\n  a2:\n    value: a3\n  a3:\n    value: a4\n  a4:\n    value: a5\n  a5:\n    value: child.flag\n"
+	// 200 levels of set instances, then parse instances inside each other
+	OUTER :: "meta:\n  id: outer\nseq:\n  - id: flag\n    type: u1\n  - id: next\n    type: outer\n    if: flag != 0\n  - id: x\n    size: 0\n    if: flag == 0 and child.flag < 2\ninstances:\n  child:\n    pos: _io.pos\n    type: p\n    if: flag == 0\ntypes:\n  p:\n    seq:\n      - id: flag\n        type: u1\n      - id: x\n        size: 0\n        if: flag != 0 and child.flag < 2\n    instances:\n      child:\n        pos: _io.pos\n        type: p\n        if: flag != 0\n"
+	// set instances inside each other, each evaluating an expression
+	EVALUATED :: "meta:\n  id: e\nseq:\n  - id: flag\n    type: u1\n  - id: next\n    type: e\n    if: flag != 0\n  - id: x\n    size: 0\n    if: (flag + 1) * 2 > 1\n"
+	Deep :: struct {
+		name:   string,
+		src:    string,
+		prefix: int, // flags of 1 and a 0 before those of the levels
+		levels: int,
+		error:  string, // of one level more
 	}
-	// MAX_INSTANCE_DEPTH flags of 1 and one of 0, with room for one more 1
-	flags := make([]byte, rdr.MAX_INSTANCE_DEPTH + 2, context.temp_allocator)
-	slice.fill(flags[:rdr.MAX_INSTANCE_DEPTH], 1)
-	deepest := strings.repeat(".child[0]", rdr.MAX_INSTANCE_DEPTH, context.temp_allocator)
-	for src, i in through_instances {
-		got = ksy_dump(t, src, flags[:rdr.MAX_INSTANCE_DEPTH + 1])
-		testing.expectf(t, strings.has_suffix(got, fmt.tprintf("p[0]%s.flag[0] = 0\n", deepest)), "schema %v, MAX_INSTANCE_DEPTH levels: %.120s", i, got)
-
-		flags[rdr.MAX_INSTANCE_DEPTH] = 1
-		got = ksy_dump(t, src, flags)
-		flags[rdr.MAX_INSTANCE_DEPTH] = 0
-		want = fmt.tprintf("error: Too_Deep at %v in p[0]%s.child[0]", rdr.MAX_INSTANCE_DEPTH + 1, deepest)
-		testing.expectf(t, got == want, "schema %v, MAX_INSTANCE_DEPTH + 1 levels: got %q, want %q", i, got, want)
+	deep := [?]Deep {
+		{"parse instance in an if", P_HEAD + "    if: flag != 0 and child.flag < 2\ninstances:\n" + P_CHILD, 0, 20, "error: Too_Deep at 22 in p[0]"},
+		{"through six value instances", P_HEAD + "    if: flag != 0 and a0 < 2\ninstances:\n" + VALUES + P_CHILD, 0, 8, "error: Too_Deep at 9 in p[0]"},
+		{"in a 6-deep expression", P_HEAD + "    if: flag != 0 and ((((((child.flag + 1) * 2) - 1) / 1) + 0) < 100)\ninstances:\n" + P_CHILD, 0, 10, "error: Too_Deep at 11 in p[0]"},
+		{"under 200 set instances", OUTER, 200, 1, "error: Too_Deep at 203 in outer[0]"},
+		{"evaluating in each set instance", EVALUATED, 0, 220, "error: Too_Deep at 222 in e[0]"},
+	}
+	for c in deep {
+		input := make([dynamic]byte, context.temp_allocator)
+		if c.prefix > 0 {
+			for _ in 0 ..< c.prefix do append(&input, 1)
+			append(&input, 0)
+		}
+		levels := 0
+		next: string
+		for ; levels < 2 * rdr.MAX_DEPTH; levels += 1 {
+			// one more flag of 1, then a 0
+			append(&input, 1, 0)
+			next = ksy_dump(t, c.src, input[:])
+			pop(&input)
+			if strings.has_prefix(next, "error: ") do break
+		}
+		testing.expectf(t, levels == c.levels && strings.has_prefix(next, c.error), "%s: %v levels decode, then %.100s; want %v, then %.100s", c.name, levels, next, c.levels, c.error)
 	}
 }
 
