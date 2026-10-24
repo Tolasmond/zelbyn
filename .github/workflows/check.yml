@@ -1,7 +1,8 @@
 # The checks a change must pass (tools/check.py), with the Odin release
-# they are pinned to. The corpus checks need clones of kaitai_struct_formats
-# and kaitai_struct_samples, and Node.js, and are run by hand
-# (doc/development.md).
+# they are pinned to, on Linux and on Windows, whose 1 MB main-thread stack
+# the stack limits are sized for. The corpus checks need clones of
+# kaitai_struct_formats and kaitai_struct_samples, and Node.js, and are run
+# by hand (doc/development.md).
 name: check
 
 on:
@@ -29,3 +30,21 @@ jobs:
 
       - name: Checks
         run: python3 tools/check.py
+
+  check-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Odin dev-2026-10 (commit 84bc3fc)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://github.com/odin-lang/Odin/releases/download/dev-2026-10/odin-windows-amd64-dev-2026-10.zip -OutFile odin.zip
+          $hash = (Get-FileHash odin.zip -Algorithm SHA256).Hash
+          if ($hash -ne 'B6B2E426A8B6F147B74EC7E18BEF8DF27CF40FE16193159DF7CA09A0CC0C2011') { throw "odin.zip: SHA-256 $hash" }
+          Expand-Archive odin.zip -DestinationPath "$env:RUNNER_TEMP\odin"
+          Remove-Item odin.zip
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:RUNNER_TEMP\odin\dist"
+
+      - name: Checks
+        run: python tools/check.py

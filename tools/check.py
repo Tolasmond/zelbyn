@@ -8,8 +8,8 @@ names (another is warned of, not refused). Always run, in order:
 
   - odin check . -vet -strict-style, and with -debug
   - odin check tests -vet -strict-style -no-entry-point
-  - the tests, built without and with -o:speed, with
-    ODIN_TEST_FAIL_ON_BAD_MEMORY
+  - the tests, built without and with -o:speed, and with -debug, which
+    uses the most stack, with ODIN_TEST_FAIL_ON_BAD_MEMORY
   - odin check -vet -strict-style of tools/bench, tools/ksy_corpus and
     tools/yaml_corpus
 
@@ -81,12 +81,13 @@ def main():
 
     results = []
     with tempfile.TemporaryDirectory() as tmp:
-        tests = os.path.join(tmp, 'tests')
+        tests = os.path.join(tmp, 'tests' + ('.exe' if os.name == 'nt' else ''))
         run('odin check .', ['odin', 'check', '.', '-vet', '-strict-style'], results)
         run('odin check . -debug', ['odin', 'check', '.', '-vet', '-strict-style', '-debug'], results)
         run('odin check tests', ['odin', 'check', 'tests', '-vet', '-strict-style', '-no-entry-point'], results)
         run('tests', ['odin', 'test', 'tests', '-out:' + tests] + TEST_DEFINES, results)
         run('tests -o:speed', ['odin', 'test', 'tests', '-o:speed', '-out:' + tests] + TEST_DEFINES, results)
+        run('tests -debug', ['odin', 'test', 'tests', '-debug', '-out:' + tests] + TEST_DEFINES, results)
         for tool in ('tools/bench', 'tools/ksy_corpus', 'tools/yaml_corpus'):
             run('odin check ' + tool, ['odin', 'check', tool, '-vet', '-strict-style'], results)
 
