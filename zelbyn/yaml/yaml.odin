@@ -846,8 +846,9 @@ parse_block_scalar :: proc(p: ^Parser, indent: int) -> ^Node {
 		}
 	}
 
+	// as in libyaml, a comment can follow the indicators with no blank (|#)
 	for is_blank(peek(p)) do advance(p)
-	if peek(p) == '#' && is_blank(p.src[p.pos - 1]) {
+	if peek(p) == '#' {
 		for p.pos < len(p.src) && !is_break(peek(p)) do advance(p)
 	}
 	if p.pos < len(p.src) && !is_break(peek(p)) {
@@ -955,6 +956,7 @@ parse_flow :: proc(p: ^Parser) -> ^Node {
 
 			if !skip_flow_space(p) do return nil
 			if peek(p) != ':' do return fail(p, .Unsupported, p.pos, "a flow mapping entry without a value is not supported")
+			if !colon_on_key_line(p, key) do return nil
 			advance(p)
 
 			// libyaml places an empty value at the token after it
@@ -971,7 +973,10 @@ parse_flow :: proc(p: ^Parser) -> ^Node {
 			item := parse_flow_node(p)
 			if item == nil do return nil
 			if !skip_flow_space(p) do return nil
-			if peek(p) == ':' do return fail(p, .Unsupported, p.pos, "a mapping inside a flow sequence is not supported")
+			if peek(p) == ':' {
+				if !colon_on_key_line(p, item) do return nil
+				return fail(p, .Unsupported, p.pos, "a mapping inside a flow sequence is not supported")
+			}
 			append(&items, item)
 		}
 
@@ -995,17 +1000,33 @@ parse_flow :: proc(p: ^Parser) -> ^Node {
 	return node
 }
 
+// Whether the : at the reader is on the line key starts on, as libyaml
+// requires of an implicit key, which skip_flow_space would otherwise let
+// a line break or a comment separate from its : ({"k"# c, then : v on the
+// next line); else fails at the :.
+@(private = "file")
+colon_on_key_line :: proc(p: ^Parser, key: ^Node) -> bool {
+	if p.line == key.line do return true
+	fail(p, .Syntax, p.pos, "a : after a key must be on the line the key starts on")
+	return false
+}
+
 @(private = "file")
 fail_at_node_nil :: proc(p: ^Parser, kind: Error_Kind, n: ^Node, format: string, args: ..any) -> ^Node {
 	fail_at_node(p, kind, n, format, ..args)
 	return nil
 }
 
+// Skips blanks, line breaks and comments between the tokens of a flow
+// collection. A # here starts a comment even right after a token, as in
+// libyaml ([x,# c): it is only called between tokens, and a # inside a
+// plain scalar (url#frag) is already part of the scalar, which ends only
+// before a blank and a #.
 @(private = "file")
 skip_flow_space :: proc(p: ^Parser) -> bool {
 	for p.pos < len(p.src) {
 		c := peek(p)
-		if c == '#' && (p.pos == p.line_start || is_blank(p.src[p.pos - 1]) || is_break(p.src[p.pos - 1])) {
+		if c == '#' {
 			for p.pos < len(p.src) && !is_break(peek(p)) do advance(p)
 		} else if is_blank(c) || is_break(c) {
 			advance(p)
