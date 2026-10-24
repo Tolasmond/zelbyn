@@ -442,10 +442,8 @@ compile_count :: proc(c: ^Compiler, attr: ^yml.Node, id: string, scope: expr.Sco
 	case "expr":
 		if repeat_expr == nil do return nil, fail(c, .Invalid, get_key(attr, "repeat"), "%s: repeat: expr needs repeat-expr", id)
 		e := compile_expr(c, repeat_expr, "repeat-expr", scope, .Int) or_return
-		if lit, is_literal := e.variant.(mdata.Int_Literal); is_literal {
-			if lit.value < 0 do return nil, fail(c, .Invalid, repeat_expr, "%s: repeat-expr is negative", id)
-			return mdata.Fixed_Count{n = lit.value, repeat = true}, true
-		}
+		// a negative count reads no elements, as in Kaitai's runtimes
+		if lit, is_literal := e.variant.(mdata.Int_Literal); is_literal do return mdata.Fixed_Count{n = max(lit.value, 0), repeat = true}, true
 		return mdata.Rule_Count{expr = e}, true
 	}
 

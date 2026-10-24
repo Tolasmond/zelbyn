@@ -340,6 +340,21 @@ class Decodes(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn('1 files: 1 agree', r.stdout)
 
+    def test_negative_counts_agree(self):
+        """A negative repeat-expr reads no elements, in both: computed from
+        the input, a negation and an enum constant (whose .to_i the official
+        compiler needs)."""
+        schema = ('meta:\n  id: neg\n  endian: le\nseq:\n  - id: n\n    type: s1\n'
+                  '  - id: computed\n    type: u1\n    repeat: expr\n    repeat-expr: n\n'
+                  '  - id: negation\n    type: u1\n    repeat: expr\n    repeat-expr: -1\n'
+                  '  - id: constant\n    type: u1\n    repeat: expr\n    repeat-expr: counts::none.to_i\n'
+                  '  - id: after\n    type: u1\nenums:\n  counts:\n    -3: none\n')
+        for flags in ([], ['--offsets']):
+            with self.subTest(flags=flags):
+                r = self.compare(schema, b'\xfe\x07', *flags)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertIn('1 files: 1 agree', r.stdout)
+
     def test_any_name(self):
         """A name can be one that a JavaScript object has already, or error,
         which an error record has: as a field's -orig-id or the root's, and

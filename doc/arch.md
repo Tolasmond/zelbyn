@@ -383,7 +383,7 @@ The resolver stores a field's slot in its `Field_Ref` when it resolves the name,
 | Variant | Elements read |
 |---|---|
 | `Fixed_Count{n, repeat}` | `n`; `repeat` when the schema repeats the field, so that it is an array even of one element |
-| `Rule_Count{expr}` | The value of an `Int` expression. Negative is `Invalid_Length`. |
+| `Rule_Count{expr}` | The value of an `Int` expression; none when it is negative. |
 | `Marker_Count{markers}` | 1 when every marker (an integer at an offset from the current position) matches the input, else 0. A marker that cannot be read does not match. Nothing is consumed. |
 | `Repeat_Count{type, value, until, order}` | While (`until` false) or until (`until` true) the integer at the current position equals `value`. It is peeked, never consumed. With `until`, reaching the end of the input first is an error. Each element must consume input. |
 | `Eos_Count` | Until the end of the stream, counting bits left over. Each element must consume input. |
@@ -545,7 +545,7 @@ As the official compiler does, the compiler marks every attribute that follows a
 
 ### 7.8 Counting rules
 
-- A negative `Rule_Count` is `Invalid_Length`.
+- A negative `Rule_Count` reads no elements, as Kaitai's runtimes read none, and so does a negative constant `repeat-expr`, a `Fixed_Count` of 0. A negative length is still `Invalid_Length`, as the JavaScript runtime fails on one too.
 - `markers_match` peeks each marker at its offset from the current position.
 - `read_repeat` implements `Repeat_Count`. A failed peek ends a `-while-peek` repeat; for `-until-peek` it is `Unexpected_EOF`.
 
@@ -704,7 +704,7 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | `helpers.odin` | Loading the GIF schemas; decoding helpers, with or without spans; finding a field's slot and values by name |
 | `golden_test.odin` | The text and JSON dumps of all six samples, from trees read with and without spans, compared byte for byte with `tests/golden/` (from `gif.ksy`) and `tests/golden/gif89a/` (from `gif89a.ksy`). With `-define:GOLDEN_RECORD=true` the dumps are re-recorded instead. |
 | `decode_samples_test.odin` | Per-sample values: dimensions, colour-table sizes, block counts, trailer |
-| `decode_malformed_test.odin` | Truncated and malformed inputs, their error kinds, offsets and paths; truncation sweeps over the samples; counts larger than the input; negative counts and lengths |
+| `decode_malformed_test.odin` | Truncated and malformed inputs, their error kinds, offsets and paths; truncation sweeps over the samples; counts larger than the input; negative counts, which read nothing, and lengths |
 | `memory_test.odin` | That decoding, with and without spans and with `process: zlib`, `read` and `ksy.compile` make no heap allocations; that errors allocate only their message or path, and a failed check's value and expected; tree lifetime and reuse after destroy |
 | `checks_test.odin` | Byte order, `valid` checks and bit fields, on hand-built plans, with the value and the expected value each failed check reports, shortened when long |
 | `expression_parse_test.odin` | Parsing, precedence and syntax errors, and type errors, also of floats |

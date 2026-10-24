@@ -1,8 +1,11 @@
 package tests
 
+import dmp "../zelbyn/dump"
 import ksy "../zelbyn/ksy"
 import mdata "../zelbyn/metadata"
+import "core:fmt"
 import "core:os"
+import "core:strings"
 import "core:testing"
 import "core:time"
 
@@ -318,11 +321,12 @@ count_beyond_input :: proc(t: ^testing.T) {
 	}
 }
 
-// A count or a length computed from the input may be negative, which is an
-// error where the field starts.
+// A negative repeat-expr reads no elements, as in Kaitai's runtimes:
+// computed from the input, a negation or an enum constant, and the fields
+// after it are read; a negative length is an error where the field starts.
 @(test)
 negative_count_and_length :: proc(t: ^testing.T) {
-	SRC :: "meta:\n  id: neg\nseq:\n  - id: n\n    type: s1\n  - id: items\n    type: u1\n    repeat: expr\n    repeat-expr: n\n  - id: m\n    type: s1\n  - id: data\n    size: m\n"
+	SRC :: "meta:\n  id: neg\nseq:\n  - id: n\n    type: s1\n  - id: items\n    type: u1\n    repeat: expr\n    repeat-expr: n\n  - id: negation\n    type: u1\n    repeat: expr\n    repeat-expr: -1\n  - id: constant\n    type: u1\n    repeat: expr\n    repeat-expr: counts::none\n  - id: m\n    type: s1\n    valid:\n      expr: items.size + negation.size + constant.size == 0\n  - id: data\n    size: m\nenums:\n  counts:\n    -3: none\n"
 
 	ff: mdata.File_Format
 	defer mdata.destroy_file_format(&ff)
@@ -331,14 +335,27 @@ negative_count_and_length :: proc(t: ^testing.T) {
 	if !testing.expectf(t, err.kind == .None, "%v at %v:%v: %s", err.kind, err.line, err.column, err.message) do return
 
 	Case :: struct {
-		input:  []byte,
-		path:   string,
-		offset: int,
+		input: []byte,
+		dump:  string, // or the error
 	}
-	for c in ([?]Case{{{0xff}, "neg[0]", 1}, {{0, 0xff}, "neg[0].data[0]", 2}}) {
+	cases := [?]Case {
+		{{0xff, 2, 0xaa, 0xbb}, "neg[0].n[0] = -1\nneg[0].m[0] = 2\nneg[0].data[0] = <2 bytes> aa bb\n"},
+		{{0x80, 0}, "neg[0].n[0] = -128\nneg[0].m[0] = 0\nneg[0].data[0] = <0 bytes>\n"},
+		{{0x01, 7, 0}, "error: Expr_False at 2 in neg[0].m[0]"},
+		{{0xff, 0xff}, "error: Invalid_Length at 2 in neg[0].data[0]"},
+	}
+	for c in cases {
 		d: Decoded
+		defer destroy_decoded(&d)
 		decode_bytes(&ff, c.input, &d)
-		testing.expectf(t, d.err.kind == .Invalid_Length && d.err.offset == c.offset && d.err.path == c.path, "%v: %v at %v in %s, want Invalid_Length at %v in %s", c.input, d.err.kind, d.err.offset, d.err.path, c.offset, c.path)
-		destroy_decoded(&d)
+		got: string
+		if d.err.kind != .None {
+			got = fmt.tprintf("error: %v at %v in %s", d.err.kind, d.err.offset, d.err.path)
+		} else {
+			b := strings.builder_make(context.temp_allocator)
+			testing.expect(t, dmp.write_text(strings.to_writer(&b), &ff, &d.tree) == .None, "write_text failed")
+			got = strings.to_string(b)
+		}
+		testing.expectf(t, got == c.dump, "%v: got %q, want %q", c.input, got, c.dump)
 	}
 }
