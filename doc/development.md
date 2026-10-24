@@ -30,9 +30,20 @@ The checks that need what the repository does not hold run only when asked: `--f
 python3 tools/check.py --formats ../kaitai_struct_formats --samples ../kaitai_struct_samples --yaml-corpus --compare-tests
 ```
 
-`.github/workflows/check.yml` runs `tools/check.py` on every push to `main` and every pull request, on Linux and on Windows, with the Odin release it is pinned to, checked against its SHA-256. The debug build of the tests uses the most stack, and on Windows checks the stack limits against the 1 MB stack they are sized for (arch.md §7.5). The optional checks are not run there.
+`.github/workflows/check.yml` runs `tools/check.py` on every push to `main` and every pull request, on Linux and on Windows, with the Odin release it is pinned to, checked against its SHA-256. `.github/actions/install-odin` installs that release for it and for the release workflow, so a new pin, with its checksums, is made there and in `tools/check.py`. The debug build of the tests uses the most stack, and on Windows checks the stack limits against the 1 MB stack they are sized for (arch.md §7.5). The optional checks are not run there.
 
 Debug builds (`odin build . -debug -out:build/zelbyn`) run under a tracking allocator and exit 1 if anything leaks or is freed twice.
+
+## Releases
+
+Pushing a tag that starts with `v` publishes a GitHub release of the tagged commit:
+
+```
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+`.github/workflows/release.yml` runs `tools/check.py` on Linux (Ubuntu 22.04, for the oldest glibc of the supported runners) and on Windows, builds zelbyn with `-o:speed` on each, and packages the binary with `LICENSE`, `THIRD_PARTY.md` and `README.md`: `zelbyn-<tag>-linux-amd64.tar.gz` and `zelbyn-<tag>-windows-amd64.zip`. The release, named for the tag, has notes GitHub generates from the pull requests since the last release, the two archives, and `SHA256SUMS`. A tag with a hyphen (`v0.2.0-rc.1`) makes a pre-release. If a check fails, nothing is published; delete the tag (`git push --delete origin v0.1.0`), fix the commit, and tag again. A pull request that changes the workflow or `install-odin` builds and packages the archives without publishing them, and they can be downloaded from the run's artifacts.
 
 ## Benchmark
 
