@@ -171,11 +171,18 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    consume: false\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n", .Invalid, 6, 5, "a: consume applies only with terminator or strz"},
 	{HEAD + "  encoding: ASCII\nseq:\n  - id: a\n    size: 2\n    consume: false\n    type:\n      switch-on: 1\n      cases:\n        1: strz\n", .Invalid, 8, 5, "a: consume does not apply with a size"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: nope\n", .Invalid, 9, 12, "a: unknown type nope"},
-	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        n: s\ntypes:\n  s: {}\n", .Unsupported, 11, 9, "a case must be an integer from -2^63 to 2^63 - 1 or an enum constant"},
+	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        n: s\ntypes:\n  s: {}\n", .Unsupported, 11, 9, "a case must be an integer literal, from -2^63 to 2^64 - 1, or an enum constant"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n        0x1: s\ntypes:\n  s: {}\n", .Invalid, 10, 9, "a: case 1 is already given (line 9, column 9)"},
 	{HEAD + "seq:\n  - id: a\n    type: s1\n    enum: e\n  - id: b\n    type:\n      switch-on: a\n      cases:\n        e::m: u1\n        -1: u1\nenums:\n  e:\n    -1: m\n", .Invalid, 13, 9, "b: case -1 is already given (line 12, column 9)"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        9223372036854775808: u1\n", .Unsupported, 9, 9, "a: a case must be an integer from -2^63 to 2^63 - 1 or an enum constant"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        -9223372036854775809: u1\n", .Unsupported, 9, 9, "a: a case must be an integer from -2^63 to 2^63 - 1 or an enum constant"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        18446744073709551616: u1\n", .Unsupported, 9, 9, "integer literal 18446744073709551616 is above 2^64 - 1"},
+	// enum values are those of the official compiler, which holds them as
+	// 64-bit signed integers; their literals are those of expressions
+	{HEAD + "enums:\n  e:\n    9223372036854775808: big\n", .Unsupported, 6, 5, "enum e: 9223372036854775808 does not fit in a 64-bit signed integer"},
+	{HEAD + "enums:\n  e:\n    1__0: x\n", .Invalid, 6, 5, `enum e: "1__0" is not an integer`},
+	{HEAD + "enums:\n  e:\n    010: x\n", .Invalid, 6, 5, `enum e: "010" is not an integer`},
+	{HEAD + "seq:\n  - id: a\n    contents: [010]\n", .Invalid, 6, 16, "is not a byte"},
+	{HEAD + "seq:\n  - id: a\n    contents: 010\n", .Invalid, 6, 15, "write a byte as a sequence"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        -9223372036854775809: u1\n", .Unsupported, 9, 9, "a: a case must be an integer literal, from -2^63 to 2^64 - 1, or an enum constant"},
 	{HEAD + "  encoding: ASCII\nseq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n        2: strz\n  - id: b\n    size: a\n", .Unsupported, 13, 11, "size: a is a switch-on field whose values can be an integer or a string"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n    size: 2\n  - id: b\n    size: a\n", .Unsupported, 12, 11, "size: a is a switch-on field whose values can be a byte array or an integer"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        _: s\n  - id: b\n    size: a.c\ntypes:\n  s:\n    seq:\n      - id: c\n        type: u1\n", .Unsupported, 11, 11, "size: a is a switch-on field whose cases are user types; it cannot be used in expressions"},
@@ -1847,6 +1854,49 @@ ksy_valid_constant_bounds :: proc(t: ^testing.T) {
 		expect_dump(t, c.bound, ksy_dump(t, as_value, c.input), c.want)
 		expect_dump(t, c.bound, ksy_dump(t, as_expr, c.input), c.want)
 	}
+}
+
+// A switch-on compares its value, and its cases, as any integers an
+// expression has: from -2^63 to 2^64 - 1, so a u8 above max(int) chooses
+// its case, or the default, rather than failing.
+@(test)
+ksy_wide_switch :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: recs
+    type: rec
+    repeat: eos
+types:
+  rec:
+    seq:
+      - id: k
+        type: u8
+      - id: v
+        type:
+          switch-on: k
+          cases:
+            18446744073709551615: u1
+            0x8000_0000_0000_0000: u2
+            1: s1
+            _: s2
+`
+	input := []byte{
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 7,
+		0, 0, 0, 0, 0, 0, 0, 0x80, 8, 0,
+		1, 0, 0, 0, 0, 0, 0, 0, 0xf7,
+		1, 0, 0, 0, 0, 0, 0, 0x80, 0xf6, 0xff,
+		5, 0, 0, 0, 0, 0, 0, 0, 0xf5, 0xff,
+	}
+	expect_dump(t, "wide switch", ksy_dump(t, src, input), `t[0].recs[0].k[0] = 18446744073709551615
+t[0].recs[0].v[0] = 7
+t[0].recs[1].k[0] = 9223372036854775808
+t[0].recs[1].v[0] = 8
+t[0].recs[2].k[0] = 1
+t[0].recs[2].v[0] = -9
+t[0].recs[3].k[0] = 9223372036854775809
+t[0].recs[3].v[0] = -10
+t[0].recs[4].k[0] = 5
+t[0].recs[4].v[0] = -11
+`)
 }
 
 // A value instance that reads a repeated field keeps the value it had when

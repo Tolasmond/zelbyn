@@ -1984,11 +1984,11 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 	}
 
 	list := make([dynamic]mdata.Switch_Case, c.allocator)
-	seen := make(map[int]^yml.Node, c.scratch)
+	seen := make(map[i128]^yml.Node, c.scratch)
 	seen_text := make(map[string]^yml.Node, c.scratch)
 	for e in cases.entries {
 		is_default := e.key.text == "_" && e.key.style == .Plain
-		value: int
+		value: i128
 		text: string
 		if is_default {
 			// _ has no value to compare
@@ -2004,15 +2004,16 @@ compile_switch :: proc(c: ^Compiler, td: ^Type_Def, attr, n: ^yml.Node, id: stri
 			key := compile_expr(c, e.key, "a case", scope, .Bool) or_return
 			lit, is_literal := key.variant.(mdata.Bool_Literal)
 			if !is_literal do return fail(c, .Unsupported, e.key, "%s: a case must be true or false", id)
-			value = int(lit.value)
+			value = i128(lit.value)
 			if prev, dup := seen[value]; dup do return fail(c, .Invalid, e.key, "%s: case %s is already given (line %v, column %v)", id, e.key.text, prev.line, prev.column)
 			seen[value] = e.key
 		} else {
 			key := compile_expr(c, e.key, "a case", scope, .Int) or_return
-			// the decoder compares a switch-on as an int
+			// any integer an expression has, as the value is compared with
+			// each in full
 			v, is_literal := int_literal(key)
-			if !is_literal || v < i128(min(int)) || v > i128(max(int)) do return fail(c, .Unsupported, e.key, "%s: a case must be an integer from -2^63 to 2^63 - 1 or an enum constant", id)
-			value = int(v)
+			if !is_literal do return fail(c, .Unsupported, e.key, "%s: a case must be an integer literal, from -2^63 to 2^64 - 1, or an enum constant", id)
+			value = v
 			if prev, dup := seen[value]; dup do return fail(c, .Invalid, e.key, "%s: case %v is already given (line %v, column %v)", id, value, prev.line, prev.column)
 			seen[value] = e.key
 		}
@@ -2418,15 +2419,17 @@ byte_list :: proc(c: ^Compiler, n: ^yml.Node, what: string) -> (bytes: []byte, o
 	b := make([dynamic]byte, c.allocator)
 	switch n.kind {
 	case .Scalar:
-		if _, is_int := parse_int(n.text); is_int && n.style == .Plain {
+		if _, status := int_scalar_value(n.text); status != .Invalid && n.style == .Plain {
 			return nil, fail(c, .Invalid, n, "%s: write a byte as a sequence, [%s]", what, n.text)
 		}
 		append(&b, n.text)
 	case .Seq:
 		for item in n.items {
 			if item.kind != .Scalar do return nil, fail(c, .Invalid, item, "%s: an element must be a byte or a string", what)
-			if v, is_int := parse_int(item.text); is_int && item.style == .Plain {
-				if v < 0 || v > 255 do return nil, fail(c, .Invalid, item, "%s: %s is not a byte (0 to 255)", what, item.text)
+			v, status := int_scalar_value(item.text)
+			if status != .Invalid && item.style == .Plain {
+				// 010 and one beyond 2^64 - 1 are numbers in YAML, not strings
+				if status != .Ok || v < 0 || v > 255 do return nil, fail(c, .Invalid, item, "%s: %s is not a byte (0 to 255)", what, item.text)
 				append(&b, byte(v))
 			} else {
 				append(&b, item.text)
@@ -2608,9 +2611,8 @@ int_literal :: proc(e: ^mdata.Expr) -> (v: i128, ok: bool) {
 		return i128(x.value), true
 	case mdata.Unary:
 		if x.op != .Neg do return
-		v = int_literal(x.operand) or_return
-		v = -v
-		return v, v >= i128(min(int)) && v <= i128(max(u64))
+		n, err := mdata.int_unary(.Neg, int_literal(x.operand) or_return)
+		return n, err == .None
 	}
 	return
 }
@@ -2687,51 +2689,29 @@ int_of :: proc(s: mdata.Scalar) -> i128 {
 	panic("int_of: not an integer")
 }
 
-// An integer literal as Kaitai writes them: an optional sign, then decimal,
-// 0x hex, 0b binary or 0o octal digits, with _ allowed between digits.
-// Values beyond 64 bits are rejected.
+// An integer literal in a YAML scalar: an optional sign, then an integer
+// literal as an expression has one (expression.int_literal_value, which the
+// expression parser reads them with too), so up to 2^64 - 1 either way.
 @(private = "file")
 parse_int :: proc(text: string) -> (v: i128, ok: bool) {
+	value, status := int_scalar_value(text)
+	return value, status == .Ok
+}
+
+// The value of text as parse_int reads it, and why it is not one: Invalid
+// for text that is no integer, Leading_Zero (010) and Too_Large for text
+// that would be one, but is not one zelbyn reads.
+@(private = "file")
+int_scalar_value :: proc(text: string) -> (v: i128, status: expr.Int_Literal_Status) {
 	s := text
 	negative := false
 	if len(s) > 0 && (s[0] == '-' || s[0] == '+') {
 		negative = s[0] == '-'
 		s = s[1:]
 	}
-
-	base: i128 = 10
-	if len(s) > 2 && s[0] == '0' {
-		switch s[1] {
-		case 'x', 'X':
-			base = 16
-		case 'b', 'B':
-			base = 2
-		case 'o', 'O':
-			base = 8
-		}
-		if base != 10 do s = s[2:]
-	}
-	if len(s) == 0 || s[0] == '_' || s[len(s) - 1] == '_' do return 0, false
-
-	for ch in transmute([]byte)s {
-		d: i128
-		switch ch {
-		case '_':
-			continue
-		case '0' ..= '9':
-			d = i128(ch - '0')
-		case 'a' ..= 'f':
-			d = i128(ch - 'a' + 10)
-		case 'A' ..= 'F':
-			d = i128(ch - 'A' + 10)
-		case:
-			return 0, false
-		}
-		if d >= base do return 0, false
-		v = v * base + d
-		if v > i128(max(u64)) do return 0, false
-	}
-	return negative ? -v : v, true
+	value: u64
+	value, _, status, _ = expr.int_literal_value(s)
+	return negative ? -i128(value) : i128(value), status
 }
 
 // -bits: packed subfields of an integer field, each a mapping of id,

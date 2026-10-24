@@ -326,14 +326,56 @@ hex_digit :: proc(c: byte) -> int {
 	return -1
 }
 
-// An integer literal at p.pos, which is a digit.
+// An integer literal at p.pos, which is a digit (int_literal_value); one
+// that turns out to be a float literal is lexed as one (lex_float).
 @(private = "file")
 lex_int :: proc(p: ^Parser) -> bool {
 	start := p.pos
-	base := 10
-	digits := start
-	if p.text[start] == '0' && start + 1 < len(p.text) {
-		switch p.text[start + 1] {
+	end := start
+	for end < len(p.text) && (is_ident_start(p.text[end]) || is_digit(p.text[end])) do end += 1
+	text := p.text[start:end]
+	value, base, status, bad := int_literal_value(text)
+	// 1.5 and 1. are floats; 1.to_s is a method of 1
+	if end < len(p.text) && base == 10 && p.text[end] == '.' && (end + 1 == len(p.text) || !is_ident_start(p.text[end + 1])) do return lex_float(p)
+
+	switch status {
+	case .Ok:
+	case .Invalid:
+		// so is 1e3, which no integer literal would be
+		c := bad < len(text) ? text[bad] : 0
+		if base == 10 && (c == 'e' || c == 'E') && exponent(p.text[start + bad:]) > 0 do return lex_float(p)
+		return fail(p, .Syntax, start, "invalid integer literal %s", text)
+	case .Leading_Zero:
+		return fail(p, .Syntax, start, "invalid integer literal %s (use 0o for octal)", text)
+	case .Too_Large:
+		// valid Kaitai, whose expressions are wider still
+		return fail(p, .Unsupported, start, "integer literal %s is above 2^64 - 1, the largest integer expressions have", text)
+	}
+
+	p.pos = end
+	p.tok = Token{kind = .Int, offset = start, text = text, value = int(value), big = value > u64(max(int))}
+	return true
+}
+
+Int_Literal_Status :: enum {
+	Ok,
+	Invalid,      // not an integer literal; bad is where
+	Leading_Zero, // decimal with a 0 before its other digits (010), which YAML 1.1 would read as octal
+	Too_Large,    // above max(u64)
+}
+
+// The value of text as an integer literal, as Kaitai writes one in an
+// expression, and as the compiler reads one in a YAML scalar too (an enum
+// value, a byte, a valid bound, after its sign): decimal, without leading
+// zeros, or 0x hex, 0b binary or 0o octal digits (also 0X, 0B and 0O),
+// with a single _ between two digits. base is that of its prefix. bad is
+// the offset of the first character that is not a digit of the base, or
+// len(text) when there are no digits or the last is _, for Invalid.
+int_literal_value :: proc(text: string) -> (value: u64, base: int, status: Int_Literal_Status, bad: int) {
+	base = 10
+	digits := 0
+	if len(text) > 1 && text[0] == '0' {
+		switch text[1] {
 		case 'x', 'X':
 			base = 16
 		case 'b', 'B':
@@ -341,20 +383,13 @@ lex_int :: proc(p: ^Parser) -> bool {
 		case 'o', 'O':
 			base = 8
 		}
-		if base != 10 do digits += 2
+		if base != 10 do digits = 2
 	}
 
-	end := digits
-	for end < len(p.text) && (is_ident_start(p.text[end]) || is_digit(p.text[end])) do end += 1
-	// 1.5 and 1. are floats; 1.to_s is a method of 1
-	if end < len(p.text) && base == 10 && p.text[end] == '.' && (end + 1 == len(p.text) || !is_ident_start(p.text[end + 1])) do return lex_float(p)
-
-	text := p.text[start:end]
-	value: u64
 	n := 0 // digits seen
-	for i in digits ..< end {
-		c := p.text[i]
-		if c == '_' && i > digits && p.text[i - 1] != '_' do continue
+	for i in digits ..< len(text) {
+		c := text[i]
+		if c == '_' && i > digits && text[i - 1] != '_' do continue
 
 		d := 99
 		switch c {
@@ -365,25 +400,14 @@ lex_int :: proc(p: ^Parser) -> bool {
 		case 'A' ..= 'F':
 			d = int(c - 'A') + 10
 		}
-		if d >= base {
-			// so is 1e3, which no integer literal would be
-			if base == 10 && (c == 'e' || c == 'E') && exponent(p.text[i:]) > 0 do return lex_float(p)
-			return fail(p, .Syntax, start, "invalid integer literal %s", text)
-		}
-
-		if value > (max(u64) - u64(d)) / u64(base) {
-			// valid Kaitai, whose expressions are wider still
-			return fail(p, .Unsupported, start, "integer literal %s is above 2^64 - 1, the largest integer expressions have", text)
-		}
+		if d >= base do return value, base, .Invalid, i
+		if value > (max(u64) - u64(d)) / u64(base) do return value, base, .Too_Large, -1
 		value = value * u64(base) + u64(d)
 		n += 1
 	}
-	if n == 0 || p.text[end - 1] == '_' do return fail(p, .Syntax, start, "invalid integer literal %s", text)
-	if base == 10 && n > 1 && p.text[start] == '0' do return fail(p, .Syntax, start, "invalid integer literal %s (use 0o for octal)", text)
-
-	p.pos = end
-	p.tok = Token{kind = .Int, offset = start, text = text, value = int(value), big = value > u64(max(int))}
-	return true
+	if n == 0 || text[len(text) - 1] == '_' do return value, base, .Invalid, len(text)
+	if base == 10 && n > 1 && text[0] == '0' do return value, base, .Leading_Zero, -1
+	return value, base, .Ok, -1
 }
 
 // A float literal at p.pos, which is a digit, as Kaitai writes one: digits,
