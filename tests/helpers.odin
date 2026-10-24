@@ -52,7 +52,7 @@ Decoded :: struct {
 // d must be zero or destroyed. Decoded embeds a Value_Tree, and so its
 // arena, whose blocks a copy would share without knowing of those the
 // other adds, so it is filled in place and never returned by value
-// (doc/arch.md §11).
+// (doc/arch.md, "Memory and ownership").
 decode_bytes :: proc(ff: ^mdat.File_Format, data: []byte, d: ^Decoded, spans := false, args: []fld.Value = nil) {
 	d.consumed, d.err = rdr.read_from_bytes(data, ff, &d.tree, spans, args)
 }

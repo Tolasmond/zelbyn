@@ -1,6 +1,7 @@
 package metadata
 
-// A node of a parsed expression (doc/arch.md §5.2, and in the plan, §6.8).
+// A node of a parsed expression (doc/arch.md, "expression: parsing,
+// resolution and direct forms", and in the plan, "Checks and expressions").
 // The parser (package expression) gives every node a syntax variant; resolving the expression replaces the
 // names and member accesses with the resolved variants and sets type. The
 // decoder only sees resolved expressions.
@@ -345,8 +346,9 @@ Value_Ref :: struct {
 }
 
 // A form of a whole expression that the decoder evaluates without walking
-// the tree, kept alongside it (doc/arch.md §5.2, and how the decoder
-// evaluates it, §7.9). It gives what the tree gives
+// the tree, kept alongside it (doc/arch.md, "expression: parsing,
+// resolution and direct forms", and how the decoder evaluates it,
+// "Expression evaluation"). It gives what the tree gives
 // whenever the field it reads has a value that fits an int; otherwise the
 // decoder evaluates the tree, which reports the error.
 Direct :: union {
