@@ -18,18 +18,17 @@ This produces `build/zelbyn`, or `build\zelbyn.exe` on Windows; `build/` holds o
 zelbyn <schema.ksy> <file> [--dump tree|json] [--offsets] [--import-path dirs] [--param name=value]... [--max-memory n] [--max-steps n]
 ```
 
-Decodes `<file>` with the Kaitai Struct schema and writes the decoded tree to stdout. For example:
+Decodes `<file>` with the Kaitai Struct schema and writes the decoded tree to stdout. The repository holds no schemas or sample files of real formats. The examples here use clones of [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) and [kaitai_struct_samples](https://github.com/kaitai-io/kaitai_struct_samples) beside it, made as [Corpus check](development.md#corpus-check) describes:
 
 ```
-build/zelbyn formats/gif.ksy data/855.gif
-build/zelbyn formats/gif.ksy data/855.gif --dump json
-build/zelbyn formats/gif89a.ksy data/855.gif
+build/zelbyn ../kaitai_struct_formats/image/png.ksy ../kaitai_struct_samples/image/png/atch-plain.png
+build/zelbyn ../kaitai_struct_formats/image/png.ksy ../kaitai_struct_samples/image/png/atch-plain.png --dump json
 build/zelbyn ../kaitai_struct_formats/common/bcd.ksy number.bin --param num_digits=6 --param bits_per_digit=4 --param is_le=false
 ```
 
 When the schema's top-level type has `params`, `--param name=value` gives the argument of each: an integer (decimal, or with `0x`, `0o` or `0b`), `true` or `false`, bytes in hex (`0a1b`), also for a user type, whose instance the decoder reads from them, or a `str`'s text as it is.
 
-`formats/gif.ksy` is `gif.ksy` from [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats), unchanged (CC0-1.0), and decodes the samples as the official Kaitai Struct runtime does (see [Kaitai runtime check](development.md#kaitai-runtime-check)). Options may also be written `--dump=json`. `--import-path` lists the directories that a schema's absolute imports (`/common/x`) are found in, separated by `:` (`;` on Windows), as the official compiler's `-I` does. `--help` (or `-h`) prints usage.
+Options may also be written `--dump=json`. `--import-path` lists the directories that a schema's absolute imports (`/common/x`) are found in, separated by `:` (`;` on Windows), as the official compiler's `-I` does. `--help` (or `-h`) prints usage.
 
 ### Limits
 
@@ -53,47 +52,47 @@ Decoding nests set instances only as deeply as the decoder allows (`Too_Deep`, b
 
 ### Output
 
-`--dump tree` (the default) writes one line per decoded value: its path, ` = `, then the value. Fields are listed in schema order, and `[i]` is the index within each array. A set (such as `logical_screen_descriptor`) gets no line of its own, and a field that was not read (its `if` was false, or no `switch-on` case matched) gets none either. A `switch-on` field with a `size` or `size-eos` that matched no case is a blob.
+`--dump tree` (the default) writes one line per decoded value: its path, ` = `, then the value. Fields are listed in schema order, and `[i]` is the index within each array. A set (such as `ihdr`) gets no line of its own, and a field that was not read (its `if` was false, or no `switch-on` case matched) gets none either. A `switch-on` field with a `size` or `size-eos` that matched no case is a blob.
 
 ```
-gif[0].hdr[0].version[0] = "89a"
-gif[0].logical_screen_descriptor[0].screen_width[0] = 500
-gif[0].global_color_table[0].entries[0].red[0] = 252
-gif[0].blocks[2].body[0].image_data[0].subblocks[0].entries[0].bytes[0] = <254 bytes> 80 42 29 83 84 83 56 3c 83 7e 29 8a 8c 8b 8e 8d ...
+png[0].ihdr[0].width[0] = 200
+png[0].chunks[0].body[0].entries[0].g[0] = 255
+png[0].chunks[1].body[0] = <28 bytes> 18 19 ed c1 81 00 00 00 00 c3 a0 fb 53 4f e1 00 ...
+png[0].chunks[2].body[0].file_name[0] = "message.txt"
 ```
 
 With `--offsets`, each line ends with ` @0x` and the offset in the file, in hex, where the value was read:
 
 ```
-gif[0].logical_screen_descriptor[0].screen_width[0] = 500 @0x6
-gif[0].blocks[2].body[0].image_data[0].subblocks[0].entries[0].bytes[0] = <254 bytes> 80 42 29 83 84 83 56 3c 83 7e 29 8a 8c 8b 8e 8d ... @0x1B4
+png[0].ihdr[0].width[0] = 200 @0x10
+png[0].chunks[1].body[0] = <28 bytes> 18 19 ed c1 81 00 00 00 00 c3 a0 fb 53 4f e1 00 ... @0x38
 ```
 
 The offset is the one Kaitai Struct's debug mode records, which the Web IDE shows: the stream's position when the value starts to be read. A bit type that only uses bits left over from the value before it starts where that value ended. `--offsets` applies only to `--dump tree`. To give the offsets, the decoder records the span of every value, so decoding takes about 30% longer, and the tree about 45% more memory.
 
-Integers are decimal, a `b1` field is `true` or `false`, and strings are quoted. A blob shows its length and its first 16 bytes in hex, followed by `...` if it is longer. A field with an `enum` shows its integer. Value instances (such as `has_color_table`) are not read from the file, so they are not shown. Parse instances (`instances` with `pos`) are read, and shown after the fields of their type, in the order of `instances`.
+Integers are decimal, a `b1` field is `true` or `false`, and strings are quoted. A blob shows its length and its first 16 bytes in hex, followed by `...` if it is longer. A field with an `enum` shows its integer. Value instances are not read from the file, so they are not shown. Parse instances (`instances` with `pos`) are read, and shown after the fields of their type, in the order of `instances`.
 
-In a schema with the `-bits` extension, such as `formats/gif89a.ksy`, an integer with packed bit fields is followed by one line for each of them, in the order of their lowest bit:
+With the `-bits` extension ([below](#schemas)), an integer with packed bit fields is followed by one line for each of them, in the order of their lowest bit. A `u1` named `flags`, with `-bits` `mode` (bits 0 to 2), `locked` (3), `level` (4 to 6) and `enabled` (7), read from the byte 0xF6:
 
 ```
-GIF89a[0].Logical Screen Descriptor[0].Logical Screen Descriptor Packed Fields[0] = 246
-GIF89a[0].Logical Screen Descriptor[0].Size of Global Color Table[0] = 6
-GIF89a[0].Logical Screen Descriptor[0].Sort Flag[0] = 0
-GIF89a[0].Logical Screen Descriptor[0].Color Resolution[0] = 7
-GIF89a[0].Logical Screen Descriptor[0].Global Color Table Flag[0] = 1
+header[0].flags[0] = 246
+header[0].mode[0] = 6
+header[0].locked[0] = 0
+header[0].level[0] = 7
+header[0].enabled[0] = 1
 ```
 
 `--dump json` writes the same tree as compact JSON on one line. Each set instance is an object whose keys are its field names in schema order, each followed by its bit fields, then its parse instances, and every field is an array:
 
 ```
-{"gif":[{"hdr":[{"magic":["474946"],"version":["89a"]}],"logical_screen_descriptor":[{"screen_width":[500],...
+{"png":[{"magic":["89504e470d0a1a0a"],"ihdr_len":[13],"ihdr_type":["49484452"],"ihdr":[{"width":[200],...
 ```
 
 Blobs are written in full as lowercase hex strings. Strings are escaped as JSON requires, and each byte that is not part of valid UTF-8 is written `\u00NN`, the character of the same value, so the output is always valid JSON; a JSON reader cannot tell such a byte from that character. A `b1` field is `true` or `false`, and NaN and infinite floats are written as `null`.
 
 A field that was not read is an empty array.
 
-Because the path is on every line, the text dump works well with `grep`, for example `... data/BOB_89A.GIF | grep 'subblocks'`.
+Because the path is on every line, the text dump works well with `grep`, for example `... | grep type_raw`.
 
 ### Errors and exit codes
 
@@ -110,13 +109,13 @@ Stdout carries only the decoded tree. Errors and usage messages go to stderr, an
 A `.ksy` schema that cannot be compiled is reported with its file (the schema, or one it imports), line and column, and the kind of problem: `Syntax`, `Unsupported` (valid YAML or Kaitai outside the supported subset) or `Invalid`:
 
 ```
-error: formats/x.ksy:6:14: Unsupported: a: process xor(1) is not supported; only zlib is
+error: x.ksy:6:14: Unsupported: a: process xor(1) is not supported; only zlib is
 ```
 
-Decoding checks every value against its field's `contents` and `valid`. Set instances nested more deeply than the decoder allows, which only a type that contains itself can do, are `Too_Deep`, a cast to a user type of a `switch-on` field read as another case is `Wrong_Type`, an `endian` `switch-on` that matches no case is `Undecided_Endianness`, and `process: zlib` bytes that are not a zlib stream are `Decompression_Failed`. A decode that reaches a limit is `Memory_Limit` or `Step_Limit` ([Limits](#limits)). A value that does not pass stops the decode with `Not_Equal`, `Less_Than_Min`, `Greater_Than_Max`, `Not_Any_Of`, `Not_In_Enum` or `Expr_False` (`valid: expr`), at the offset and path of that value, followed by the value read and what the check expected: the constant, the minimum (`at least`) or maximum (`at most`), or the values allowed (`one of`), the first 16 of them. A value is shown as in the text dump, and a string by its first 64 characters, followed by ` ...` when longer. `Expr_False` shows only the value. A file that is not a GIF, here one that starts with `# z`, fails on its signature:
+Decoding checks every value against its field's `contents` and `valid`. Set instances nested more deeply than the decoder allows, which only a type that contains itself can do, are `Too_Deep`, a cast to a user type of a `switch-on` field read as another case is `Wrong_Type`, an `endian` `switch-on` that matches no case is `Undecided_Endianness`, and `process: zlib` bytes that are not a zlib stream are `Decompression_Failed`. A decode that reaches a limit is `Memory_Limit` or `Step_Limit` ([Limits](#limits)). A value that does not pass stops the decode with `Not_Equal`, `Less_Than_Min`, `Greater_Than_Max`, `Not_Any_Of`, `Not_In_Enum` or `Expr_False` (`valid: expr`), at the offset and path of that value, followed by the value read and what the check expected: the constant, the minimum (`at least`) or maximum (`at most`), or the values allowed (`one of`), the first 16 of them. A value is shown as in the text dump, and a string by its first 64 characters, followed by ` ...` when longer. `Expr_False` shows only the value. A file that is not a PNG, here one that starts with `not a pn`, fails on its signature:
 
 ```
-error: Not_Equal at 0x00000000 in gif[0].hdr[0].magic[0]: read <3 bytes> 23 20 7a, expected <3 bytes> 47 49 46
+error: Not_Equal at 0x00000000 in png[0].magic[0]: read <8 bytes> 6e 6f 74 20 61 20 70 6e, expected <8 bytes> 89 50 4e 47 0d 0a 1a 0a
 ```
 
 ## Schemas
@@ -159,7 +158,7 @@ Not supported yet: other encodings (such as `UTF-16` without `LE` or `BE`, `ISO-
 
 `to-string`, which defines how Kaitai's tools show a type's instances, is parsed as an expression and otherwise ignored, as nothing zelbyn writes shows it: as in the official compiler, its names are not resolved.
 
-Keys starting with `-` are extensions. The official Kaitai tools ignore them, and zelbyn ignores the ones it does not know, as well as `-orig-id` on a type. zelbyn's own extensions let `formats/gif89a.ksy` give the same dumps as the SQLite schema it was ported from:
+Keys starting with `-` are extensions. The official Kaitai tools ignore them, and zelbyn ignores the ones it does not know, as well as `-orig-id` on a type. zelbyn's own extensions were made for a port of the SQLite schema zelbyn read before `.ksy`, so that it gave the same dumps:
 
 | Extension | Meaning | In standard Kaitai |
 |---|---|---|

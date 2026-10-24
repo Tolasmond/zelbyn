@@ -164,7 +164,7 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	{"items", .Invalid, 0, "expected an integer, found an array"},
 	{"hdr.tag", .Invalid, 4, "expected an integer, found a byte array"},
 	{"block_type::end_of_file", .Invalid, 0, "no enum block_type"},
-	{"'GIF'", .Invalid, 0, "expected an integer, found a string"},
+	{"'ABC'", .Invalid, 0, "expected an integer, found a string"},
 	{"items[0]", .Invalid, 5, "expected an integer, found a set"},
 	{"a[0]", .Invalid, 1, "an integer cannot be indexed"},
 	{"items['x'].v", .Invalid, 6, "expected an integer, found a string"},

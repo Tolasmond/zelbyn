@@ -31,8 +31,8 @@ Limits :: struct {
 
 // The limits read and read_from_bytes take when not given others.
 // max_memory is some 300 times the largest tree of a sample of the corpus
-// (3.3 MB), and max_steps some 3 seconds of gif.ksy's elements, read at
-// about 40 million a second (doc/arch.md, "Limits").
+// (3.3 MB), and max_steps some 3 seconds of the elements of GIF files,
+// read with gif.ksy at about 40 million a second (doc/arch.md, "Limits").
 DEFAULT_LIMITS :: Limits {
 	max_memory = 1 << 30,
 	max_steps  = 100_000_000,

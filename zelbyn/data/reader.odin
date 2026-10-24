@@ -77,9 +77,10 @@ align_to_byte :: proc(r: ^Reader) {
 // are taken from the most significant end of each byte, and the first
 // taken are the most significant of the value; in .Little from the least
 // significant end, and they are the least significant. The two orders
-// share the bits left over, as in Kaitai's runtimes, whose
-// read_bits_int_be and read_bits_int_le this follows. Leaves r unchanged
-// on error.
+// share the bits left over, as in Kaitai's runtimes. Adapted from
+// read_bits_int_be and read_bits_int_le of the Kaitai Struct C++/STL
+// runtime, Copyright (c) 2016-2025 Kaitai Project, MIT License (see
+// THIRD_PARTY.md). Leaves r unchanged on error.
 @(require_results)
 read_bits :: proc(r: ^Reader, n: int, order: endian.Byte_Order) -> (value: u64, err: Read_Error) {
 	assert(n >= 1 && n <= 64, "read_bits: not 1 to 64 bits")
