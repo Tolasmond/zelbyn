@@ -35,7 +35,7 @@ When the schema's top-level type has `params`, `--param name=value` gives the ar
 
 Every schema and input either decodes or fails with an error that names the limit it reached, within bounded memory, stack and time:
 
-- **`--max-memory n`** (default `1G`) is the memory the decoded tree may take beyond the file itself: its values, instances, arrays, the strings decoded or made by expressions, and the bytes `process: zlib` decompresses. `n` is bytes, or with `K`, `M` or `G` (2^10, 2^20 or 2^30). A decode that would take more fails with `Memory_Limit`, which it is also when the system has no memory left. It is checked as memory is committed, 1 MB at a time, so a decode can pass it by up to 1 MB.
+- **`--max-memory n`** (default `1G`) is the memory the decoded tree may take beyond the file itself: its values, instances, arrays, the strings decoded or made by expressions, and the bytes `process: zlib` decompresses. `n` is bytes, or with `K`, `M` or `G` (2^10, 2^20 or 2^30). A decode that would take more fails with `Memory_Limit`, which it is also when the system has no memory left. The decoder's own records, of where it is and of the parse instances it reads once the rest is read, count towards it too.
 - **`--max-steps n`** (default 100,000,000, a few seconds of decoding) is the steps the decode may take: one for each element of a field read, each instance of a type and parse instance read, each value instance evaluated, and each item of an array that an expression makes, converts or searches (`.min`, `.max`). A decode that takes more fails with `Step_Limit`.
 
 `0` lifts either limit. A `--max-memory` or `--max-steps` that is not a count is a usage error.

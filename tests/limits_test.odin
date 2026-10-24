@@ -8,6 +8,7 @@ import mdata "../zelbyn/metadata"
 import rdr "../zelbyn/reader"
 import yml "../zelbyn/yaml"
 import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:testing"
 
@@ -20,9 +21,11 @@ import "core:testing"
 LIMITS_HEAD :: "meta:\n  id: t\n  endian: le\n"
 
 // The result of decoding input with src and limits, "ok" or "error: <kind>
-// in <path>", or the compile error, and the bytes the tree's arena held.
+// in <path>", or the compile error, and the bytes the tree's arena held
+// beyond the input. With from_file, read decodes it from a temporary file,
+// which it puts in the arena too.
 @(private = "file")
-decode_limited :: proc(t: ^testing.T, src: string, input: []byte, limits: rdr.Limits, loc := #caller_location) -> (result: string, used: uint) {
+decode_limited :: proc(t: ^testing.T, src: string, input: []byte, limits: rdr.Limits, from_file := false, loc := #caller_location) -> (result: string, used: uint) {
 	ff: mdata.File_Format
 	defer mdata.destroy_file_format(&ff)
 	cerr := ksy.compile(src, &ff)
@@ -31,9 +34,22 @@ decode_limited :: proc(t: ^testing.T, src: string, input: []byte, limits: rdr.Li
 
 	tree: fld.Value_Tree
 	defer fld.destroy_value_tree(&tree)
-	_, err := rdr.read_from_bytes(input, &ff, &tree, limits = limits)
+	err: rdr.Parse_Error
+	if from_file {
+		f, create_err := os.create_temp_file("", "zelbyn_limits_*.bin")
+		if create_err != nil do return fmt.tprintf("creating a temporary file: %v", create_err), 0
+		path := strings.clone(os.name(f), context.temp_allocator)
+		_, write_err := os.write(f, input)
+		os.close(f)
+		defer os.remove(path)
+		if write_err != nil do return fmt.tprintf("writing %s: %v", path, write_err), 0
+		_, err = rdr.read(path, &ff, &tree, limits = limits)
+		used = arn.arena_used(&tree.arena) - uint(len(input))
+	} else {
+		_, err = rdr.read_from_bytes(input, &ff, &tree, limits = limits)
+		used = arn.arena_used(&tree.arena)
+	}
 	defer rdr.destroy_parse_error(&err)
-	used = arn.arena_used(&tree.arena)
 	if err.kind == .None do return "ok", used
 	return fmt.tprintf("error: %v in %s", err.kind, err.path), used
 }
@@ -105,21 +121,50 @@ limits_steps_counted :: proc(t: ^testing.T) {
 	testing.expect_value(t, result, "ok")
 }
 
-// max_memory bounds what the tree holds beyond the input: a decode within
-// it succeeds, one under it fails with Memory_Limit, with the arena past
-// it by at most a commit, and 0 is no limit.
+// max_memory bounds what the tree holds beyond the input, which is never
+// more: a decode within it succeeds, and one under it fails with
+// Memory_Limit, from the input or from a file, also once the file's block
+// has committed more than the limit leaves.
 @(test)
 limits_memory :: proc(t: ^testing.T) {
 	src := LIMITS_HEAD + "seq:\n  - id: items\n    type: item\n    repeat: eos\ntypes:\n  item:\n    seq:\n      - id: v\n        type: u1\n"
 	input := make([]byte, 20_000, context.temp_allocator)
-	result, needed := decode_limited(t, src, input, {})
+	for from_file in ([]bool{false, true}) {
+		result, needed := decode_limited(t, src, input, {}, from_file)
+		if !testing.expectf(t, result == "ok", "from a file %v: %s", from_file, result) do continue
+		result, _ = decode_limited(t, src, input, {max_memory = int(needed)}, from_file)
+		testing.expectf(t, result == "ok", "from a file %v, with the memory it needs, %v: %s", from_file, needed, result)
+		used: uint
+		result, used = decode_limited(t, src, input, {max_memory = int(needed / 4)}, from_file)
+		testing.expectf(t, strings.has_prefix(result, "error: Memory_Limit in t[0].items["), "from a file %v, with a quarter of it: %s", from_file, result)
+		testing.expectf(t, used <= needed / 4, "from a file %v, with a quarter: the arena held %v bytes, past %v", from_file, used, needed / 4)
+	}
+
+	// 8 MiB read into a block that commits half as much again as it holds,
+	// and instances that take no input
+	empties := LIMITS_HEAD + "seq:\n  - id: items\n    type: empty\n    repeat: expr\n    repeat-expr: 20000000\ntypes:\n  empty: {}\n"
+	big := make([]byte, 8 << 20, context.temp_allocator)
+	for from_file in ([]bool{false, true}) {
+		result, used := decode_limited(t, empties, big, {max_memory = 1 << 20, max_steps = 1_000_000}, from_file)
+		testing.expectf(t, strings.has_prefix(result, "error: Memory_Limit in t[0].items["), "8 MiB, from a file %v: %s", from_file, result)
+		testing.expectf(t, used <= 1 << 20, "8 MiB, from a file %v: the arena held %v bytes beyond the input", from_file, used)
+	}
+}
+
+// The decoder's own records are bounded by max_memory too: parse instances
+// kept to be read once the root is, which read nothing when their if is
+// false, and so take no steps.
+@(test)
+limits_kept_records :: proc(t: ^testing.T) {
+	src := strings.builder_make(context.temp_allocator)
+	strings.write_string(&src, LIMITS_HEAD + "instances:\n")
+	for i in 0 ..< 10_000 do fmt.sbprintf(&src, "  p%d: {{pos: 0, type: u1, if: false}}\n", i)
+	result, needed := decode_limited(t, strings.to_string(src), nil, {})
 	if !testing.expect_value(t, result, "ok") do return
-	result, _ = decode_limited(t, src, input, {max_memory = int(needed)})
-	testing.expectf(t, result == "ok", "with the memory it needs, %v: %s", needed, result)
 	used: uint
-	result, used = decode_limited(t, src, input, {max_memory = int(needed / 4)})
-	testing.expectf(t, strings.has_prefix(result, "error: Memory_Limit in t[0].items["), "with a quarter of it: %s", result)
-	testing.expectf(t, used <= needed / 4 + arn.COMMIT_SIZE, "with a quarter: the arena held %v bytes", used)
+	result, used = decode_limited(t, strings.to_string(src), nil, {max_memory = int(needed / 4), max_steps = 1})
+	testing.expect_value(t, result, "error: Memory_Limit in t[0]")
+	testing.expectf(t, used <= needed / 4, "the arena held %v bytes, past %v", used, needed / 4)
 }
 
 // A YAML document nested MAX_NESTING deep parses, and one a level deeper,
