@@ -170,13 +170,34 @@ class Decodes(unittest.TestCase):
         schema = self.write('s.json', json.dumps(yaml.safe_load(SCOPED)))
         out = subprocess.run(['node', os.path.join(HERE, 'decode.js'), schema, self.write('in.bin', SCOPED_INPUT)],
                              capture_output=True, text=True, check=True).stdout
-        self.assertEqual(compare.present(json.loads(out)), SCOPED_VALUES)
+        self.assertEqual(compare.present(json.loads(out)['value']), SCOPED_VALUES)
 
     def test_scoped_names_agree(self):
         for flags in ([], ['--offsets']):
             r = self.compare(SCOPED, SCOPED_INPUT, *flags)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn('1 files: 1 agree', r.stdout)
+
+    def test_any_name(self):
+        """A name can be one that a JavaScript object has already, or error,
+        which an error record has: as a field's -orig-id or the root's, and
+        constructor as an id, which would hide the object's class."""
+        cases = [('n', name, 'names') for name in ('constructor', '__proto__', 'error', 'hasOwnProperty', 'toString')]
+        cases += [('n', 'n', 'error'), ('constructor', 'constructor', 'names')]
+        for id, shown, root in cases:
+            schema = 'meta:\n  id: names\n  -orig-id: %s\nseq:\n  - id: %s\n    -orig-id: %s\n    type: u1\n' % (root, id, shown)
+            for flags in ([], ['--offsets']):
+                with self.subTest(id=id, shown=shown, root=root, flags=flags):
+                    r = self.compare(schema, b'\x01', *flags)
+                    self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                    self.assertIn('1 files: 1 agree', r.stdout)
+
+    def test_failure_reported(self):
+        """A decode that fails is reported as one, on both sides, though a
+        field is named error."""
+        r = self.compare('meta:\n  id: names\n  endian: le\nseq:\n  - id: n\n    -orig-id: error\n    type: u2\n', b'\x01')
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertRegex(r.stdout, r'FAILED: .*\n  zelbyn: error: Unexpected_EOF.*\n  kaitai:  EOFError')
 
     def test_difference_found(self):
         """A difference is still found, at the path zelbyn's names give."""
