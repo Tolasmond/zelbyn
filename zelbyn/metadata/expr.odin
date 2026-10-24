@@ -150,10 +150,16 @@ Index :: struct {
 // type, item_type, an Int, Float, Bool, String or Bytes, or an Array whose
 // items, array literals, are all of one type; one of integer literals from
 // 0 to 255 is a Bytes_Literal instead, as in Kaitai. Each evaluation makes
-// the array in the tree's arena.
+// the array in the tree's arena. constant is set when every item is a
+// constant that evaluates without fail: a literal, the negation of an Int or
+// Float literal, or an array literal that is constant. Indexed, a constant
+// one evaluates only the item at the index, which is the same as making the
+// array, as no item can fail or depend on the input; any other is made
+// whole, so that an error in any item is the expression's.
 Array_Literal :: struct {
 	items:     []^Expr,
 	item_type: Expr_Type,
+	constant:  bool,
 }
 
 // An array literal of bytes, [0x50, 0x4b], a Bytes value, copied into the

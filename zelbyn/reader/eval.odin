@@ -113,24 +113,25 @@ tree_value :: proc(v: Eval_Value) -> fld.Value {
 	panic("tree_value: not a value")
 }
 
-// operand[index], when operand is an array literal, directly or as the
-// expression of a value instance without an if: the item at index,
-// evaluated alone rather than with the whole array. found is false for any
-// other operand.
+// operand[index], when operand is a constant array literal
+// (Array_Literal.constant), directly or as the expression of a value
+// instance without an if: the item at index, evaluated alone rather than
+// with the whole array, which gives the same value or error, as no item
+// can fail. found is false for any other operand, which is made whole.
 @(private = "file", require_results)
 literal_item :: proc(d: ^Decoder, x: mdata.Index, ctx: Eval_Context) -> (v: Eval_Value, found: bool, err: dat.Read_Error) {
 	e := x.operand
 	item_ctx := ctx
 	caller := ctx
 	if ref, is_ref := e.variant.(mdata.Value_Ref); is_ref && ref.instance.cond == nil && !ref.instance.cached {
-		if _, is_literal := ref.instance.expr.variant.(mdata.Array_Literal); !is_literal do return
+		if lit, is_literal := ref.instance.expr.variant.(mdata.Array_Literal); !is_literal || !lit.constant do return
 		base, base_err := eval(d, ref.base, ctx)
 		if base_err != .None do return nil, true, base_err
 		item_ctx = Eval_Context{index = -1, self = base.(^fld.Instance), base = ref.base, caller = &caller}
 		e = ref.instance.expr
 	}
 	literal, is_literal := e.variant.(mdata.Array_Literal)
-	if !is_literal do return
+	if !is_literal || !literal.constant do return
 	index, index_err := eval(d, x.index, ctx)
 	if index_err != .None do return nil, true, index_err
 	i, is_int := index.(int)
