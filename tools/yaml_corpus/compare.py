@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compares zelbyn's YAML parser with libyaml on every .ksy file under a
 directory, normally a clone of
-https://github.com/kaitai-io/kaitai_struct_formats.
+https://github.com/kaitai-io/kaitai_struct_formats, but those of EXCLUDED.
 
     python3 tools/yaml_corpus/compare.py <dir>
 
@@ -18,6 +18,11 @@ import sys
 import tempfile
 
 import yaml
+
+# The files left out, relative to the directory, as tools/ksy_corpus leaves
+# them out: zelbyn keeps nothing of GIF, whose sample files it had no
+# licenses for.
+EXCLUDED = {'image/gif.ksy'}
 
 STYLE = {'': 'plain', None: 'plain', "'": 'single', '"': 'double', '|': 'literal', '>': 'folded'}
 
@@ -73,7 +78,9 @@ def main():
     if not getattr(yaml, '__with_libyaml__', False):
         sys.exit('PyYAML is not built with libyaml')
 
-    paths = sorted(os.path.join(d, f) for d, _, fs in os.walk(sys.argv[1]) for f in fs if f.endswith('.ksy'))
+    root = sys.argv[1]
+    paths = sorted(os.path.join(d, f) for d, _, fs in os.walk(root) for f in fs
+                   if f.endswith('.ksy') and os.path.relpath(os.path.join(d, f), root).replace(os.sep, '/') not in EXCLUDED)
 
     with tempfile.TemporaryDirectory() as tmp:
         tool = os.path.join(tmp, 'yaml_corpus')

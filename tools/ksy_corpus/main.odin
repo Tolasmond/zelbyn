@@ -1,9 +1,9 @@
-// Compiles every .ksy file under the directory named on the command line,
-// with that directory as the import path, and prints one tab-separated line
-// for each, in path order: OK and its path, or ERR, its path, the error's
-// kind, where it is (file:line:column, the file relative to the
-// directory) and its message. Not part of zelbyn's build: check.py builds
-// and runs it.
+// Compiles every .ksy file under the directory named on the command line
+// but those of EXCLUDED, with that directory as the import path, and
+// prints one tab-separated line for each, in path order: OK and its path,
+// or ERR, its path, the error's kind, where it is (file:line:column, the
+// file relative to the directory) and its message. Not part of zelbyn's
+// build: check.py builds and runs it.
 package ksy_corpus
 
 import "core:bufio"
@@ -15,6 +15,11 @@ import "core:slice"
 import "core:strings"
 import ksy "../../zelbyn/ksy"
 import mdata "../../zelbyn/metadata"
+
+// The files left out, relative to the directory: zelbyn keeps nothing of
+// GIF, whose sample files it had no licenses for. tools/yaml_corpus leaves
+// out the same.
+EXCLUDED :: []string{"image/gif.ksy"}
 
 main :: proc() {
 	if len(os.args) != 2 {
@@ -32,6 +37,7 @@ main :: proc() {
 	walk(root, &paths)
 	slice.sort(paths[:])
 	for path in paths {
+		if slice.contains(EXCLUDED, relative(root, path)) do continue
 		ff: mdata.File_Format
 		err := ksy.read_file_format(path, &ff, {root})
 		if err.kind == .None {

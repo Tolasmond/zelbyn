@@ -34,7 +34,7 @@ Not yet: other processes (`xor`, `rotate`, custom ones), other encodings (such a
 
 ## How it is checked
 
-All 190 schemas in [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) compile, at the commit `tools/ksy_corpus/expected.txt` records. Separately, decodes are compared with the official runtime's (0.11), value for value and offset for offset, on the 43 samples of the 18 formats that have samples in [kaitai_struct_samples](https://github.com/kaitai-io/kaitai_struct_samples), at the commit [doc/development.md](doc/development.md#corpus-check) gives. 41 of those agree. Two fail: a malformed one, in both decoders, and one whose schema tests a field it never read, which the JavaScript runtime takes as 0 and zelbyn, like the Python and Java runtimes, rejects. Development is on Linux; CI builds and tests on Linux and Windows, in release and debug builds.
+All 189 schemas in [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) other than `gif.ksy`, which the checks leave out, compile, at the commit `tools/ksy_corpus/expected.txt` records. Separately, decodes are compared with the official runtime's (0.11), value for value and offset for offset, on the 43 samples of the 18 formats that have samples in [kaitai_struct_samples](https://github.com/kaitai-io/kaitai_struct_samples), at the commit [doc/development.md](doc/development.md#corpus-check) gives. 41 of those agree. Two fail: a malformed one, in both decoders, and one whose schema tests a field it never read, which the JavaScript runtime takes as 0 and zelbyn, like the Python and Java runtimes, rejects. Development is on Linux; CI builds and tests on Linux and Windows, in release and debug builds.
 
 ## Documentation
 
