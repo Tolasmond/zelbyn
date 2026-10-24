@@ -426,7 +426,8 @@ t[0].Top Bits[0] = 10
 @(test)
 ksy_types_and_values :: proc(t: ^testing.T) {
 	// byte order from meta and from suffixes; str keeps NUL bytes within
-	// its size, as a view of the input (doc/arch.md §7.6);
+	// its size, as a view of the input (doc/arch.md, "Scalars, strings and
+	// bit types");
 	// a literal count on a primitive; sizes from fields, _parent and enums
 	src := `meta:
   id: t

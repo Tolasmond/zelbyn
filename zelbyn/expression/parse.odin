@@ -32,10 +32,12 @@ destroy_error :: proc(err: ^Error) {
 // comparison. Integer literals are decimal, 0x hex, 0b binary or 0o octal,
 // with _ allowed between digits; one above max(int), up to max(u64), is a
 // Big_Literal. Float literals are 1.5, 2., 1e3 and 1.5e-3; string literals
-// are as String_Literal describes. A member followed by arguments,
-// a.name(args), is a Call, and .as<t>, sizeof<t> and bitsizeof<t> are
-// Cast and Size_Of: which methods and casts exist, and on what, is for
-// resolution to decide.
+// are as String_Literal describes. After an atom, a[i] is an Index, and a
+// member followed by arguments, a.name(args), a Call (only a member can be
+// called); .as<t>, sizeof<t> and bitsizeof<t> are Cast and Size_Of, and
+// a::v and a::b::e::v Enum_Constants. [a, b] is an Array_Literal, whose
+// last item may be followed by a comma. Which methods and casts exist, and
+// on what, is for resolution to decide.
 @(require_results)
 parse :: proc(text: string, allocator: mem.Allocator) -> (e: ^mdata.Expr, err: Error) {
 	p := Parser{text = text, allocator = allocator}

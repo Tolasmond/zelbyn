@@ -148,54 +148,17 @@ Kaitai Struct expressions appear in `if`, `size`, `repeat-expr`, `repeat-until`,
 
     ?:   or   and   not   comparisons   |   ^   &   << >>   + -   * / %   unary - ~ +   .
 
-- Every binary operator is left-associative.
-- `?:` is right-associative.
-- A comparison cannot be an operand of another comparison.
-- Integer literals may be decimal, `0x`, `0b` or `0o`, with `_` between digits. One above `max(int)`, up to 2^64 − 1, is a `Big_Literal`, whose value is a `u64`; one above that is `Unsupported`.
-- Float literals are digits followed by a `.` and any digits (`1.5`, `2.`), an exponent (`1e3`, `1.5e-3`), or both, parsed with `strconv.parse_f64`; one beyond a 64-bit float is `Unsupported`. `lex_int` hands a literal to `lex_float` only where it already tests for a `.` after the digits, and where an `e` would be an invalid digit, so that integer literals pay nothing for floats. A `.` followed by a name is a member of the integer (`1.to_s`).
-- String literals in single quotes are taken as written; in double quotes, Kaitai's escapes are replaced: `\a \b \t \n \v \f \r \e \" \' \\`, octal `\0` to `\377`, and `\uXXXX`, written as UTF-8.
-- `a[i]` indexes, after an atom, as `.` does.
-- `x.as<t>` is a `Cast`, after an atom, as `.` is.
-- `sizeof<t>` and `bitsizeof<t>` are a `Size_Of`, whose type name can be a path (`a::b`). As in Kaitai, `sizeof<` always starts one, even when there is a field called `sizeof`.
-- `a::v` is an `Enum_Constant`, and so is a path, `a::b::e::v`, whose enum name is all but the value (`a::b::e`).
-- `[a, b]` is an `Array_Literal`, whose last item may be followed by a comma.
-- `x.name(a, b)` is a `Call`, after an atom, as `.` is; only a member can be called.
+- Every binary operator is left-associative, except `?:`, which is right-associative, and a comparison cannot be an operand of another comparison.
+- The literals, and the forms that follow an atom (`.name`, `a[i]`, `.as<t>`, `.name(args)`), are those `parse`'s comment gives, and each makes the syntax variant of `metadata/expr.odin` that is named for it. An integer literal above `max(int)`, up to 2^64 − 1, is a `Big_Literal`; one beyond that, or a float beyond a 64-bit float, is `Unsupported`. As in Kaitai, `sizeof<` always starts a `Size_Of`, even when a field is called `sizeof`.
+- `lex_int` hands a literal to `lex_float` only where it already tests for a `.` after the digits, and where an `e` would be an invalid digit, so that integer literals pay nothing for floats. A `.` followed by a name is a member of the integer (`1.to_s`).
 
-The result holds only syntax variants: literals, `Unary`, `Binary`, `Ternary`, `Index`, `Name`, `Member`, `Enum_Constant`, `Size_Of`, `Cast`, `Call` and `Array_Literal`. It does not refer to `text`.
+The result holds only syntax variants, and does not refer to `text`.
 
 **Resolution.** `compile(text, scope, want, allocator)` parses `text`, then resolves the tree in a `Scope`, replacing every `Name`, `Member`, `Enum_Constant`, `Size_Of`, `Cast` and `Call` with a resolved variant. Resolution sets every node's type to one of `Int`, `Float` (an `f64`), `Bool`, `Bytes` (a blob), `String`, `Array` (every value of a repeated field), `Struct` (a set instance) or `Stream`. The result must have type `want`, unless `want` is `Unresolved`. `compile_list` resolves each expression of a list, whatever its type.
 
-A `Scope` holds:
-- `types`, the chain of sets from the outermost (`_root`) to the one the expression is evaluated in;
-- `own_root`, set when `types[0]` is the top level of an imported schema, which is the `_root` of its own types, and `no_root`, set when `types[0]` is a type declared in another schema, not at its top level, which has no `_root`, so that `_root` is `Invalid`;
-- `in_repeat`, which defines `_index`;
-- `element`, the field whose element `_` is, in `repeat-until`, or whose value it is, in `valid`;
-- `instance`, the value instance whose own expression is resolved, nil elsewhere: its `_io.pos` and `_io.eof`, a repeated field, and a reference to another value instance mark it `cached` (`mark_cached`), and any `_io.` member marks its set `keeps_stream`;
-- `compile_instance` and `compile_parse_instance`, callbacks that compile a value instance or a parse instance the first time an expression refers to it, the latter with `type_only` when only its type is needed;
-- `size_of`, a callback that gives the size in bits of an attribute, a parse instance or a type, for `_sizeof`, `sizeof<t>` and `bitsizeof<t>` (§5.3);
-- `encoding`, a callback that gives the encoding a name is, for `.to_s(encoding)`: the compiler's `encoding_named`, over the encodings a `str` can have;
-- `same_type`, a callback that tells whether two sets are of one type, for `?:` on sets;
-- `find_enum`, a callback that gives the enum a name or a path names, from the type of the set the expression is in (`types`' last), for enum constants.
+A `Scope`, whose members `resolve.odin` documents, gives the resolver the chain of sets from `_root` to the one the expression is in, whether that chain has a `_root` and whether it is the decoded tree's (`own_root`, `no_root`), whether `_index` and `_` are defined, and in a value instance's own expression the instance, which the resolver marks `cached` (`mark_cached`, §7.9), and whose set it marks `keeps_stream` for any `_io.` member. Everything else comes through callbacks into the compiler: compiling a value instance or a parse instance the first time an expression refers to it (with `type_only` when only its type is needed), sizes for `_sizeof`, `sizeof<t>` and `bitsizeof<t>` (§5.3), encodings for `.to_s(encoding)`, whether two sets are of one type for `?:`, and enums. The callbacks keep `expression` from importing `ksy` (§3), and compiling on first reference lets an instance resolve against the fields compiled before it (§5.3).
 
-The resolved variants are:
-
-| Variant | Meaning |
-|---|---|
-| `Instance{root, up, node, imported_root}` | `_root`, or the set instance `up` levels out from the current one (0 is the current one, 1 is `_parent`); `imported_root` marks the `_root` of an imported schema, which `up` reaches in the type it was compiled in, and the decoder finds among the frames elsewhere (§7.9) |
-| `Field_Ref{base, node, slot}` | A field, parse instance or param of the instance `base`, found by its slot in that instance (§6.3) |
-| `Size{operand}` | `.size` of an array or byte array |
-| `String_Length{operand}`, `To_I{operand}`, `To_S{operand}` | `.length` (code points) and `.to_i` (a decimal integer, else `Invalid_Number`) of a string, `.to_i` of a boolean (1 or 0) and of a float (rounded toward zero, else `Integer_Overflow`), and `.to_s` of an integer |
-| `Decode{operand, encoding, name}`, `Substring{operand, from, to}` | `.to_s(encoding)` of a byte array, with a string literal, decoded as a `str` is, and `.substring(from, to)` of a string, in code points (`resolve_call`); any other method is `Unsupported` |
-| `To_Bytes{operand}` | `x.as<bytes>` of an array of integers; of a byte array, the cast is its operand |
-| `Array_Method{operand, method}` | `.first`, `.last`, `.min` and `.max` of an array or byte array |
-| `Io{instance}` | `_io`, the stream of the current set instance, or `X._io`, that of the set instance `X` |
-| `Io_Pos{stream}`, `Io_Size{stream}`, `Io_Eof{stream}` | `.pos`, `.size` and `.eof` of `stream`, a `Stream` expression (`X._io`, or a `?:` of those), or with `stream` nil, of `_io`: the current set instance's stream, or in a value instance, the stream of the instance it is evaluated for |
-| `Repeat_Index` | `_index` |
-| `Repeat_Element{node}` | `_` in `repeat-until` |
-| `Value_Ref{base, instance}` | A value instance of the instance `base` |
-| `Bytes_Literal{value}` | An array literal of integer literals from 0 to 255, a byte array, as in Kaitai |
-| `Array_Literal{items, item_type}` | Any other array literal, an `Array` of items of one type, `Int`, `Float`, `Bool`, `String` or `Bytes`, an integer among floats being made a float, a literal a `Float_Literal` and any other `e + 0.0` (`as_float`), or `Array`, array literals whose items have one type (`resolve_array_literal`) |
-| `Switch_Cast{operand, type_name, node, choices}` | `x.as<t>` of a `switch-on` field read once, to the user type of some of its cases: the instance, as `node`, the first of those cases' sets; `choices` are their indexes, as `Instance.choice` records them |
+The resolved variants, each documented in `metadata/expr.odin`, name what an expression reads: an enclosing set instance (`Instance`: `up` levels out from the current one, `_root`, or an imported schema's `_root`, which the decoder finds as §7.9 says); a field, parse instance or param by its slot (`Field_Ref`, §6.3); a value instance (`Value_Ref`); `_index` and `_` (`Repeat_Index`, `Repeat_Element`); a stream and its `.pos`, `.size` and `.eof` (`Io`, `Io_Pos`, `Io_Size`, `Io_Eof`); and the methods and casts of the subset (`Size`, `String_Length`, `To_I`, `To_S`, `Decode`, `Substring`, `To_Bytes`, `Array_Method`, `Switch_Cast`). Any other method is `Unsupported` (`resolve_call`). An array literal of integer literals from 0 to 255 is a `Bytes_Literal`, as in Kaitai, and any other an `Array_Literal`, whose items `resolve_array_literal` makes of one type.
 
 Type rules:
 - A reference to a field read at most once (`metadata.is_single`) has the type of one value: `Int` for an integer or a bit type, `Bool` for `b1`, `Bytes` for a blob, `String` for a string, `Struct` for a set. Any other field gives an `Array`, and indexing it (`Index`) gives one value, of the same type. Indexing `Bytes` gives an `Int`. An `Array` is all the values of a field, an array literal, a value instance of one of those, a `?:` of those, or an item of an array of arrays, and `array_item_type` gives the type of its items: of an item of an array of arrays, that of the first item of the array literal it is in (`first_item`).
@@ -231,11 +194,7 @@ The decoder evaluates a direct form without walking the tree (§7.9). The tree s
 
 *Reason for one arena:* a second arena costs a mapping and its first pages in every compile, and freeing the working data early saves nothing a process that exits soon after needs. Keeping the YAML trees lets the plan use their strings without copying them. The compile of `gif.ksy` leaves about 75 KB in the plan's arena that the plan does not need.
 
-**Errors.** A `ksy.Error` has a kind, a 1-based line and column (0 for `Read_Failed`), a message, the file it is in (the schema, or one it imports; "" for source compiled without a path), and an `os.Error` for `Read_Failed`. The kinds are:
-- `Read_Failed`: the file could not be read;
-- `Syntax`: invalid YAML, or an expression that does not parse;
-- `Unsupported`: valid YAML or Kaitai outside the subset;
-- `Invalid`: anything else wrong with the schema, including a duplicate YAML key.
+**Errors.** A `ksy.Error` has a kind, a 1-based line and column (0 for `Read_Failed`), a message, the file it is in (the schema, or one it imports; "" for source compiled without a path), and an `os.Error` for `Read_Failed`. The kinds, `Read_Failed`, `Syntax`, `Unsupported` and `Invalid`, are documented where `Error_Kind` is declared; a duplicate YAML key is `Invalid`.
 
 Only the first error is recorded. When an expression error has an offset and the expression is a plain or simply quoted scalar on one line, the column points at the character the offset names.
 
@@ -342,42 +301,16 @@ A `File_Format` holds the format's name, its root `Node`, and the `Arena` that t
 
 ### 6.2 `Node`
 
-A `Node` is one field. Its members are:
+A `Node` is one field, and `plan.odin` documents each of its members where it is declared. They say:
+- how its elements are read: `type`, `order`, `width`, `align`, `count`, `length`, `terminator`, `pad_right`, `process` and `encoding` (§6.4, §7.6);
+- whether, and for a parse instance where: `cond`, and `pos`, `at_stream_pos` and `io` (§6.6);
+- what a set holds: `children`, `slot_count`, `instances`, `parse_instances`, `params` and their `args` (§6.3, §7.5);
+- how a set's type or byte order is chosen per instance: `switch_on` (§6.7) and `order_switch` (§5.3);
+- how a set stands to the sets around it: `parent_up`, `recursive` (§5.3) and `keeps_stream` (§7.5);
+- its names: `name`, shown in the dumps and error paths, and `ref_name`, the id expressions use;
+- its checks and subfields: `valid` (§6.8) and `bits` (§6.5).
 
-| Member | Meaning |
-|---|---|
-| `name` | The name shown in dumps and error paths |
-| `ref_name` | The name expressions use (the `.ksy` id) |
-| `type` | A `Data_Type` |
-| `order` | The byte order of integer and float values; the bit order of a bit type |
-| `width` | For a bit type: the bits of each element; else 0 |
-| `align` | The bits left over are discarded before the field is read, before `cond` (Kaitai's `alignToByte`) |
-| `cond` | A `Bool` expression. The field is read only when it is true. `nil` means always. |
-| `count` | How many elements or set instances are read (§6.4) |
-| `length` | For `String` and `Blob`: each element's byte length. For a `Set`: the length of the substream each instance is read from. `nil` for a terminator alone, or for a set read from its parent's stream. |
-| `terminator` | For `String`, `Blob` and `Set`: the byte that ends each element's bytes (§6.4) |
-| `pad_right` | With a length: a byte removed from the end of each element's bytes |
-| `process` | For a `Blob` or `Set`: `Zlib` when each element's bytes, once `pad_right` is removed or they are cut at the terminator, are decompressed |
-| `encoding` | For a `String`: how its bytes are decoded; `None` for ASCII and UTF-8, which are kept as they are (§7.6) |
-| `children` | For a `Set`: its fields, in order (`nil` with `switch_on`) |
-| `slot_count` | For a `Set`: the number of slots in each of its instances (§6.3) |
-| `switch_on` | For a `Set` whose type is chosen per instance: a `Switch` (§6.7) |
-| `order_switch` | For the little-endian `Set` of a type whose `endian` is a `switch-on`: an `Order_Switch` (§5.3, §7.5) |
-| `parent_up` | For a `Set` with a `parent`: how many levels out from the instance each instance is read in its `_parent` is; 0 without one |
-| `recursive` | For a `Set` of a type inside the same type: the set of that type that encloses it, whose members it has (§5.3) |
-| `instances` | For a `Set`: its value instances |
-| `parse_instances` | For a `Set`: its parse instances, each a node with a `pos` |
-| `params` | For a `Set`: its params, each a node read once, of type `Int64` (any integer type), `Bool`, `Blob`, `String`, or `Set` for a user type, with the members of its argument's set |
-| `is_param` | The node is a param of its set |
-| `args` | For a `Set` with params: an expression for each, evaluated where each instance is read (§7.5); for the root's set, `Root_Arg`s |
-| `pos` | For a parse instance: the `Int` expression of the offset it is read at |
-| `at_stream_pos` | For a parse instance without `pos` in the schema: read where its stream is (§5.3) |
-| `io` | For a parse instance: the `Stream` expression of the stream it is read from; `nil` for its own set instance's |
-| `keeps_stream` | For a `Set`: an `io` expression, or `_io` in a value instance of the set, refers to the stream of its instances (§7.5) |
-| `bits` | For an integer type: its `-bits` subfields (§6.5) |
-| `valid` | A check applied to every value (§7.7) |
-
-The plan is a tree, but for a type that contains itself. Each field has its own node, even when several fields have the same type (§5.3), and there are no cycles but those through the `children` a node of such a type shares with the set it reuses. The decoder and the dumps walk the plan as the value tree leads them, so they never follow a cycle further than the input does. `Node` is 304 bytes.
+The plan is a tree, but for a type that contains itself. Each field has its own node, even when several fields have the same type (§5.3), and there are no cycles but those through the `children` a node of such a type shares with the set it reuses. The decoder and the dumps walk the plan as the value tree leads them, so they never follow a cycle further than the input does.
 
 ### 6.3 Slots
 
@@ -443,20 +376,12 @@ With `spans` (default false), the tree records the span of every value (§8.2). 
 
 ### 7.2 Decoder state
 
-`Decoder` holds:
-- `r`, the `data.Reader` of the stream being read: the input, or a substream of it;
-- `base`, the offset in the input of `r.data[0]`, so that error offsets and spans are always offsets in the input;
-- `arena`, the tree's arena, which the decoder allocates its values from directly, and `allocator`, the same arena as a `mem.Allocator`, which holds `path`, `frames` and `streams`;
-- `path`, a stack of `Path_Segment{name, index}`: the field and element being read;
-- `frames`, a stack of the set instances being read, outermost first, each with the index of its stream in `streams`, the length of its path, the set it is read as, and the index of its `_parent`'s frame (`Frame.parent`), the frame before it unless its field has a `parent`, and -1 for the root. Expressions use it to find `_root`, `_parent` and the current instance, and parse instances to find their stream;
-- `streams`, the streams that substreams were taken from, outermost first;
-- `kept`, a map from each instance of a set marked `keeps_stream` to its stream, in the tree's arena, made when the first such instance is read;
-- `cache`, a map from each cached value instance evaluated, with the set instance it was evaluated for (`Cached`), to its value, or to the slot of the field whose values it is (`Kept_Value`), in the tree's arena, made when the first is evaluated;
-- `pending`, the parse instances that no expression had read when their set instances were, with the frames, streams, path and stream of each set instance then (`Pending`), to read once the root is;
-- `pending_at`, the index in `pending` of each, by instance and slot, made when an expression first reads one of them (`read_kept`);
-- `stack_start`, the address of a local of `decode`, from which `stack_used` measures the stack that decoding has used (§7.5);
-- `spans`, whether the tree records spans;
-- `err`, the first error.
+The `Decoder`, whose members `errors.odin` documents, holds the reader of the current stream and the offset of its first byte in the input (`base`), so that error offsets and spans are always offsets in the input, and the tree's arena, which holds everything it allocates. Three stacks say where it is:
+- `path`, the field and element being read;
+- `frames`, the set instances being read, outermost first, each with the index of its stream in `streams`, the length of its path, the set it is read as, and the index of its `_parent`'s frame (`Frame.parent`): the frame before it, unless its field has a `parent`, and -1 for the root. Expressions find `_root`, `_parent` and the current instance in it (§7.9), and parse instances their stream;
+- `streams`, the streams that substreams were taken from, outermost first.
+
+Beside them are `kept`, the streams of the instances of sets marked `keeps_stream` (§7.5); `cache`, the values of the cached value instances (§7.9); `pending` and `pending_at`, the parse instances to read once the root is (§7.5); `stack_start`, from which `stack_used` measures the stack used (§7.5); the arguments of the root's params; and the first error. The maps are made when they are first needed, so a format that needs none pays nothing for them.
 
 ### 7.3 Reading a field
 
@@ -592,13 +517,7 @@ As the official compiler does, the compiler marks every attribute that follows a
 
 `fail(d, kind, offset)` records only the first error. It stores the error's kind, its offset in the input (`base + offset`), and the path formatted as `Name[i].Name[i]...`. The path is allocated with `context.allocator`, and `destroy_parse_error` frees it. A `Parse_Error` also carries an `os.Error` for `File_Read_Failed`.
 
-The `Read_Error` kinds are:
-- `Unexpected_EOF`, `Offset_Out_Of_Range` and `Unsupported_Type`, from the `data.Reader`, and `Offset_Out_Of_Range` also for a `pos` outside the stream;
-- `Invalid_Length` and `No_Progress`, from counts and lengths;
-- `Division_By_Zero`, `Integer_Overflow`, `Invalid_Shift`, `Absent_Field`, `Index_Out_Of_Range` and `Invalid_Number`, from expressions;
-- `Not_Equal`, `Less_Than_Min`, `Greater_Than_Max`, `Not_Any_Of`, `Not_In_Enum` and `Expr_False`, from checks;
-- `Too_Deep`, from set instances nested too deeply (§7.5), `Wrong_Type`, from casts, `Undecided_Endianness`, from an `endian` `switch-on` that matches no case, `Decompression_Failed`, from `process: zlib`, and `Invalid_Arguments`, from arguments that do not fit the root's params;
-- `File_Read_Failed`.
+The kinds are those of `data.Read_Error`, each documented where it is declared: from reads and offsets (`Unexpected_EOF`, `Offset_Out_Of_Range`, also for a `pos` outside its stream), counts and lengths, expressions, checks (§7.7), nesting (`Too_Deep`, §7.5), casts, an `endian` `switch-on` that matches no case, `process: zlib`, the root's arguments, and reading the file.
 
 ## 8. The value tree (`field`)
 
@@ -651,7 +570,7 @@ Both write to an `io.Writer`. A writer's error stops the dump and is returned.
 
 ## 10. The program (`main.odin`)
 
-`main` parses the command line with `core:flags`. The options are the positional `schema` and `file`, `--dump tree|json` (default `tree`), `--offsets` (with `--dump tree` only), `--import-path`, a list of directories separated as in `PATH`, and `--param name=value`, any number of times. `parse_args` takes `--param` out before `core:flags` parses the rest, and `write_usage` adds its line to the usage.
+`main` parses the command line, whose options doc/usage.md (Running) gives, with `core:flags`. `parse_args` takes `--param` out before `core:flags` parses the rest, and `write_usage` adds its line to the usage.
 
 *Reason for parsing `--param` apart:* as a list field of the options, `core:flags` costs every run some 7,000 instructions, given or not, 0.3% of decoding a small file.
 - `--help` prints the usage and exits 0.
@@ -695,7 +614,7 @@ In debug builds (`ODIN_DEBUG`), `run` executes under a `mem.Tracking_Allocator`.
 | `expression_parse_test.odin` | Parsing, precedence and syntax errors, and type errors, also of floats |
 | `expression_eval_test.odin` | Evaluation on hand-built plans: field references, `_parent`, `_index`, conditions, methods, floats and their mixing with integers, `?:` over byte arrays, `.substring` and `.as<bytes>`, the size of other streams, integers above `max(int)` |
 | `expression_direct_test.odin` | That direct forms and the tree evaluator give the same results and errors (§7.9) |
-| `ksy_test.odin` | Compile errors with their kinds, lines and columns; the extensions; types and value instances, with `if` and `enum` and with `_parent` and `_root`; attributes without an `id`; `_io` in value instances, saved as the `seq` is read and kept once their instance is; float fields in sizes, counts and `repeat-until`; params of user types and `str`, and a parse instance read after its instance; instances without `pos` that read nothing; parse instances that use a later field of `_parent`, or the parse instance they are inside; an `endian` that is a `switch-on`, in both orders and with no case; `process: zlib`, and bytes that are not zlib; `.to_s(encoding)`, `.substring` and `.as<bytes>` in a schema; `.size`, `.pos` and `.eof` of other streams; `_index` in `repeat-until`; params on the top-level type, with arguments of each type and wrong ones; `vlq_base128_le.ksy`'s arithmetic up to 2^64 − 1; `?:` on sets and on a float and an integer; an imported schema's `_root` in a type that contains itself; types and enums by path, also of an imported schema, whose types have no `_parent` or `_root` there; `parent`, in a type that contains itself and through a value instance, and its errors; `contents` with a `size`; a `switch-on` instance without `pos` that reads nothing; an `-orig-id` list; arrays of arrays; `?:` on arrays; a top-level param of a user type and `_io` of params; `_sizeof` of a parse instance's field in its own `pos`; `valid` with expressions, and constant bounds that fail as the same `expr` does; sizes and methods; `meta` in a type; `switch-on` with a length, with cases of every type, with negative cases, direct, as enum constants and at the edges of an `s8`, over a boolean, repeated with elements no case chooses, and in expressions; strings in every encoding; value instances of every type, casts and array literals; `to-string`; recursive types and the depth limits (`Too_Deep`); the Kaitai features: `size-eos`, terminators, parse instances, `io`, imports, bit types, params and spans |
+| `ksy_test.odin` | The `.ksy` compiler end to end: compile errors with their kinds, lines and columns, and each Kaitai feature of the subset and each extension compiled and decoded, alone and in the combinations that have needed care: types that contain themselves and the depth limits, imports, params (also of the top-level type), parse and value instances, `switch-on`, `valid`, expressions and their methods and casts, encodings, `process: zlib`, and `endian` `switch-on`s. The comment of each test says what it covers. |
 | `yaml_test.odin` | The YAML parser's node trees and errors; escapes at the edge of the Unicode range and beyond it; characters allowed raw and those that are not, and bytes that are not UTF-8; comments right after flow punctuation and a block scalar's indicators, and `#` inside a plain scalar; a flow key and its `:` on two lines |
 | `file_test.odin` | `file.read_entire_file` with injected `read` failures, at once and after partial reads, and `EINTR`: the error kept, and nothing left allocated, with the heap or an arena (Linux, macOS and the BSDs) |
 | `data_reader_test.odin` | `data.Reader` reads and bounds checks, and bit reads in both orders |
@@ -711,6 +630,10 @@ These are not part of the program's build.
   - `main.odin` is a one-shot program. It compiles the schema, reads the file, decodes it with `read_from_bytes` (with spans after `--spans`), and writes the JSON dump to memory. It prints each phase's time, the page faults taken during the decode, and the tree's size. `faults_posix.odin` counts page faults with `getrusage`. `faults_windows.odin` returns -1, selected by `#+build` tags.
   - `bench.py` builds zelbyn and the one-shot program with `-o:speed`. It runs them 200 times per sample, interleaved, and prints medians, including the whole-process time of the CLI (with `--dump json`, or with `--offsets` after `--spans`) and of a process that exits at once.
   - `cpp/` builds an optional reference with the official Kaitai Struct C++ runtime. `generate.js` runs the pinned compiler's `cpp_stl` target, `build.py` compiles the result with `oneshot.cpp`, and the output goes to the ignored `cpp/build/`.
-- **`tools/kaitai_compare/`** checks zelbyn's decode against the official Kaitai Struct runtime. `compare.py` converts a schema and the schemas it imports to JSON with PyYAML, and `decode.js` decodes the files with the official compiler and JavaScript runtime, pinned at 0.11.0 in `package.json`. `--param name=value` gives both the arguments of the params of the top-level type: zelbyn as its `--param`s, and `decode.js` as a JSON array, typed by the schema's params (`root_args`), for the root's constructor; that of a user type is the instance the type's generated class makes from the bytes, an imported schema's top-level type or a type of the schema by path. The script compares the result value by value with zelbyn's `--dump json`, leaving out value instances and params. Fields are matched by the names zelbyn writes, the `-orig-id` where there is one. `decode.js` gives each of the runtime's fields the name its attribute has in the spec of the type its object was generated from: it finds that spec by the object's class (`CLASSES`), which is a property of the class of the type that declares it, or an imported schema's module. A name therefore belongs to one type, and nested or imported types that share a short name keep their own params and parse instances. The root is named by its `meta` `-orig-id`, else its `id` (`root_of`). Attributes of one type that share an `-orig-id` under exclusive conditions, as `elf.ksy`'s `flags32` and `flags64` share `p_flags`, are one field: zelbyn's JSON writes both, and the script keeps the one with values (`merge_fields`); two with values are an error, on either side. A name can be any string, such as `constructor`, `__proto__` or `error`: `decode.js` holds fields in objects without a prototype, finds an object's class through its prototype, which a field named `constructor` cannot hide, and prints each result in an envelope, `{"value": ...}` or `{"error": ...}`, which `compare.py` keeps apart from the value (`Result`). `test_compare.py` tests these helpers, and decodes schemas that need them. Integers beyond 2^53, which the JavaScript runtime holds as doubles, are compared as doubles. A float is compared as a number, since the runtime writes one with an integer value as an integer. An `f8` must be the same double. One read as an `f4` also equals the runtime's when it rounds to it as an `f4` (`as_f4`): zelbyn writes an `f4` with its shortest digits, the runtime the double it widens to. `decode.js` gives the paths of the floats read as `f4`s with each result. It wraps the runtime's primitive readers to record what each read over each span, its start and end, of each stream (`READS`): an `f4`, an `f8`, or an integer or bits. As it compiles the schema in debug mode for values too, the debug record of each value of a field that can be a float gives the span, and so the reader (`readKind`). A span rather than a start tells apart an `f4` that a parse instance reads from the first half of an `f8`. A `switch-on` with cases of several types (`f4` and `f8` in `minecraft_nbt.ksy`, or an integer and a float) is then compared by the case chosen, which neither the schema nor the width of the record (a `u4` and an `f4`) can tell. Reads of several kinds of one span, as when a parse instance reads an `f4`'s bytes again as a `u4`, give the float kind to a value that is not an integer, and no `f4` rule to an integer value, which is compared exactly. A value with no read is an error. `first_difference` applies the `f4` rule only at those paths. With `--offsets`, the script compares the start of every value that is not a set instance with zelbyn's `--offsets` dump. The runtime copies the bytes of a substream whose `pad-right` it removes or that it cuts at a terminator, and decompresses those of one with `process: zlib`, and its debug records in such a stream start at 0, so `decode.js` adds the offset of the field it is of. A stream is a view of the input only within the input's range (`inInput`): Node gives small buffers, such as decompressed bytes, from a shared pool, which can be the input's. The runtime moves one byte too far past a terminator with `include: true`, so a schema that uses it can differ after it, and reads some negative `s8` values wrongly. Its debug records of an array are by element, so for a repeated `switch-on` whose elements no case chose, `decode.js` keeps the records of the elements that read something. It decodes strings with `TextDecoder`, which removes a byte-order mark at the start of a UTF-16 string, decodes ISO-8859-1 as windows-1252, has no UTF-32 or IBM437, and counts `.length` in UTF-16 units, so schemas with those can differ there.
+- **`tools/kaitai_compare/`** checks zelbyn's decode against the official Kaitai Struct runtime; doc/development.md gives its use and the runtime's own errors, and the comments at the top of `compare.py` and `decode.js` the details. `compare.py` converts a schema and the schemas it imports to JSON with PyYAML, and `decode.js` decodes the files with the official compiler and JavaScript runtime, pinned at 0.11.0 in `package.json`, in debug mode, which records where each value was read. `compare.py` compares the result value by value with zelbyn's `--dump json`, or with `--offsets` the start of every value that is not a set instance with zelbyn's `--offsets` dump. Two things it must know of each value come from the runtime's side:
+  - **Its name.** Fields are matched by the names zelbyn writes, the `-orig-id` where there is one. `decode.js` names each field of the runtime's from the spec of the type its object was generated from, which it finds by the object's class (`CLASSES`), so a name belongs to one type, and nested or imported types that share a short name keep their own params and parse instances. A name can be any string: fields are held in objects without a prototype, and each result is in an envelope, `{"value": ...}` or `{"error": ...}`. Attributes of one type that share an `-orig-id` under exclusive conditions are one field (`merge_fields`).
+  - **Whether a float is an `f4`.** zelbyn writes an `f4` with its shortest digits, and the runtime the double it widens to, so a float read as an `f4` is also equal when zelbyn's rounds to it as an `f4`; an `f8` must be the same double. `decode.js` records what each of the runtime's primitive readers read, over each span of each stream (`READS`), and gives the paths of the values an `f4` reader read, by the spans of their debug records (`readKind`), so that a `switch-on` with cases of several types is compared by the case chosen.
+
+  `test_compare.py` tests these helpers, and decodes schemas that need them.
 - **`tools/ksy_corpus/`** is the corpus test. `main.odin` compiles every `.ksy` file under a directory, with the directory as the import path, and prints one line for each: compiled, or its first error's kind, file, line, column and message. `check.py` compares those lines with `expected.txt`, which records them and the commit of `kaitai_struct_formats` they were made at, and `--record` rewrites it. With `--samples`, it runs `tools/kaitai_compare/compare.py`, on values and on offsets, over the samples in a clone of `kaitai_struct_samples` of every format that compiles: the files of the format's directory that have a `.license` file beside them, other than `.txt` and `.json` files.
 - **`tools/yaml_corpus/`** checks the YAML parser. `main.odin` prints the YAML parser's node tree for each file. `compare.py` compares it with libyaml's, through PyYAML, over every `.ksy` file in a clone of `kaitai_struct_formats` kept outside the repository.
