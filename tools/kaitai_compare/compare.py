@@ -23,9 +23,13 @@ else its id, as zelbyn names it. Its helpers are tested by
 test_compare.py. Integers beyond 2^53, which the
 JavaScript runtime holds as doubles, are compared as doubles. A float is
 compared as a number, as the runtime writes one with an integer value as
-an integer, and zelbyn writes an f4 with the shortest digits that give
-it, where the runtime writes the double it widens to: a float of
-zelbyn's is also equal to the runtime's when it rounds to it as an f4.
+an integer. An f8 must be the same double. zelbyn writes an f4 with the
+shortest digits that give it, where the runtime writes the double it
+widens to, so a float that the runtime read as an f4 is also equal when
+zelbyn's rounds to it as an f4: decode.js gives the paths of those, the
+values that the runtime's f4 readers read, so that a switch-on with cases
+of several types (f4 and f8, or an integer and a float) is compared by the
+case chosen.
 Imports are read relative to the importing schema, or for an absolute one,
 from the directories of --import-path (separated as in PATH), and given to
 both. Each --param is an argument for a param of the schema's top-level
@@ -63,8 +67,8 @@ class Result:
     apart from the value, as a decoded field, or the root, can be named
     error."""
 
-    def __init__(self, value=None, error=None):
-        self.value, self.error = value, error
+    def __init__(self, value=None, error=None, f4=()):
+        self.value, self.error, self.f4 = value, error, frozenset(f4)
 
 
 def display_name(spec, id):
@@ -163,9 +167,14 @@ def root_args(ksy, params):
     return args
 
 
-def first_difference(a, b, path):
+def first_difference(a, b, path, f4=frozenset()):
     """The path of the first value that differs, and the two values; None
-    when a and b are equal. Also counts the values compared."""
+    when a and b are equal. Also counts the values compared. f4 holds the
+    paths of the values that the runtime read as f4s: only those are equal
+    when zelbyn's rounds to the runtime's as an f4, as zelbyn writes an f4
+    with the shortest digits that give it, and the runtime the double it
+    widens to. Any other float, an f8, is equal only when it is the same
+    double."""
     if isinstance(a, dict) and isinstance(b, dict):
         for k in list(a) + [k for k in b if k not in a]:
             if k not in a or k not in b:
@@ -174,7 +183,7 @@ def first_difference(a, b, path):
                 p = '%s.%s[%d]' % (path, k, i)
                 if i >= len(a[k]) or i >= len(b[k]):
                     return p, a[k][i] if i < len(a[k]) else '(absent)', b[k][i] if i < len(b[k]) else '(absent)'
-                d = first_difference(a[k][i], b[k][i], p)
+                d = first_difference(a[k][i], b[k][i], p, f4)
                 if d:
                     return d
         return None
@@ -182,7 +191,7 @@ def first_difference(a, b, path):
     if type(a) is int and type(b) is int and max(abs(a), abs(b)) > 2**53:
         return None if float(a) == float(b) else (path, a, b)
     if float in (type(a), type(b)) and type(a) in (int, float) and type(b) in (int, float):
-        return None if a == b or as_f4(a) == b else (path, a, b)
+        return None if a == b or (path in f4 and as_f4(a) == b) else (path, a, b)
     return None if a == b and type(a) is type(b) else (path, a, b)
 
 
@@ -277,7 +286,7 @@ def main():
                 print('FAILED: %s\n  zelbyn: %s' % (path, e.args[0]))
                 continue
             first_difference.values = 0
-            d = first_difference(present(ours), present(b), root_name)
+            d = first_difference(present(ours), present(b), root_name, rb.f4)
             values = '%d values' % first_difference.values
         if d:
             failed += 1
