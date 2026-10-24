@@ -171,11 +171,26 @@ KSY_ERROR_CASES := [?]Ksy_Error_Case {
 	{HEAD + "seq:\n  - id: a\n    consume: false\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n", .Invalid, 6, 5, "a: consume applies only with terminator or strz"},
 	{HEAD + "  encoding: ASCII\nseq:\n  - id: a\n    size: 2\n    consume: false\n    type:\n      switch-on: 1\n      cases:\n        1: strz\n", .Invalid, 8, 5, "a: consume does not apply with a size"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: nope\n", .Invalid, 9, 12, "a: unknown type nope"},
-	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        n: s\ntypes:\n  s: {}\n", .Unsupported, 11, 9, "a case must be an integer from -2^63 to 2^63 - 1 or an enum constant"},
+	{HEAD + "seq:\n  - id: n\n    type: u1\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        n: s\ntypes:\n  s: {}\n", .Unsupported, 11, 9, "a case must be an integer literal, from -2^63 to 2^64 - 1, or an enum constant"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: s\n        0x1: s\ntypes:\n  s: {}\n", .Invalid, 10, 9, "a: case 1 is already given (line 9, column 9)"},
 	{HEAD + "seq:\n  - id: a\n    type: s1\n    enum: e\n  - id: b\n    type:\n      switch-on: a\n      cases:\n        e::m: u1\n        -1: u1\nenums:\n  e:\n    -1: m\n", .Invalid, 13, 9, "b: case -1 is already given (line 12, column 9)"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        9223372036854775808: u1\n", .Unsupported, 9, 9, "a: a case must be an integer from -2^63 to 2^63 - 1 or an enum constant"},
-	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        -9223372036854775809: u1\n", .Unsupported, 9, 9, "a: a case must be an integer from -2^63 to 2^63 - 1 or an enum constant"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        18446744073709551616: u1\n", .Unsupported, 9, 9, "integer literal 18446744073709551616 is above 2^64 - 1"},
+	// enum values are those of the official compiler, which holds them as
+	// 64-bit signed integers; their literals are those of expressions
+	{HEAD + "enums:\n  e:\n    9223372036854775808: big\n", .Unsupported, 6, 5, "enum e: 9223372036854775808 does not fit in a 64-bit signed integer"},
+	{HEAD + "enums:\n  e:\n    1__0: x\n", .Invalid, 6, 5, `enum e: "1__0" is not an integer`},
+	{HEAD + "enums:\n  e:\n    010: x\n", .Invalid, 6, 5, `enum e: "010" is not an integer`},
+	// a scalar that YAML 1.1 reads as an integer, as the official tools do, is
+	// a byte of contents, and one that is not written as zelbyn reads integers
+	// is an error, not its text
+	{HEAD + "seq:\n  - id: a\n    contents: [010]\n", .Invalid, 6, 16, "010 is an integer in YAML, which is not written as zelbyn reads one"},
+	{HEAD + "seq:\n  - id: a\n    contents: [1__0]\n", .Invalid, 6, 16, "1__0 is an integer in YAML, which is not written as zelbyn reads one"},
+	{HEAD + "seq:\n  - id: a\n    contents: [1_]\n", .Invalid, 6, 16, "1_ is an integer in YAML"},
+	{HEAD + "seq:\n  - id: a\n    contents: [1:30]\n", .Invalid, 6, 16, "1:30 is an integer in YAML"},
+	{HEAD + "seq:\n  - id: a\n    contents: [18446744073709551616]\n", .Invalid, 6, 16, "18446744073709551616 is an integer in YAML"},
+	{HEAD + "seq:\n  - id: a\n    contents: [300]\n", .Invalid, 6, 16, "300 is not a byte (0 to 255)"},
+	{HEAD + "seq:\n  - id: a\n    contents: 010\n", .Invalid, 6, 15, "write a byte as a sequence"},
+	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        -9223372036854775809: u1\n", .Unsupported, 9, 9, "a: a case must be an integer literal, from -2^63 to 2^64 - 1, or an enum constant"},
 	{HEAD + "  encoding: ASCII\nseq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n        2: strz\n  - id: b\n    size: a\n", .Unsupported, 13, 11, "size: a is a switch-on field whose values can be an integer or a string"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        1: u1\n    size: 2\n  - id: b\n    size: a\n", .Unsupported, 12, 11, "size: a is a switch-on field whose values can be a byte array or an integer"},
 	{HEAD + "seq:\n  - id: a\n    type:\n      switch-on: 1\n      cases:\n        _: s\n  - id: b\n    size: a.c\ntypes:\n  s:\n    seq:\n      - id: c\n        type: u1\n", .Unsupported, 11, 11, "size: a is a switch-on field whose cases are user types; it cannot be used in expressions"},
@@ -1847,6 +1862,91 @@ ksy_valid_constant_bounds :: proc(t: ^testing.T) {
 		expect_dump(t, c.bound, ksy_dump(t, as_value, c.input), c.want)
 		expect_dump(t, c.bound, ksy_dump(t, as_expr, c.input), c.want)
 	}
+}
+
+// The items of contents that YAML 1.1 reads as integers are bytes, and
+// the others, also ones that look like numbers but are not integers in
+// YAML 1.1 (0o17, 08, a literal beyond 2^64 - 1 followed by text), are
+// their text, as the official tools take them.
+@(test)
+ksy_contents_numbers_and_text :: proc(t: ^testing.T) {
+	Case :: struct {
+		item:  string,
+		input: string,
+	}
+	cases := [?]Case {
+		{"1_0", "\x0a"},
+		{"0x1_F", "\x1f"},
+		{"0b1_0", "\x02"},
+		{"+5", "\x05"},
+		{"0", "\x00"},
+		{"18446744073709551616x", "18446744073709551616x"},
+		{"0x10000000000000000g", "0x10000000000000000g"},
+		{"0o17", "0o17"},
+		{"08", "08"},
+		{"0b", "0b"},
+		{"0XFF", "0XFF"},
+		{"0B10", "0B10"},
+		{"0O17", "0O17"},
+	}
+	for c in cases {
+		// the size of the contents, as _sizeof gives it, is what is read
+		src := fmt.tprintf("%sseq:\n  - id: m\n    contents: [%s]\n  - id: size\n    type: u1\n    valid:\n      expr: m._sizeof == %v and _ == %v\n", HEAD, c.item, len(c.input), len(c.input))
+		input := strings.concatenate({c.input, string([]byte{byte(len(c.input))})}, context.temp_allocator)
+		got := ksy_dump(t, src, transmute([]byte)input)
+		testing.expectf(t, strings.has_prefix(got, fmt.tprintf("t[0].m[0] = <%v bytes>", len(c.input))), "%s: %s", c.item, got)
+		testing.expectf(t, strings.contains(got, fmt.tprintf("t[0].size[0] = %v\n", len(c.input))), "%s: %s", c.item, got)
+		// one byte more is not the contents
+		wrong := strings.concatenate({"\x01", input}, context.temp_allocator)
+		testing.expectf(t, strings.has_prefix(ksy_dump(t, src, transmute([]byte)wrong), "error: Not_Equal"), "%s: matched %q", c.item, wrong)
+	}
+
+	// items of both kinds in one list: "ab", a byte and text
+	src := HEAD + "seq:\n  - id: m\n    contents: [ab, 1, 0o17, 0XFF]\n  - id: size\n    type: u1\n    valid:\n      expr: m._sizeof == 11\n"
+	expect_dump(t, "mixed contents", ksy_dump(t, src, transmute([]byte)string("ab\x010o170XFF\x0b")), "t[0].m[0] = <11 bytes> 61 62 01 30 6f 31 37 30 58 46 46\nt[0].size[0] = 11\n")
+}
+
+// A switch-on compares its value, and its cases, as any integers an
+// expression has: from -2^63 to 2^64 - 1, so a u8 above max(int) chooses
+// its case, or the default, rather than failing.
+@(test)
+ksy_wide_switch :: proc(t: ^testing.T) {
+	src := HEAD + `seq:
+  - id: recs
+    type: rec
+    repeat: eos
+types:
+  rec:
+    seq:
+      - id: k
+        type: u8
+      - id: v
+        type:
+          switch-on: k
+          cases:
+            18446744073709551615: u1
+            0x8000_0000_0000_0000: u2
+            1: s1
+            _: s2
+`
+	input := []byte{
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 7,
+		0, 0, 0, 0, 0, 0, 0, 0x80, 8, 0,
+		1, 0, 0, 0, 0, 0, 0, 0, 0xf7,
+		1, 0, 0, 0, 0, 0, 0, 0x80, 0xf6, 0xff,
+		5, 0, 0, 0, 0, 0, 0, 0, 0xf5, 0xff,
+	}
+	expect_dump(t, "wide switch", ksy_dump(t, src, input), `t[0].recs[0].k[0] = 18446744073709551615
+t[0].recs[0].v[0] = 7
+t[0].recs[1].k[0] = 9223372036854775808
+t[0].recs[1].v[0] = 8
+t[0].recs[2].k[0] = 1
+t[0].recs[2].v[0] = -9
+t[0].recs[3].k[0] = 9223372036854775809
+t[0].recs[3].v[0] = -10
+t[0].recs[4].k[0] = 5
+t[0].recs[4].v[0] = -11
+`)
 }
 
 // A value instance that reads a repeated field keeps the value it had when

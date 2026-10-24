@@ -87,6 +87,8 @@ COMPILE_ERROR_CASES := [?]Compile_Error_Case {
 	{"0x", .Syntax, 0, "invalid integer literal 0x"},
 	{"0b12", .Syntax, 0, "invalid integer literal 0b12"},
 	{"1__0", .Syntax, 0, "invalid integer literal 1__0"},
+	{"18446744073709551616x", .Syntax, 0, "invalid integer literal 18446744073709551616x"},
+	{"0x10000000000000000g", .Syntax, 0, "invalid integer literal 0x10000000000000000g"},
 	{"1_", .Syntax, 0, "invalid integer literal 1_"},
 	{"1e5", .Invalid, 0, "expected an integer, found a float"},
 	{"18446744073709551616", .Unsupported, 0, "is above 2^64 - 1"},
