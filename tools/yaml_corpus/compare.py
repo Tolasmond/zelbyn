@@ -19,9 +19,8 @@ import tempfile
 
 import yaml
 
-# The files left out, relative to the directory, as tools/ksy_corpus leaves
-# them out: zelbyn keeps nothing of GIF, whose sample files it had no
-# licenses for.
+# The files left out, relative to the directory: zelbyn keeps nothing of
+# GIF, whose sample files it had no licenses for.
 EXCLUDED = {'image/gif.ksy'}
 
 STYLE = {'': 'plain', None: 'plain', "'": 'single', '"': 'double', '|': 'literal', '>': 'folded'}

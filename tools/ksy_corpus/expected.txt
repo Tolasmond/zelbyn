@@ -1,4 +1,4 @@
-# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 189 of 189 files compile
+# kaitai_struct_formats f38fd7de89aa6cc171624ba08a0647e06e2ade47: 190 of 190 files compile
 OK	3d/gltf_binary.ksy
 OK	archive/android_bootldr_asus.ksy
 OK	archive/android_bootldr_huawei.ksy
@@ -93,6 +93,7 @@ OK	hardware/mifare/mifare_classic.ksy
 OK	image/bmp.ksy
 OK	image/dicom.ksy
 OK	image/exif.ksy
+OK	image/gif.ksy
 OK	image/gimp_brush.ksy
 OK	image/icc_4.ksy
 OK	image/ico.ksy
