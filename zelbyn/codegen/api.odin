@@ -171,6 +171,11 @@ write_struct :: proc(g: ^Generator, s: ^Struct_Info) -> bool {
 
 @(private)
 dump_proc :: proc(s: ^Struct_Info) -> string {
+	return ref(dump_proc_name(s))
+}
+
+@(private)
+dump_proc_name :: proc(s: ^Struct_Info) -> string {
 	return fmt.tprintf("dump_%s", s.name)
 }
 
@@ -233,7 +238,7 @@ dump_value :: proc(g: ^Generator, depth: int, f: ^Field, v: string) {
 @(private = "file")
 dump_one :: proc(g: ^Generator, depth: int, elem, v: string) {
 	if strings.has_prefix(elem, "^") {
-		line(g, depth, "dump_%s(w, path, %s) or_return", elem[1:], v)
+		line(g, depth, "%s(w, path, %s) or_return", ref(fmt.tprintf("dump_%s", elem[1:])), v)
 		return
 	}
 	line(g, depth, "dat.write_dump_start(w, path) or_return")

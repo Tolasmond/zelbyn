@@ -55,7 +55,7 @@ generate :: proc(format: ^mdata.File_Format, options: Options, allocator := cont
 	g.emitted = make(map[string]bool, context.temp_allocator)
 	g.work = make([dynamic]Work, context.temp_allocator)
 	g.decls = strings.builder_make(context.temp_allocator)
-	g.procs = strings.builder_make(context.temp_allocator)
+	g.procs = make([dynamic]Proc, context.temp_allocator)
 	for name in RESERVED do g.names[name] = true
 
 	if !generate_package(&g) {
@@ -74,7 +74,8 @@ Generator :: struct {
 	options:     Options,
 	builder:     strings.Builder, // the whole file
 	decls:       strings.Builder, // types and constants
-	procs:       strings.Builder, // procedures
+	procs:       [dynamic]Proc,   // the procedures written
+	out:         strings.Builder, // the procedure being written
 	ids:         map[rawptr]int,  // the number of each node, expression and value instance that has code of its own
 	next_id:     int,
 	structs:     map[^mdata.Type_Info]^Struct_Info,
@@ -85,6 +86,7 @@ Generator :: struct {
 	names:       map[string]bool,  // the type names taken
 	union_names: map[^mdata.Node]string, // the union of each switch-on field with values of more than one type
 	constants:   map[string]string,      // the constant of each Bytes literal, by its bytes
+	kept:        map[string]string,      // the procedure kept for each written (merge)
 	emitted:     map[string]bool,  // the procedures and constants written or queued
 	work:        [dynamic]Work,    // those still to write
 	temps:       int,              // the temporaries of the procedure being written
@@ -156,14 +158,22 @@ id_of :: proc(g: ^Generator, p: rawptr) -> int {
 }
 
 // Queues w, unless a procedure of its name is written or queued, and
-// returns its name.
+// returns a reference to it (ref).
 @(private)
 need :: proc(g: ^Generator, w: Work) -> string {
 	if !g.emitted[w.name] {
 		g.emitted[w.name] = true
 		append(&g.work, w)
 	}
-	return w.name
+	return ref(w.name)
+}
+
+// A reference to the procedure called name, as the code being written calls
+// it: marked, so that merge can call the procedure it keeps of those that
+// are the same.
+@(private)
+ref :: proc(name: string) -> string {
+	return fmt.tprintf("\x01%s\x02", name)
 }
 
 @(private = "file")
@@ -178,17 +188,20 @@ generate_package :: proc(g: ^Generator) -> bool {
 
 	write_api(g) or_return
 	for s in g.struct_list do write_struct(g, s) or_return
-	for set in g.set_list do need(g, {name = set_proc(g, set), write = write_set, node = set})
+	for set in g.set_list do need(g, {name = set_proc_name(g, set), write = write_set, node = set})
 	for s in g.struct_list {
-		need(g, {name = dump_proc(s), write = write_dump, info = s})
-		if len(s.set.parse_instances) > 0 do need(g, {name = parse_dispatch(s), write = write_parse_dispatch, info = s})
+		need(g, {name = dump_proc_name(s), write = write_dump, info = s})
+		if len(s.set.parse_instances) > 0 do need(g, {name = parse_dispatch_name(s), write = write_parse_dispatch, info = s})
 	}
 	for i := 0; i < len(g.work); i += 1 {
 		w := g.work[i]
 		g.temps = 0
+		g.out = strings.builder_make(context.temp_allocator)
 		w.write(g, w)
 		if g.err != "" do return false
+		append(&g.procs, Proc{name = w.name, text = strings.to_string(g.out)})
 	}
+	procs := merge(g)
 
 	name := g.options.package_name
 	if name == "" do name = identifier(root.ref_name)
@@ -207,8 +220,8 @@ generate_package :: proc(g: ^Generator) -> bool {
 	fmt.sbprintln(b, "_ :: strings")
 	fmt.sbprintln(b, "_ :: utf8")
 	fmt.sbprintln(b)
-	strings.write_string(b, strings.to_string(g.decls))
-	strings.write_string(b, strings.to_string(g.procs))
+	strings.write_string(b, resolve_refs(g, strings.to_string(g.decls)))
+	strings.write_string(b, procs)
 	return true
 }
 
@@ -336,12 +349,27 @@ ada_case :: proc(s: string) -> string {
 	return name
 }
 
-// name, an id of the schema, as an Odin identifier: with _ after it when it
-// is one of Odin's keywords.
+// The name generated code gives a field, a param or a member of Args whose
+// id in the schema is name: the id, or with _ after it when it is one of
+// Odin's keywords.
+field_name :: proc(name: string) -> string {
+	return identifier(name)
+}
+
+// name, an id of the schema, or the name of a bit field, as an Odin
+// identifier: a character that cannot be in one made _, and with _ after
+// it when it is one of Odin's keywords.
 @(private)
 identifier :: proc(name: string) -> string {
-	for k in KEYWORDS do if name == k do return fmt.tprintf("%s_", name)
-	return name
+	b := strings.builder_make(context.temp_allocator)
+	for c, i in transmute([]byte)name {
+		ok := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (i > 0 && c >= '0' && c <= '9')
+		strings.write_byte(&b, ok ? c : '_')
+	}
+	id := strings.to_string(b)
+	if id == "" do id = "_"
+	for k in KEYWORDS do if id == k do return fmt.tprintf("%s_", id)
+	return id
 }
 
 @(private = "file")
@@ -400,6 +428,14 @@ layout :: proc(g: ^Generator, s: ^Struct_Info) -> bool {
 			return fail(g, "param %s has an unknown type", p.name)
 		}
 		append(&s.fields, f)
+	}
+	// names made identifiers can meet, and the bit fields' are not ids
+	taken := make(map[string]bool, context.temp_allocator)
+	for &f in s.fields {
+		name := f.name
+		for i := 2; taken[name] || name == "_zr" || name == "_have" || name == "_read"; i += 1 do name = fmt.tprintf("%s_%d", f.name, i)
+		taken[name] = true
+		f.name = name
 	}
 	s.have_words = (have + 63) / 64
 	s.read_words = (len(set.parse_instances) + 63) / 64
@@ -541,4 +577,112 @@ scalar_type :: proc(t: dat.Data_Type) -> string {
 	case .Bool:    return "bool"
 	}
 	panic("scalar_type: not a scalar type")
+}
+
+// A procedure written, whose references to the others are marked (ref).
+@(private)
+Proc :: struct {
+	name: string,
+	text: string,
+}
+
+// The procedures written, with each set of them that are the same kept once:
+// two are the same when their text is, but for their own names, and the
+// procedures they call at each place are the same. Each type is compiled
+// once for each field of it (doc/arch.md, "The compiler"), and the code of
+// most of those fields is the same. The same are found as a partition is
+// refined: by text first, then by the classes of the procedures called,
+// until no class splits.
+@(private = "file")
+merge :: proc(g: ^Generator) -> string {
+	n := len(g.procs)
+	index := make(map[string]int, n, context.temp_allocator)
+	for p, i in g.procs do index[p.name] = i
+	calls := make([][]int, n, context.temp_allocator)
+	class := make([]int, n, context.temp_allocator)
+	{
+		classes := make(map[string]int, context.temp_allocator)
+		for p, i in g.procs {
+			list := make([dynamic]int, context.temp_allocator)
+			skeleton := strings.builder_make(context.temp_allocator)
+			own := fmt.tprintf("%s :: ", p.name)
+			text := p.text
+			if at := strings.index(text, own); at >= 0 {
+				strings.write_string(&skeleton, text[:at])
+				strings.write_string(&skeleton, "\x03 :: ")
+				text = text[at + len(own):]
+			}
+			for {
+				start := strings.index_byte(text, 0x01)
+				if start < 0 do break
+				end := start + strings.index_byte(text[start:], 0x02)
+				strings.write_string(&skeleton, text[:start])
+				strings.write_string(&skeleton, "\x01\x02")
+				callee, found := index[text[start + 1:end]]
+				assert(found, "merge: a reference to no procedure written")
+				append(&list, callee)
+				text = text[end + 1:]
+			}
+			strings.write_string(&skeleton, text)
+			calls[i] = list[:]
+			key := strings.to_string(skeleton)
+			if c, found := classes[key]; found {
+				class[i] = c
+			} else {
+				class[i] = len(classes)
+				classes[key] = class[i]
+			}
+		}
+	}
+	count := -1
+	for {
+		classes := make(map[string]int, context.temp_allocator)
+		next := make([]int, n, context.temp_allocator)
+		for i in 0 ..< n {
+			key := strings.builder_make(context.temp_allocator)
+			fmt.sbprintf(&key, "%d", class[i])
+			for c in calls[i] do fmt.sbprintf(&key, ",%d", class[c])
+			k := strings.to_string(key)
+			if c, found := classes[k]; found {
+				next[i] = c
+			} else {
+				next[i] = len(classes)
+				classes[k] = next[i]
+			}
+		}
+		class = next
+		if len(classes) == count do break
+		count = len(classes)
+	}
+
+	// the first of each class is kept
+	kept := make([]int, count, context.temp_allocator)
+	for &k in kept do k = -1
+	for i in 0 ..< n do if kept[class[i]] < 0 do kept[class[i]] = i
+	g.kept = make(map[string]string, n, context.temp_allocator)
+	for p, i in g.procs do g.kept[p.name] = g.procs[kept[class[i]]].name
+	b := strings.builder_make(context.temp_allocator)
+	for p, i in g.procs {
+		if kept[class[i]] != i do continue
+		strings.write_string(&b, resolve_refs(g, p.text))
+	}
+	return strings.to_string(b)
+}
+
+// text with each reference to a procedure (ref) made the name of the one
+// kept of those the same as it (merge).
+@(private = "file")
+resolve_refs :: proc(g: ^Generator, text: string) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	text := text
+	for {
+		start := strings.index_byte(text, 0x01)
+		if start < 0 do break
+		end := start + strings.index_byte(text[start:], 0x02)
+		strings.write_string(&b, text[:start])
+		strings.write_string(&b, g.kept[text[start + 1:end]])
+		text = text[end + 1:]
+	}
+	strings.write_string(&b, text)
+	return strings.to_string(b)
 }

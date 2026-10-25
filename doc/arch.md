@@ -216,16 +216,20 @@ The decoder evaluates a direct form without walking the tree (§7.9). The tree s
 | `reach_of` | `expression/resolve.odin` | All | The most levels above its instance a value instance reaches |
 | `note_escapes` | `ksy/types.odin` | All | The first expression in a set that reaches out of it (§5.3) |
 | `eval` | `reader/eval.odin` | All | Evaluates a tree (§7.9) |
+| `write_ev` | `codegen/exprs.odin` | All | Writes the procedure that evaluates a tree as `eval` does (§10) |
 | `depth`, `struct_node`, `through_param`, `through_indirect` | `expression/resolve.odin` | Those of type `Struct`: `Instance`, `Field_Ref`, `Index`, `Array_Method`, `Switch_Cast`, `Repeat_Element`, `Value_Ref`, `Ternary` | The level of the instance an expression gives, its set, and whether it is reached through a param or a `?:` |
 | `enclosing` | `reader/eval.odin` | Those of type `Struct` | The instance levels above the one an expression gives (§7.9) |
+| `write_enc` | `codegen/exprs.odin` | Those of type `Struct` | Writes the procedure that does as `enclosing` for an expression (§10) |
 | `keep_streams` | `expression/resolve.odin` | Those of type `Stream`: `Io`, `Ternary` | Marks the sets whose streams a value instance uses |
 | `eval_stream`, `stream_reader` | `reader/eval.odin` | Those of type `Stream` | The stream an expression gives |
+| `write_stream_value`, `write_stream_reader` | `codegen/exprs.odin` | Those of type `Stream` | Write the procedures that do as `eval_stream` and `stream_reader` for an expression (§10) |
 | `array_item_type`, `first_item` | `expression/resolve.odin` | Those of type `Array`: `Field_Ref`, `Array_Literal`, `Value_Ref`, `Ternary`, and `Index` and `Array_Method` of an array of arrays; `first_item` all but `Field_Ref` and `Ternary`, as it is asked only of an array of arrays, whose items are array literals | The type of an array's items, and the first item of an array of arrays |
 | `eval_kept` | `reader/eval.odin` | `Field_Ref`, `Ternary` and `Value_Ref` of type `Array` | A cached value instance's array as its field's slot |
 | `direct_form`, `direct_field` | `expression/resolve.odin` | A literal, a `Field_Ref`, a comparison | The direct forms |
 | `constant_wide`, `is_constant` | `expression/resolve.odin` | Integer literals and operators; literals and array literals | A constant's value, and whether an array literal is constant |
 | `resolve_member_size_of`, `resolve_cast` | `expression/resolve.odin` | The operand of `_sizeof` and `.as<t>` | What the size or the cast is of |
 | `int_literal` | `ksy/constants.odin` | Integer literals and their negations | A `switch-on` case or `valid` bound |
+| `literal` | `codegen/exprs.odin` | The literals | An expression's value as an Odin literal (§10) |
 
 ### 5.3 `ksy`: the compiler
 

@@ -15,7 +15,7 @@ import "core:strings"
 // %v are replaced by args.
 @(private)
 line :: proc(g: ^Generator, depth: int, format: string, args: ..any) {
-	write_line(&g.procs, depth, format, ..args)
+	write_line(&g.out, depth, format, ..args)
 }
 
 // As line, into the declarations.
@@ -42,6 +42,11 @@ temp :: proc(g: ^Generator, prefix: string) -> string {
 // The procedure that reads an instance of set, once its parent has made it.
 @(private)
 set_proc :: proc(g: ^Generator, set: ^mdata.Node) -> string {
+	return ref(set_proc_name(g, set))
+}
+
+@(private)
+set_proc_name :: proc(g: ^Generator, set: ^mdata.Node) -> string {
 	return fmt.tprintf("read_set_%d", g.set_ids[set])
 }
 
@@ -57,6 +62,11 @@ field_proc :: proc(g: ^Generator, node: ^mdata.Node) -> string {
 
 @(private)
 parse_dispatch :: proc(s: ^Struct_Info) -> string {
+	return ref(parse_dispatch_name(s))
+}
+
+@(private)
+parse_dispatch_name :: proc(s: ^Struct_Info) -> string {
 	return fmt.tprintf("parse_%s", s.name)
 }
 

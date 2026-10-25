@@ -29,16 +29,20 @@ WALKS := [?]Walk {
 	{"zelbyn/expression/resolve.odin", "reach_of", true},
 	{"zelbyn/ksy/types.odin", "note_escapes", true},
 	{"zelbyn/reader/eval.odin", "eval", true},
+	{"zelbyn/codegen/exprs.odin", "write_ev", true},
 	// expressions of type Struct
 	{"zelbyn/expression/resolve.odin", "depth", false},
 	{"zelbyn/expression/resolve.odin", "struct_node", false},
 	{"zelbyn/expression/resolve.odin", "through_param", false},
 	{"zelbyn/expression/resolve.odin", "through_indirect", false},
 	{"zelbyn/reader/eval.odin", "enclosing", false},
+	{"zelbyn/codegen/exprs.odin", "write_enc", false},
 	// expressions of type Stream
 	{"zelbyn/expression/resolve.odin", "keep_streams", false},
 	{"zelbyn/reader/eval.odin", "eval_stream", false},
 	{"zelbyn/reader/eval.odin", "stream_reader", false},
+	{"zelbyn/codegen/exprs.odin", "write_stream_value", false},
+	{"zelbyn/codegen/exprs.odin", "write_stream_reader", false},
 	// expressions of type Array
 	{"zelbyn/expression/resolve.odin", "array_item_type", false},
 	{"zelbyn/expression/resolve.odin", "first_item", false},
@@ -51,6 +55,7 @@ WALKS := [?]Walk {
 	{"zelbyn/expression/resolve.odin", "resolve_member_size_of", false},
 	{"zelbyn/expression/resolve.odin", "resolve_cast", false},
 	{"zelbyn/ksy/constants.odin", "int_literal", false},
+	{"zelbyn/codegen/exprs.odin", "literal", false},
 }
 
 // Every switch on an expression's variant in zelbyn/ is one of WALKS,
