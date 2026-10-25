@@ -746,7 +746,8 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | Value tree, with its decoded strings | `Value_Tree.arena` | `field.destroy_value_tree` | Its input: owned when it came from `read`, borrowed when it came from `read_from_bytes` |
 | Decoder's `path`, `frames`, `streams`, `kept`, `cache` and arguments | The tree's arena, within its limit (§7.11) | With the tree | — |
 | Error messages, `ksy.Error.path`, and `Parse_Error.path`, `value` and `expected` | `context.allocator` | The matching `destroy_error` / `destroy_parse_error` | — |
-| Generated code: the generator's working data and the source | `context.temp_allocator`, and the source is copied to the allocator `generate` is given | The caller | — |
+| Generated code: the generator's working data | An arena of `generate`'s own | The end of `generate` | — |
+| Generated code: the source | The allocator `generate` is given | The caller | — |
 | Generated code: the instances, arrays, strings decoded and made, and bytes decompressed by `read` | `context.allocator` | The caller, best as an arena | Its input and the bytes of `Args` |
 | Generated code: `data.Decoder`'s records | An arena of its own (`decoder_init`) | `decoder_destroy`, as `read` returns | — |
 

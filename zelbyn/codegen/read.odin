@@ -567,7 +567,8 @@ write_instance :: proc(g: ^Generator, w: Work) {
 // has a length or a terminator.
 @(private = "file")
 into_proc :: proc(g: ^Generator, node, set: ^mdata.Node, choice: int) -> string {
-	return need(g, {name = fmt.tprintf("read_into_%d_%d", id_of(g, node), g.set_ids[set]), write = write_into, node = node, expr = nil, k = choice, info = struct_of(g, type_of(g, set))}) if set in g.set_ids else ""
+	assert(set in g.set_ids, "into_proc: a set that was not visited")
+	return need(g, {name = fmt.tprintf("read_into_%d_%d", id_of(g, node), g.set_ids[set]), write = write_into, node = node, k = choice})
 }
 
 @(private = "file")

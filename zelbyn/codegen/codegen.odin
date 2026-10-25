@@ -10,6 +10,7 @@ package codegen
 import dat "../data"
 import mdata "../metadata"
 import "core:fmt"
+import "core:mem/virtual"
 import "core:strings"
 
 // How generate writes the package.
@@ -35,12 +36,19 @@ destroy_error :: proc(err: ^Error) {
 }
 
 // The source of a package that decodes format's schema, one file, in
-// allocator. The package declares a struct for each type of the schema,
+// allocator, which is all generate leaves allocated. The package declares a struct for each type of the schema,
 // Args for the params of its top-level type, read, which decodes bytes
 // into an instance of that type, and write_text, which writes an instance
 // as zelbyn's text dump does.
 @(require_results)
 generate :: proc(format: ^mdata.File_Format, options: Options, allocator := context.allocator) -> (code: string, err: Error) {
+	// the working data, in an arena of its own, as context.temp_allocator
+	// for every procedure of the package
+	scratch: virtual.Arena
+	if virtual.arena_init_growing(&scratch) != nil do return "", Error{message = strings.clone("no memory to generate code in", allocator)}
+	defer virtual.arena_destroy(&scratch)
+	context.temp_allocator = virtual.arena_allocator(&scratch)
+
 	g := Generator{format = format, options = options}
 	g.builder = strings.builder_make(context.temp_allocator)
 	g.ids = make(map[rawptr]int, context.temp_allocator)
@@ -183,9 +191,8 @@ ref :: proc(name: string) -> string {
 generate_package :: proc(g: ^Generator) -> bool {
 	root := g.format.root
 	visit_set(g, root) or_return
-	for p in root.params {
-		if p.type != .Set do continue
-		visit_set(g, mdata.members(root.args[slot_index(root, p)].variant.(mdata.Root_Arg).set)) or_return
+	for p, k in root.params {
+		if p.type == .Set do visit_set(g, mdata.members(root.args[k].variant.(mdata.Root_Arg).set)) or_return
 	}
 	for s in g.struct_list do layout(g, s) or_return
 
@@ -223,13 +230,6 @@ generate_package :: proc(g: ^Generator) -> bool {
 	strings.write_string(b, resolve_refs(g, strings.to_string(g.decls)))
 	strings.write_string(b, procs)
 	return true
-}
-
-// The index of param p among the params of set.
-@(private)
-slot_index :: proc(set: ^mdata.Node, p: ^mdata.Node) -> int {
-	for q, k in set.params do if q == p do return k
-	panic("slot_index: not a param of the set")
 }
 
 // Records set, a set that is not a switch-on field, and the sets inside it,
