@@ -449,19 +449,14 @@ write_field_ref :: proc(g: ^Generator, e: ^mdata.Expr, x: mdata.Field_Ref) {
 			fail(g, "%s: an array of a field read once", x.node.name)
 			return
 		}
-		if strings.has_prefix(f.elem, "^") || !is_switch_union(g, f) {
+		if !is_switch_union(g, f) {
 			line(g, 1, "return dat.array_of(&base.%s), .None", f.name)
 			return
 		}
-		// the values of a switch-on field of cases of several types, made
-		// one type
-		item := expr_type(node_expr_type(x.node))
-		line(g, 1, "items, alloc_err := make([]%s, len(base.%s))", item, f.name)
-		line(g, 1, "if alloc_err != nil do return {}, .Memory_Limit")
-		line(g, 1, "for value, i in base.%s {", f.name)
-		write_union_item(g, 2, x.node, f.elem, "value", "items[i]")
-		line(g, 1, "}")
-		line(g, 1, "return dat.array_from(items), .None")
+		// the values of a switch-on field of cases of several types, each
+		// made the one type they give as it is read, so that the array is
+		// the field's as it grows
+		line(g, 1, "return dat.array_of_union(&base.%s, %s), .None", f.name, item_proc(g, x.node))
 		return
 	}
 	switch f.storage {
@@ -531,17 +526,28 @@ write_converted :: proc(g: ^Generator, depth: int, node: ^mdata.Node, elem, valu
 	line(g, depth, "return %s, .None", convert(elem, value, t))
 }
 
-// Writes the line that sets target, an item of type node's expression
-// type, to value, a value of node's union.
+// The data.Item_Proc of node, a switch-on field of cases of several types,
+// which gives a value of its union as the expression's value of the one
+// type they give.
 @(private = "file")
-write_union_item :: proc(g: ^Generator, depth: int, node: ^mdata.Node, elem, value, target: string) {
+item_proc :: proc(g: ^Generator, node: ^mdata.Node) -> string {
+	return need(g, {name = fmt.tprintf("item_%s", union_name(g, node)), write = write_item, node = node})
+}
+
+@(private = "file")
+write_item :: proc(g: ^Generator, w: Work) {
+	node := w.node
 	t := node_expr_type(node)
-	line(g, depth, "switch x in %s {", value)
+	line(g, 0, "%s :: proc(items: rawptr, i: int) -> dat.Item {", w.name)
+	line(g, 1, "switch x in ([^]%s)(items)[i] {", union_name(g, node))
 	for variant in switch_variants(g, node) {
-		line(g, depth, "case %s:", variant)
-		line(g, depth + 1, "%s = %s", target, convert(variant, "x", t))
+		line(g, 1, "case %s:", variant)
+		line(g, 2, "return %s", convert(variant, "x", t))
 	}
-	line(g, depth, "}")
+	line(g, 1, "}")
+	line(g, 1, "return nil")
+	line(g, 0, "}")
+	line(g, 0, "")
 }
 
 // value, of Odin type elem, as an expression value of type t.

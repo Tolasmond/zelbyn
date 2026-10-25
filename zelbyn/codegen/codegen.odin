@@ -58,7 +58,7 @@ generate :: proc(format: ^mdata.File_Format, options: Options, allocator := cont
 	g.set_list = make([dynamic]^mdata.Node, context.temp_allocator)
 	g.owners = make(map[^mdata.Node]^Struct_Info, context.temp_allocator)
 	g.names = make(map[string]bool, context.temp_allocator)
-	g.union_names = make(map[^mdata.Node]string, context.temp_allocator)
+	g.union_names = make(map[string]string, context.temp_allocator)
 	g.constants = make(map[string]string, context.temp_allocator)
 	g.untyped = make(map[^mdata.Node]^mdata.Type_Info, context.temp_allocator)
 	g.emitted = make(map[string]bool, context.temp_allocator)
@@ -73,9 +73,10 @@ generate :: proc(format: ^mdata.File_Format, options: Options, allocator := cont
 	return strings.clone(strings.to_string(g.builder), allocator), {}
 }
 
-// Names generated code declares for itself, which no type takes.
+// The names that generated code declares for itself, or takes from Odin's
+// builtins, which no type takes: a type named maybe would hide Maybe.
 @(private = "file")
-RESERVED := [?]string{"Args"}
+RESERVED := [?]string{"Args", "Maybe"}
 
 @(private)
 Generator :: struct {
@@ -93,7 +94,7 @@ Generator :: struct {
 	set_list:    [dynamic]^mdata.Node,
 	owners:      map[^mdata.Node]^Struct_Info, // the struct each member of a set (child, parse instance, param) is a field of
 	names:       map[string]bool,  // the type names taken
-	union_names: map[^mdata.Node]string, // the union of each switch-on field with values of more than one type
+	union_names: map[string]string,      // the union of each switch-on field with values of more than one type, by field_key
 	constants:   map[string]string,      // the constant of each Bytes literal, by its bytes
 	kept:        map[string]string,      // the procedure kept for each written (merge)
 	untyped:     map[^mdata.Node]^mdata.Type_Info, // the type given each set that has none
@@ -362,9 +363,34 @@ ada_case :: proc(s: string) -> string {
 
 // The name generated code gives a field, a param or a member of Args whose
 // id in the schema is name, and the package of a schema whose meta id it
-// is: the id, as an Odin identifier (identifier).
+// is: the id, as an Odin identifier (identifier), which unique_names keeps
+// apart from the others of its struct.
 field_name :: proc(name: string) -> string {
 	return identifier(name)
+}
+
+// The names of the members of Args, one for each param of root, the set of
+// the top-level type: their field_names, apart as unique_names makes them.
+args_names :: proc(root: ^mdata.Node, allocator := context.allocator) -> []string {
+	names := make([]string, len(root.params), allocator)
+	for p, k in root.params do names[k] = field_name(p.ref_name)
+	unique_names(names, nil)
+	for &n in names do n = strings.clone(n, allocator)
+	return names
+}
+
+// names, made apart: each that meets one before it, or one of reserved,
+// followed by _2, _3 and so on, in context.temp_allocator.
+@(private)
+unique_names :: proc(names: []string, reserved: []string) {
+	taken := make(map[string]bool, context.temp_allocator)
+	for r in reserved do taken[r] = true
+	for &name in names {
+		n := name
+		for i := 2; taken[n]; i += 1 do n = fmt.tprintf("%s_%d", name, i)
+		taken[n] = true
+		name = n
+	}
 }
 
 // name, an id of the schema, or the name of a bit field, as an Odin
@@ -440,13 +466,10 @@ layout :: proc(g: ^Generator, s: ^Struct_Info) -> bool {
 		append(&s.fields, f)
 	}
 	// names made identifiers can meet, and the bit fields' are not ids
-	taken := make(map[string]bool, context.temp_allocator)
-	for &f in s.fields {
-		name := f.name
-		for i := 2; taken[name] || name == "_zr" || name == "_have" || name == "_read"; i += 1 do name = fmt.tprintf("%s_%d", f.name, i)
-		taken[name] = true
-		f.name = name
-	}
+	names := make([]string, len(s.fields), context.temp_allocator)
+	for f, i in s.fields do names[i] = f.name
+	unique_names(names, {"_zr", "_have", "_read"})
+	for &f, i in s.fields do f.name = names[i]
 	s.have_words = (have + 63) / 64
 	s.read_words = (len(set.parse_instances) + 63) / 64
 	return true
@@ -530,16 +553,15 @@ is_union :: proc(g: ^Generator, node: ^mdata.Node) -> bool {
 }
 
 // The name of the union of the values of node, a switch-on field, declared
-// the first time.
-@(private = "file")
+// the first time: one for the field of its struct, which each set of the
+// type has a node of.
+@(private)
 union_name :: proc(g: ^Generator, node: ^mdata.Node) -> string {
-	key := fmt.tprintf("union %d", id_of(g, node))
-	owner := g.owners[node]
-	name := fmt.tprintf("%s_%s", owner != nil ? owner.name : "T", ada_case(node.ref_name))
-	if !g.emitted[key] {
-		g.emitted[key] = true
-		name = unique_name(g, name)
-		g.union_names[node] = name
+	key := field_key(g, node)
+	if key not_in g.union_names {
+		owner := g.owners[node]
+		name := unique_name(g, fmt.tprintf("%s_%s", owner != nil ? owner.name : "T", ada_case(node.ref_name)))
+		g.union_names[key] = name
 		fmt.sbprintfln(&g.decls, "// The values of %s, a switch-on field: one of its cases' types.", node.name)
 		fmt.sbprintf(&g.decls, "%s :: union {{", name)
 		for v, i in switch_variants(g, node) {
@@ -549,7 +571,16 @@ union_name :: proc(g: ^Generator, node: ^mdata.Node) -> string {
 		fmt.sbprintln(&g.decls, "}")
 		fmt.sbprintln(&g.decls)
 	}
-	return g.union_names[node]
+	return g.union_names[key]
+}
+
+// What names node's field of its struct, the same for the nodes of that
+// field in every set of the type: the struct, and the member's kind and id.
+@(private)
+field_key :: proc(g: ^Generator, node: ^mdata.Node) -> string {
+	owner := g.owners[node]
+	kind := node.pos != nil ? "instance" : node.is_param ? "param" : "child"
+	return fmt.tprintf("%s %s %s", owner != nil ? owner.name : "", kind, node.ref_name)
 }
 
 // The Odin type of the values of node, a field that is not a set.

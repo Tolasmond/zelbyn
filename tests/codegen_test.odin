@@ -3,6 +3,7 @@ package tests
 import "../zelbyn/cli"
 import "../zelbyn/codegen"
 import dmp "../zelbyn/dump"
+import fld "../zelbyn/field"
 import ksy "../zelbyn/ksy"
 import mdata "../zelbyn/metadata"
 import "core:os"
@@ -101,24 +102,103 @@ codegen_names :: proc(t: ^testing.T) {
 		testing.expectf(t, strings.contains(code, want), "the code has no %q", want)
 	}
 	// the dump the code writes, which check.py compares with this
-	testing.expect_value(t, ksy_names_dump(t), "names[0].type[0] = 1\nnames[0].map[0].context[0] = 2\nnames[0].in[0].x[0] = 3\nnames[0].proc[0].inner[0].y[0] = 4\nnames[0].flags[0] = 165\nnames[0].top_bits[0] = 5\nnames[0].Top Bits[0] = 10\n")
+	testing.expect_value(t, interpreted_dump(t, NAMES_KSY, {1, 2, 3, 4, 0xa5}), "names[0].type[0] = 1\nnames[0].map[0].context[0] = 2\nnames[0].in[0].x[0] = 3\nnames[0].proc[0].inner[0].y[0] = 4\nnames[0].flags[0] = 165\nnames[0].top_bits[0] = 5\nnames[0].Top Bits[0] = 10\n")
 }
 
+// The text dump of input decoded with the schema src, with args, by the
+// decoder, through decode_bytes, which records the decode for
+// tools/codegen_tests (CODEGEN_RECORD); "" when it fails.
 @(private = "file")
-ksy_names_dump :: proc(t: ^testing.T) -> string {
+interpreted_dump :: proc(t: ^testing.T, src: string, input: []byte, args: []fld.Value = nil, loc := #caller_location) -> string {
 	ff: mdata.File_Format
 	defer mdata.destroy_file_format(&ff)
-	err := ksy.compile(NAMES_KSY, &ff)
+	err := ksy.compile(src, &ff)
 	defer ksy.destroy_error(&err)
-	if !testing.expectf(t, err.kind == .None, "compile: %s", err.message) do return ""
+	if !testing.expectf(t, err.kind == .None, "compile: %v at %v:%v: %s", err.kind, err.line, err.column, err.message, loc = loc) do return ""
 	d: Decoded
 	defer destroy_decoded(&d)
-	decode_bytes(&ff, {1, 2, 3, 4, 0xa5}, &d)
-	if !testing.expectf(t, d.err.kind == .None, "decode: %v", d.err.kind) do return ""
+	decode_bytes(&ff, input, &d, args = args)
+	if !testing.expectf(t, d.err.kind == .None, "decode: %v at %v in %s", d.err.kind, d.err.offset, d.err.path, loc = loc) do return ""
 	b := strings.builder_make(context.temp_allocator)
 	werr := dmp.write_text(strings.to_writer(&b), &ff, &d.tree)
-	testing.expectf(t, werr == .None, "dump: %v", werr)
+	testing.expectf(t, werr == .None, "dump: %v", werr, loc = loc)
 	return strings.to_string(b)
+}
+
+// Schemas whose code once did not build, or decoded otherwise than the
+// decoder: tools/codegen_tests builds the code of each and compares its
+// decode with these.
+@(test)
+codegen_cases :: proc(t: ^testing.T) {
+	// a cached value instance that is a repeated switch-on field of cases of
+	// two types, which it must see grow, as the decoder's kept slot does
+	testing.expect_value(t, interpreted_dump(t, `meta:
+  id: union_alias
+  endian: le
+seq:
+  - id: x
+    type:
+      switch-on: _index % 2
+      cases:
+        0: u1
+        1: u2
+    repeat: until
+    repeat-until: alias.size >= 2
+instances:
+  alias:
+    value: x
+`, {1, 2, 0}), "union_alias[0].x[0] = 1\nunion_alias[0].x[1] = 2\n")
+
+	// a type used by two fields, whose switch-on field of cases of two types
+	// has a valid: one union for both fields' checks
+	testing.expect_value(t, interpreted_dump(t, `meta:
+  id: twice
+  endian: le
+seq:
+  - id: a
+    type: t
+  - id: b
+    type: t
+types:
+  t:
+    seq:
+      - id: x
+        type:
+          switch-on: 1
+          cases:
+            1: u1
+            2: u2
+        valid:
+          expr: _ > 0
+`, {1, 2}), "twice[0].a[0].x[0] = 1\ntwice[0].b[0].x[0] = 2\n")
+
+	// params whose names meet once made identifiers: two members of Args
+	testing.expect_value(t, interpreted_dump(t, `meta:
+  id: arg_names
+params:
+  - id: context
+    type: u1
+  - id: context_
+    type: u1
+seq:
+  - id: data
+    size: context + context_
+`, {7, 8, 9}, {i64(1), i64(2)}), "arg_names[0].data[0] = <3 bytes> 07 08 09\n")
+
+	// a type whose struct Odin's Maybe would name, with a field that is a
+	// Maybe
+	testing.expect_value(t, interpreted_dump(t, `meta:
+  id: maybes
+seq:
+  - id: m
+    type: maybe
+types:
+  maybe:
+    seq:
+      - id: v
+        type: u1
+        if: true
+`, {7}), "maybes[0].m[0].v[0] = 7\n")
 }
 
 // The package's name and the import path of package data are those given,

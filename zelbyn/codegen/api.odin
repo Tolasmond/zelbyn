@@ -13,8 +13,9 @@ write_api :: proc(g: ^Generator) -> bool {
 	root := g.format.root
 	r := struct_of(g, type_of(g, root))
 	write_comment(&g.decls, 0, fmt.tprintf("The arguments of the params of %s, the schema's top-level type: an integer, a bool, bytes or a string, as each param's type is, and for a user type, the bytes that read reads an instance of it from.", r.name))
+	args := args_names(root, context.temp_allocator)
 	decl(g, 0, "Args :: struct {")
-	for p in root.params {
+	for p, k in root.params {
 		t: string
 		#partial switch p.type {
 		case .Int64:
@@ -28,7 +29,7 @@ write_api :: proc(g: ^Generator) -> bool {
 		case:
 			return fail(g, "param %s of the top-level type has an unknown type", p.name)
 		}
-		decl(g, 1, "%s: %s,", identifier(p.ref_name), t)
+		decl(g, 1, "%s: %s,", args[k], t)
 	}
 	decl(g, 0, "}")
 	decl(g, 0, "")
@@ -47,7 +48,7 @@ write_api :: proc(g: ^Generator) -> bool {
 		decl(g, 1, "arg%d: ^%s", k, t.name)
 		decl(g, 1, "{")
 		decl(g, 2, "r := d.r")
-		decl(g, 2, "dat.reader_init(&d.r, args.%s)", identifier(p.ref_name))
+		decl(g, 2, "dat.reader_init(&d.r, args.%s)", args[k])
 		decl(g, 2, "e := %s(&d, &arg%d)", top_proc(g, set), k)
 		decl(g, 2, "d.r = r")
 		decl(g, 2, "if e != .None {")
@@ -68,11 +69,11 @@ write_api :: proc(g: ^Generator) -> bool {
 		value: string
 		#partial switch p.type {
 		case .Int64:
-			value = fmt.tprintf("i128(args.%s)", identifier(p.ref_name))
+			value = fmt.tprintf("i128(args.%s)", args[k])
 		case .Set:
 			value = fmt.tprintf("arg%d", k)
 		case:
-			value = fmt.tprintf("args.%s", identifier(p.ref_name))
+			value = fmt.tprintf("args.%s", args[k])
 		}
 		decl(g, 3, "instance.%s = %s", f.name, value)
 	}

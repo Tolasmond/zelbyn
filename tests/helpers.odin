@@ -200,10 +200,11 @@ record_decode :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, args: [
 	// the arguments, as each param's type has them in Args
 	literal := strings.builder_make(context.temp_allocator)
 	strings.write_byte(&literal, '{')
-	for p, k in ff.root.params {
+	names := codegen.args_names(ff.root)
+	for _, k in ff.root.params {
 		if k >= len(args) do return
 		if k > 0 do strings.write_string(&literal, ", ")
-		fmt.sbprintf(&literal, "%s = ", codegen_identifier(p.ref_name))
+		fmt.sbprintf(&literal, "%s = ", names[k])
 		switch v in args[k] {
 		case i64:
 			fmt.sbprintf(&literal, "%d", v)
@@ -261,12 +262,6 @@ decode_result :: proc(ff: ^mdata.File_Format, d: ^Decoded) -> string {
 	}
 	strings.write_byte(&b, '\n')
 	return strings.to_string(b)
-}
-
-// name as generated code names a field or param (codegen.identifier).
-@(private = "file")
-codegen_identifier :: proc(name: string) -> string {
-	return codegen.field_name(name)
 }
 
 destroy_decoded :: proc(d: ^Decoded) {

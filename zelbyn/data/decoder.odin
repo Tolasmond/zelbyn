@@ -436,15 +436,33 @@ keep_cached :: proc(d: ^Decoder, instance: rawptr, id: int, value: $T) -> Read_E
 }
 
 // The value of an Array expression: the values of a field, or of an array
-// literal or a conversion, all of one kind. A field's (array_of) is its
-// storage, so that it is the field's values as they grow, as the decoder
-// keeps a field's slot; any other is its items, made for it.
+// literal or a conversion, all of one kind. A field's (array_of,
+// array_of_union) is its storage, so that it is the field's values as they
+// grow, as the decoder keeps a field's slot; any other is its items, made
+// for it.
 Array :: struct {
 	kind:  Array_Kind,
 	items: rawptr,
 	len:   int,
 	slot:  ^runtime.Raw_Dynamic_Array, // a field's [dynamic] storage; nil for any other
+	item:  Item_Proc,                  // Union: gives an item as an expression's value
 }
+
+// An item of an Array of kind Union, a value of a switch-on field whose
+// cases are of several types, as an expression's value of the one type
+// they all give.
+Item :: union {
+	i128,
+	f64,
+	bool,
+	[]byte,
+	string,
+	rawptr,
+}
+
+// Item i of items, the storage of a switch-on field's values, as an
+// expression's value; generated code gives one for each such field.
+Item_Proc :: #type proc(items: rawptr, i: int) -> Item
 
 // The type of an Array's items: those of a field's values, Int (i128) and
 // Float (f64) of an expression's, Struct an instance's address, and Array
@@ -466,11 +484,18 @@ Array_Kind :: enum u8 {
 	String,
 	Struct,
 	Array,
+	Union,
 }
 
 // The values of a field, as they are now and as they grow.
 array_of :: proc(slot: ^[dynamic]$E) -> Array {
 	return {kind = array_kind(E), slot = (^runtime.Raw_Dynamic_Array)(slot)}
+}
+
+// The values of a switch-on field of cases of several types, as array_of
+// gives a field's, each made an expression's value by item.
+array_of_union :: proc(slot: ^[dynamic]$U, item: Item_Proc) -> Array where intrinsics.type_is_union(U) {
+	return {kind = .Union, slot = (^runtime.Raw_Dynamic_Array)(slot), item = item}
 }
 
 // An array of items, made by an expression.
@@ -537,6 +562,14 @@ array_item :: proc(a: Array, i: i128, $T: typeid) -> (T, Read_Error) {
 	return ([^]T)(items)[int(i)], .None
 }
 
+// Item i of a, of kind Union, as item gives it.
+@(private = "file", require_results)
+union_item :: proc(a: Array, i: i128) -> (Item, Read_Error) {
+	items, n := array_items(a)
+	if i < 0 || i >= i128(n) do return nil, .Index_Out_Of_Range
+	return a.item(items, int(i)), .None
+}
+
 // Item i of a, an array of integers, as an Int.
 @(require_results)
 array_int :: proc(a: Array, i: i128) -> (n: i128, err: Read_Error) {
@@ -550,6 +583,7 @@ array_int :: proc(a: Array, i: i128) -> (n: i128, err: Read_Error) {
 	case .U32: return i128(array_item(a, i, u32) or_return), .None
 	case .U64: return i128(array_item(a, i, u64) or_return), .None
 	case .Int: return array_item(a, i, i128)
+	case .Union: return (union_item(a, i) or_return).(i128), .None
 	}
 	panic("array_int: not an array of integers")
 }
@@ -560,31 +594,36 @@ array_float :: proc(a: Array, i: i128) -> (f: f64, err: Read_Error) {
 	#partial switch a.kind {
 	case .F32: return f64(array_item(a, i, f32) or_return), .None
 	case .F64: return array_item(a, i, f64)
+	case .Union: return (union_item(a, i) or_return).(f64), .None
 	}
 	panic("array_float: not an array of floats")
 }
 
 @(require_results)
-array_bool :: proc(a: Array, i: i128) -> (bool, Read_Error) {
+array_bool :: proc(a: Array, i: i128) -> (v: bool, err: Read_Error) {
+	if a.kind == .Union do return (union_item(a, i) or_return).(bool), .None
 	assert(a.kind == .Bool)
 	return array_item(a, i, bool)
 }
 
 @(require_results)
-array_bytes :: proc(a: Array, i: i128) -> ([]byte, Read_Error) {
+array_bytes :: proc(a: Array, i: i128) -> (v: []byte, err: Read_Error) {
+	if a.kind == .Union do return (union_item(a, i) or_return).([]byte), .None
 	assert(a.kind == .Bytes)
 	return array_item(a, i, []byte)
 }
 
 @(require_results)
-array_string :: proc(a: Array, i: i128) -> (string, Read_Error) {
+array_string :: proc(a: Array, i: i128) -> (v: string, err: Read_Error) {
+	if a.kind == .Union do return (union_item(a, i) or_return).(string), .None
 	assert(a.kind == .String)
 	return array_item(a, i, string)
 }
 
 // Item i of a, an array of instances, as the address of one.
 @(require_results)
-array_struct :: proc(a: Array, i: i128) -> (rawptr, Read_Error) {
+array_struct :: proc(a: Array, i: i128) -> (v: rawptr, err: Read_Error) {
+	if a.kind == .Union do return (union_item(a, i) or_return).(rawptr), .None
 	assert(a.kind == .Struct)
 	return array_item(a, i, rawptr)
 }
