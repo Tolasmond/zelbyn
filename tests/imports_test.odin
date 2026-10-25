@@ -12,6 +12,7 @@ import "core:testing"
 IMPORT_NAMES := [?][2]string {
 	{"arena", "arn"},
 	{"cli", "cli"},
+	{"codegen", "codegen"},
 	{"data", "dat"},
 	{"dump", "dmp"},
 	{"expression", "expr"},

@@ -297,6 +297,7 @@ Type_Def :: struct {
 	enum_index:  map[string]^expr.Enum, // enums by name, when there are INDEX_FROM or more; else nil
 	params:      []Param_Def,
 	compiling:   ^mdata.Node, // the set its attributes are being compiled into; nil when they are not
+	info:        ^mdata.Type_Info, // what every set compiled from it records (Node.type_info); nil until one is
 	sizing:      bool, // its size is being found (type_bits)
 }
 

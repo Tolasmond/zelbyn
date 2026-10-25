@@ -7,9 +7,11 @@ import "core:bufio"
 import "core:flags"
 import "core:fmt"
 import "core:io"
+import "core:os"
 import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
+import "../codegen"
 import dmp "../dump"
 import fld "../field"
 import ksy "../ksy"
@@ -138,12 +140,77 @@ write_usage :: proc(w: io.Writer, program: string) {
 	fmt.wprintln(w, PARAM_USAGE)
 }
 
+// The options of zelbyn gen, which writes Odin code that decodes the schema.
+Gen_Options :: struct {
+	schema:       string `args:"pos=0,required" usage:"Schema: a Kaitai Struct .ksy file."`,
+	out:          string `args:"required" usage:"Directory to write the package to, as <package>.odin; made if it does not exist."`,
+	import_path:  string `args:"name=import-path" usage:"Directories that absolute imports (/a/b) are found in, separated by ':' (';' on Windows)."`,
+	package_name: string `args:"name=package" usage:"The package's name (default: the schema's meta id)."`,
+	runtime:      string `usage:"The import path of zelbyn's package data, which the code imports (default zelbyn:data)."`,
+}
+
+// Runs zelbyn gen, args being what follows gen: writes the package that
+// decodes the schema. Returns the exit code: 0 on success and after --help,
+// 1 when the format cannot be loaded or the code written, and 2 on a usage
+// error.
+gen :: proc(program: string, args: []string, stdout, stderr: io.Writer) -> int {
+	opts: Gen_Options
+	usage := fmt.tprintf("%s gen", program)
+	if err := flags.parse(&opts, args, .Unix, allocator = context.temp_allocator); err != nil {
+		print_gen_error(stdout, stderr, err, usage)
+		if _, is_help := err.(flags.Help_Request); is_help do return 0
+		flags.write_usage(stderr, Gen_Options, usage, .Unix)
+		return 2
+	}
+
+	file_format: mdata.File_Format
+	defer mdata.destroy_file_format(&file_format)
+	import_paths, _ := filepath.split_list(opts.import_path, context.temp_allocator)
+	if !load_format(opts.schema, import_paths, &file_format, stderr) do return 1
+
+	code, gen_err := codegen.generate(&file_format, {package_name = opts.package_name, runtime = opts.runtime})
+	defer delete(code)
+	defer codegen.destroy_error(&gen_err)
+	if gen_err.message != "" {
+		fmt.wprintfln(stderr, "error: %s: cannot generate code: %s", opts.schema, gen_err.message)
+		return 1
+	}
+
+	name := opts.package_name != "" ? opts.package_name : file_format.root.ref_name
+	if err := os.make_directory_all(opts.out); err != nil && !os.is_dir(opts.out) {
+		fmt.wprintfln(stderr, "error: cannot make %s: %v", opts.out, err)
+		return 1
+	}
+	path, _ := filepath.join({opts.out, fmt.tprintf("%s.odin", name)}, context.temp_allocator)
+	if err := os.write_entire_file(path, code); err != nil {
+		fmt.wprintfln(stderr, "error: cannot write %s: %v", path, err)
+		return 1
+	}
+	return 0
+}
+
+// As print_flags_error, for zelbyn gen.
+@(private = "file")
+print_gen_error :: proc(stdout, stderr: io.Writer, err: flags.Error, usage: string) {
+	switch e in err {
+	case flags.Parse_Error:
+		fmt.wprintfln(stderr, "[%T.%v] %s", e, e.reason, e.message)
+	case flags.Open_File_Error:
+		fmt.wprintfln(stderr, "[%T#%i] Unable to open %q", e, e.errno, e.filename)
+	case flags.Validation_Error:
+		fmt.wprintfln(stderr, "[%T] %s", e, e.message)
+	case flags.Help_Request:
+		flags.write_usage(stdout, Gen_Options, usage, .Unix)
+	}
+}
+
 // Runs the command line args (args[0] the program's name): parses it and,
 // unless it asks for the usage or is wrong, decodes the file it names and
 // writes the dump to stdout. Messages go to stderr. Returns the exit code:
 // 0 on success and after --help, 1 when the format cannot be loaded or the
 // file read or decoded, or the output written, and 2 on a usage error.
 execute :: proc(args: []string, stdout, stderr: io.Writer) -> (exit_code: int) {
+	if len(args) > 1 && args[1] == "gen" do return gen(filepath.base(args[0]), args[2:], stdout, stderr)
 	opts, dump, params, limits, usage_exit, ok := parse_args(args, stdout, stderr)
 	if !ok do return usage_exit
 	return run(opts.schema, opts.file, opts.import_path, dump, opts.offsets, params, limits, stdout, stderr)

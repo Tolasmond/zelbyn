@@ -5,7 +5,6 @@ import dat "../data"
 import fld "../field"
 import mdata "../metadata"
 import "base:intrinsics"
-import "core:math"
 import "core:slice"
 import "core:unicode/utf8"
 
@@ -905,22 +904,11 @@ eval_binary_other :: proc(d: ^Decoder, op: mdata.Binary_Op, x, y: Eval_Value) ->
 	panic("eval: invalid operator on strings")
 }
 
-// The code points of s from from up to to (mdata.Substring), a view of s.
+// The code points of s from from up to to (mdata.Substring), a view of s,
+// as data.substring gives them.
 @(private = "file", require_results)
 substring :: proc(s: string, from, to: int) -> (v: Eval_Value, err: dat.Read_Error) {
-	if from < 0 || to < 0 do return nil, .Index_Out_Of_Range
-	if to <= from do return "", .None
-	start, end := len(s), len(s)
-	n := 0
-	for _, i in s {
-		if n == from do start = i
-		if n == to {
-			end = i
-			break
-		}
-		n += 1
-	}
-	return s[start:end], .None
+	return dat.substring(s, from, to)
 }
 
 // l + r, a new string in the tree's arena.
@@ -961,57 +949,30 @@ as_float :: proc(v: Eval_Value) -> (f: f64, is_number: bool) {
 	return
 }
 
-// The integer part of f, rounded toward zero, an int or a u64:
-// Integer_Overflow when it is beyond min(int) to max(u64), or f is not a
-// number.
+// The integer part of f, rounded toward zero, an int or a u64, as
+// data.float_to_int gives it: Integer_Overflow when it is beyond min(int)
+// to max(u64), or f is not a number.
 @(private = "file", require_results)
 float_to_int :: proc(f: f64) -> (v: Eval_Value, err: dat.Read_Error) {
-	t := math.trunc(f)
-	// -2^63 fits, and so does any below 2^64; NaN fails both
-	if !(t >= -9223372036854775808.0 && t < 18446744073709551616.0) do return nil, .Integer_Overflow
-	if t >= 9223372036854775808.0 do return u64(t), .None
-	return int(t), .None
+	return from_wide(dat.float_to_int(f) or_return)
 }
 
-// The decimal digits of n, with a - when it is negative, in the tree's
-// arena: like a string that + makes, it lasts as long as the tree.
+// The decimal digits of n, with a - when it is negative (data.int_digits),
+// in the tree's arena: like a string that + makes, it lasts as long as the
+// tree.
 @(private = "file")
 int_to_string :: proc(d: ^Decoder, n: i128) -> (v: Eval_Value, err: dat.Read_Error) {
-	buf: [20]byte // the digits of min(int), and its -, or of max(u64)
-	i := len(buf)
-	u := u64(n < 0 ? -n : n)
-	for {
-		i -= 1
-		buf[i] = '0' + byte(u % 10)
-		u /= 10
-		if u == 0 do break
-	}
-	if n < 0 {
-		i -= 1
-		buf[i] = '-'
-	}
-	out := tree_make(d, byte, len(buf) - i) or_return
-	copy(out, buf[i:])
+	buf: [20]byte
+	digits := dat.int_digits(&buf, n)
+	out := tree_make(d, byte, len(digits)) or_return
+	copy(out, digits)
 	return string(out), .None
 }
 
-// The decimal integer s is, with an optional + or -: Invalid_Number when it
-// is not one, and Integer_Overflow when it is beyond min(int) to max(u64),
-// as any other integer is.
+// The decimal integer s is, with an optional + or -, as data.string_to_int
+// reads it: Invalid_Number when it is not one, and Integer_Overflow when it
+// is beyond min(int) to max(u64), as any other integer is.
 @(private = "file", require_results)
 string_to_int :: proc(s: string) -> (v: Eval_Value, err: dat.Read_Error) {
-	digits := s
-	negative := false
-	if len(digits) > 0 && (digits[0] == '-' || digits[0] == '+') {
-		negative = digits[0] == '-'
-		digits = digits[1:]
-	}
-	if len(digits) == 0 do return nil, .Invalid_Number
-	n: i128
-	for c in transmute([]byte)digits {
-		if c < '0' || c > '9' do return nil, .Invalid_Number
-		// once beyond max(u64), n stays beyond it, and so within an i128
-		if n <= i128(max(u64)) do n = n * 10 + i128(c - '0')
-	}
-	return from_wide(negative ? -n : n)
+	return from_wide(dat.string_to_int(s) or_return)
 }

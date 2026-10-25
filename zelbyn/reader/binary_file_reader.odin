@@ -5,10 +5,7 @@ import dat "../data"
 import fld "../field"
 import mdata "../metadata"
 import "base:runtime"
-import bts "core:bytes"
-import "core:compress/zlib"
 import "core:os"
-import "core:slice"
 
 // What a decode may take, so that every input either decodes or fails with
 // the limit it reached, Memory_Limit or Step_Limit, at the offset and path
@@ -914,66 +911,21 @@ element_bytes :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) 
 }
 
 // The bytes of an element with process: zlib, read at start, decompressed
-// into the tree's arena, which also holds what decompressing allocates.
-// Not inlined: only fields with process call it.
+// into the tree's arena, which also holds what decompressing allocates, and
+// is bounded by Limits.max_memory, which ends a stream that decompresses
+// to more than it allows. Not inlined: only fields with process call it.
 @(private = "file", require_results)
 process_bytes :: #force_no_inline proc(d: ^Decoder, raw: []byte, start: int) -> (processed: []byte, err: dat.Read_Error) {
-	// what inflating allocates is bounded by Limits.max_memory, which ends
-	// a stream that decompresses to more than it allows
-	recorder := Failure_Recorder{allocator = arn.arena_allocator(d.arena)}
-	allocator := runtime.Allocator{failure_recorder_proc, &recorder}
-	buf: bts.Buffer
-	bts.buffer_init_allocator(&buf, 0, max(4 * len(raw), 64), allocator)
-	inflate_err: zlib.Error
-	{
-		context.allocator = allocator
-		context.temp_allocator = allocator
-		inflate_err = zlib.inflate(raw, &buf)
-	}
-	// the error's path is in the context's allocator; inflate reports some
-	// allocations that fail as another error
-	if _, out_of_memory := inflate_err.(runtime.Allocator_Error); out_of_memory || recorder.failed do return nil, fail(d, .Memory_Limit, start)
-	if inflate_err != nil do return nil, fail(d, .Decompression_Failed, start)
-	return bts.buffer_to_bytes(&buf), .None
-}
-
-// An allocator, as process_bytes gives inflate the tree's arena, that
-// records whether an allocation through it failed for want of memory.
-@(private = "file")
-Failure_Recorder :: struct {
-	allocator: runtime.Allocator,
-	failed:    bool,
-}
-
-@(private = "file")
-failure_recorder_proc :: proc(
-	allocator_data: rawptr,
-	mode: runtime.Allocator_Mode,
-	size, alignment: int,
-	old_memory: rawptr,
-	old_size: int,
-	loc := #caller_location,
-) -> (
-	data: []byte,
-	err: runtime.Allocator_Error,
-) {
-	r := (^Failure_Recorder)(allocator_data)
-	data, err = r.allocator.procedure(r.allocator.data, mode, size, alignment, old_memory, old_size, loc)
-	if err == .Out_Of_Memory do r.failed = true
-	return
+	processed, err = dat.inflate(raw, d.allocator)
+	if err != .None do return nil, fail(d, err, start)
+	return processed, .None
 }
 
 // bytes without node's pad_right at their end, and cut at its terminator.
 @(private = "file")
 trim_bytes :: proc(node: ^mdata.Node, bytes: []byte) -> []byte {
-	bytes := bytes
-	if pad, padded := node.pad_right.?; padded {
-		for len(bytes) > 0 && bytes[len(bytes) - 1] == pad do bytes = bytes[:len(bytes) - 1]
-	}
-	if t, terminated := node.terminator.?; terminated {
-		if i, found := slice.linear_search(bytes, t.value); found do bytes = bytes[:i + int(t.include)]
-	}
-	return bytes
+	t, terminated := node.terminator.?
+	return dat.trim(bytes, node.pad_right, terminated ? t.value : nil, t.include)
 }
 
 // Reads an element of node, a bit type.
