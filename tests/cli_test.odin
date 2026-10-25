@@ -132,6 +132,7 @@ cli_command_line :: proc(t: ^testing.T) {
 
 	cases := []Cli_Case {
 		{"help", {"--help"}, 0, "--param <string>, multiple", "", false},
+		{"help names gen", {"--help"}, 0, "Or: zelbyn gen <schema> --out <dir>", "", false},
 		{"no arguments", {}, 2, "", "Usage:", false},
 		{"an unknown flag", {"SCHEMA", "INPUT", "--bogus"}, 2, "", "Usage:", false},
 		{"a bad --dump", {"SCHEMA", "INPUT", "--dump", "xml"}, 2, "", `error: --dump must be tree or json, not "xml"`, false},

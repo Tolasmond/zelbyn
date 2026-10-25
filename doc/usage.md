@@ -124,7 +124,7 @@ error: Not_Equal at 0x00000000 in png[0].magic[0]: read <8 bytes> 6e 6f 74 20 61
 zelbyn gen <schema.ksy> --out <dir> [--import-path dirs] [--package name] [--runtime path]
 ```
 
-Writes Odin source that decodes the schema's format, for a project to build with its own code: a package of one file, `<dir>/<package>.odin`, where `<package>` is the schema's `meta` `id` unless `--package` names another. `--out` is made if it does not exist, and `--import-path` is as for decoding. It exits 0 on success and after `--help`, 1 when the schema cannot be loaded or the code cannot be generated or written, and 2 on a usage error. Every schema that zelbyn compiles can be generated, and the code builds with the Odin release zelbyn is built with.
+Writes Odin source that decodes the schema's format, for a project to build with its own code: a package of one file, `<dir>/<package>.odin`, where `<package>` is the schema's `meta` `id` (followed by `_` when it is an Odin keyword) unless `--package` names another, which must be an Odin identifier. `--out` is made if it does not exist, and `--import-path` is as for decoding. It exits 0 on success and after `--help`, 1 when the schema cannot be loaded or the code cannot be generated or written, and 2 on a usage error. Every schema that zelbyn compiles can be generated, and the code builds with the Odin release zelbyn is built with.
 
 ```
 build/zelbyn gen ../kaitai_struct_formats/image/png.ksy --out app/png --import-path ../kaitai_struct_formats

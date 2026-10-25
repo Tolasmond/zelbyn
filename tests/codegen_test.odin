@@ -192,6 +192,8 @@ cli_gen :: proc(t: ^testing.T) {
 		{"no --out", {"gen", schema}, 2, "", "Usage:"},
 		{"no schema", {"gen", "--out", out}, 2, "", "Usage:"},
 		{"a schema error", {"gen", bad, "--out", out}, 1, "", ":5:11: Invalid: a: unknown type nope"},
+		{"a package that is no identifier", {"gen", schema, "--out", out, "--package", "my-pkg"}, 2, "", `error: --package must be an Odin identifier, not "my-pkg"`},
+		{"a package that is a keyword", {"gen", schema, "--out", out, "--package", "map"}, 2, "", `error: --package must be an Odin identifier, not "map"`},
 		{"generated", {"gen", schema, "--out", out}, 0, "", ""},
 		{"named", {"gen", schema, "--out", out, "--package", "smp", "--runtime", "vendor:data"}, 0, "", ""},
 	}

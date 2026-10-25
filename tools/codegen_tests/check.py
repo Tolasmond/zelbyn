@@ -17,12 +17,13 @@ the same dump, or the same error at the same offset and path, with the same
 values shown.
 
 Decodes that reach a limit of the decoder, which generated code does not
-have (doc/usage.md, "Generating code"), are not recorded; nor are those of
-plans that a test builds by hand, without the types of a schema, which the
-generator cannot write code for; tests/helpers.odin lists the latter in
-<dir>/not_generated.txt, which this prints.
+have (doc/usage.md, "Generating code"), are not recorded. Nor is a decode
+whose plan the generator cannot write code for, which tests/helpers.odin
+lists in <dir>/not_generated.txt, and this prints and fails on: every plan
+should have code, those that the tests build by hand too.
 
-Exits 1 if the tests fail, the program does not build, or a case differs.
+Exits 1 if the tests fail, a plan has no code, the program does not build,
+or a case differs.
 --keep DIR records in DIR rather than a temporary directory.
 """
 
@@ -122,10 +123,11 @@ def main():
             sys.exit('the tests failed while recording')
 
         not_generated = os.path.join(record, 'not_generated.txt')
+        skipped = []
         if os.path.isfile(not_generated):
             with open(not_generated) as f:
                 skipped = sorted(set(f.read().splitlines()))
-            print('%d plans that tests build by hand have no code:' % len(skipped))
+            print('%d plans have no code:' % len(skipped))
             for line in skipped:
                 print('  ' + line)
 
@@ -171,7 +173,7 @@ def main():
                     break
             print('DIFFERS: %s case %d\n%s' % (name, n, message))
         print('%d packages; %d of %d decodes agree' % (len(packages), len(cases) - differ, len(cases)))
-    sys.exit(1 if differ else 0)
+    sys.exit(1 if differ or skipped else 0)
 
 
 if __name__ == '__main__':

@@ -155,10 +155,11 @@ record_count: int
 // generated from the plan, once, in <dir>/<name>, named for the hash of its
 // code, and in that directory's cases, the input, the arguments as the
 // Odin literal of the package's Args, and the result, as the program
-// check.py builds writes it. A decode that reaches one of the decoder's limits, which generated
-// code does not have, or whose arguments are not of their params' types, is
-// not recorded; nor is one whose plan the generator cannot write code for,
-// which is listed in <dir>/not_generated.txt.
+// check.py builds writes it. A decode that reaches one of the decoder's
+// limits, which generated code does not have, or whose arguments are not
+// of their params' types, is not recorded; nor is one whose plan the
+// generator cannot write code for, which is listed in
+// <dir>/not_generated.txt, for check.py to fail on.
 @(private = "file")
 record_decode :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, args: []fld.Value) {
 	#partial switch d.err.kind {
@@ -174,8 +175,8 @@ record_decode :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, args: [
 	context.allocator = virtual.arena_allocator(&arena)
 	context.temp_allocator = context.allocator
 
-	// named by the hash of the code generated with no name, as a recording
-	// holds many packages, which check.py builds into one program
+	// named by the hash of the code generated with a name of its own, as a
+	// recording holds many packages, which check.py builds into one program
 	unnamed, err := codegen.generate(ff, {package_name = "p", runtime = "zelbyn:data"}, context.temp_allocator)
 	if err.message != "" {
 		path := fmt.tprintf("%s/not_generated.txt", CODEGEN_RECORD)

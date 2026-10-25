@@ -34,6 +34,9 @@ Options :: struct {
 // small file, even when it is not given.
 PARAM_USAGE :: "\t--param <string>, multiple   | An argument for a param of the schema's top-level type, name=value: an integer (decimal, or 0x, 0o or 0b), true or false, hex bytes (0a1b), also for a user type, which they are read as, or the text of a str. Give one for each param."
 
+// The line of the usage that names zelbyn gen, which has a usage of its own.
+GEN_USAGE :: "Or: %s gen <schema> --out <dir>, which writes Odin code that decodes the schema; %s gen --help gives its flags."
+
 
 Dump_Kind :: enum {
 	Tree,
@@ -69,9 +72,10 @@ parse_args :: proc(args: []string, stdout, stderr: io.Writer) -> (opts: Options,
 	params = given[:]
 
 	if err := flags.parse(&opts, rest[:], .Unix, allocator = context.temp_allocator); err != nil {
-		print_flags_error(stdout, stderr, err, program)
+		print_flags_error(stdout, stderr, err, program, Options)
 		if _, is_help := err.(flags.Help_Request); is_help {
 			fmt.wprintln(stdout, PARAM_USAGE)
+			fmt.wprintfln(stdout, GEN_USAGE, program, program)
 			return opts, dump, params, limits, 0, false
 		}
 
@@ -118,10 +122,11 @@ parse_args :: proc(args: []string, stdout, stderr: io.Writer) -> (opts: Options,
 	return opts, dump, params, limits, 0, true
 }
 
-// Writes err, from flags.parse, as flags.print_errors does, but to stderr,
-// or after --help, the usage of Options to stdout: print_errors writes to
-// the process's own. Options has no file to open, so no Open_File_Error.
-print_flags_error :: proc(stdout, stderr: io.Writer, err: flags.Error, program: string) {
+// Writes err, from flags.parse of options of type T, as flags.print_errors
+// does, but to stderr, or after --help, the usage of T to stdout:
+// print_errors writes to the process's own. Neither Options nor Gen_Options
+// has a file to open, so no Open_File_Error.
+print_flags_error :: proc(stdout, stderr: io.Writer, err: flags.Error, program: string, $T: typeid) {
 	switch e in err {
 	case flags.Parse_Error:
 		fmt.wprintfln(stderr, "[%T.%v] %s", e, e.reason, e.message)
@@ -130,14 +135,16 @@ print_flags_error :: proc(stdout, stderr: io.Writer, err: flags.Error, program: 
 	case flags.Validation_Error:
 		fmt.wprintfln(stderr, "[%T] %s", e, e.message)
 	case flags.Help_Request:
-		flags.write_usage(stdout, Options, program, .Unix)
+		flags.write_usage(stdout, T, program, .Unix)
 	}
 }
 
-// Writes the usage of the command line to w: that of Options, then --param.
+// Writes the usage of the command line to w: that of Options, then --param
+// and zelbyn gen.
 write_usage :: proc(w: io.Writer, program: string) {
 	flags.write_usage(w, Options, program, .Unix)
 	fmt.wprintln(w, PARAM_USAGE)
+	fmt.wprintfln(w, GEN_USAGE, program, program)
 }
 
 // The options of zelbyn gen, which writes Odin code that decodes the schema.
@@ -150,15 +157,21 @@ Gen_Options :: struct {
 }
 
 // Runs zelbyn gen, args being what follows gen: writes the package that
-// decodes the schema. Returns the exit code: 0 on success and after --help,
-// 1 when the format cannot be loaded or the code written, and 2 on a usage
-// error.
+// decodes the schema, as <out>/<package>.odin. Returns the exit code: 0 on
+// success and after --help, 1 when the format cannot be loaded or the code
+// generated or written, and 2 on a usage error, a --package that is not an
+// Odin identifier among them.
 gen :: proc(program: string, args: []string, stdout, stderr: io.Writer) -> int {
 	opts: Gen_Options
 	usage := fmt.tprintf("%s gen", program)
 	if err := flags.parse(&opts, args, .Unix, allocator = context.temp_allocator); err != nil {
-		print_gen_error(stdout, stderr, err, usage)
+		print_flags_error(stdout, stderr, err, usage, Gen_Options)
 		if _, is_help := err.(flags.Help_Request); is_help do return 0
+		flags.write_usage(stderr, Gen_Options, usage, .Unix)
+		return 2
+	}
+	if opts.package_name != "" && codegen.field_name(opts.package_name) != opts.package_name {
+		fmt.wprintfln(stderr, "error: --package must be an Odin identifier, not %q", opts.package_name)
 		flags.write_usage(stderr, Gen_Options, usage, .Unix)
 		return 2
 	}
@@ -176,7 +189,7 @@ gen :: proc(program: string, args: []string, stdout, stderr: io.Writer) -> int {
 		return 1
 	}
 
-	name := opts.package_name != "" ? opts.package_name : file_format.root.ref_name
+	name := opts.package_name != "" ? opts.package_name : codegen.field_name(file_format.root.ref_name)
 	if err := os.make_directory_all(opts.out); err != nil && !os.is_dir(opts.out) {
 		fmt.wprintfln(stderr, "error: cannot make %s: %v", opts.out, err)
 		return 1
@@ -189,26 +202,12 @@ gen :: proc(program: string, args: []string, stdout, stderr: io.Writer) -> int {
 	return 0
 }
 
-// As print_flags_error, for zelbyn gen.
-@(private = "file")
-print_gen_error :: proc(stdout, stderr: io.Writer, err: flags.Error, usage: string) {
-	switch e in err {
-	case flags.Parse_Error:
-		fmt.wprintfln(stderr, "[%T.%v] %s", e, e.reason, e.message)
-	case flags.Open_File_Error:
-		fmt.wprintfln(stderr, "[%T#%i] Unable to open %q", e, e.errno, e.filename)
-	case flags.Validation_Error:
-		fmt.wprintfln(stderr, "[%T] %s", e, e.message)
-	case flags.Help_Request:
-		flags.write_usage(stdout, Gen_Options, usage, .Unix)
-	}
-}
-
 // Runs the command line args (args[0] the program's name): parses it and,
 // unless it asks for the usage or is wrong, decodes the file it names and
-// writes the dump to stdout. Messages go to stderr. Returns the exit code:
-// 0 on success and after --help, 1 when the format cannot be loaded or the
-// file read or decoded, or the output written, and 2 on a usage error.
+// writes the dump to stdout, or with gen first, runs zelbyn gen (gen).
+// Messages go to stderr. Returns the exit code: 0 on success and after
+// --help, 1 when the format cannot be loaded or the file read or decoded,
+// or the output written, and 2 on a usage error.
 execute :: proc(args: []string, stdout, stderr: io.Writer) -> (exit_code: int) {
 	if len(args) > 1 && args[1] == "gen" do return gen(filepath.base(args[0]), args[2:], stdout, stderr)
 	opts, dump, params, limits, usage_exit, ok := parse_args(args, stdout, stderr)

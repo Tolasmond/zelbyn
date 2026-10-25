@@ -361,8 +361,8 @@ ada_case :: proc(s: string) -> string {
 }
 
 // The name generated code gives a field, a param or a member of Args whose
-// id in the schema is name: the id, or with _ after it when it is one of
-// Odin's keywords.
+// id in the schema is name, and the package of a schema whose meta id it
+// is: the id, as an Odin identifier (identifier).
 field_name :: proc(name: string) -> string {
 	return identifier(name)
 }
