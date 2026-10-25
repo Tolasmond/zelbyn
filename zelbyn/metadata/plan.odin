@@ -27,6 +27,7 @@ Node :: struct {
 	switch_on:       ^Switch,           // Set only: the type of each instance is chosen by a value; nil when it is fixed
 	order_switch:    ^Order_Switch,     // Set only: of a type whose endian is a switch-on, compiled little-endian; it chooses, as each instance is read, this set or the one compiled big-endian; nil otherwise
 	parent_up:       int,               // Set only: Kaitai's parent: the _parent of its instances is the instance this many levels out from the one each is read in, rather than that one (0)
+	type_info:       ^Type_Info,        // Set only: the type of the schema its children, instances and params are compiled from, for a param that of its argument's set; nil for a switch-on field, whose cases have theirs
 	recursive:       ^Node,             // Set only: for a field of a type inside the same type (a recursive type), the set of that type that encloses it, whose children, instances, parse instances, params and slot count it is given, once that set is compiled (members); nil otherwise
 	instances:       []^Value_Instance, // Set only: Kaitai's value instances, which expressions can refer to
 	parse_instances: []^Node,           // Set only: Kaitai's instances with pos, each read at an offset (see pos)
@@ -39,6 +40,15 @@ Node :: struct {
 	keeps_stream:    bool,              // Set only: an io expression, or _io in a value instance of the set, refers to the stream of its instances, which the decoder then keeps, as it is once each is read (Io, Io_Pos)
 	bits:            []Bit_Field,       // integer types only: packed subfields, decoded from each element
 	valid:           Valid,             // checked on every element; nil when there is no check
+}
+
+// A type of a schema, which sets are compiled from: the same for every set
+// compiled from one type, as each field of the type has its own (Node), so
+// that a generator (package codegen) can give the type one name for all of
+// them.
+Type_Info :: struct {
+	name:  string,     // as the schema declares it: its key in types, or the meta id of a schema's top-level type
+	outer: ^Type_Info, // the type it is declared in; nil for a schema's top-level type
 }
 
 // A value given in the schema, as the type of the field it belongs to: one
@@ -270,20 +280,10 @@ Switch_Case :: struct {
 // are in its own slot of the set instance: those of the parse instances
 // come first, in order, before the children's.
 
-// The encoding of a String's bytes. None is ASCII or UTF-8, whose bytes
-// are kept as they are, so that the tree holds a view of the input; the
-// others are decoded, into UTF-8 (reader.decode_text).
-Encoding :: enum u8 {
-	None,
-	UTF_16LE,
-	UTF_16BE,
-	UTF_32LE,
-	UTF_32BE,
-	ISO_8859_1,
-	Windows_1251,
-	Windows_1252,
-	IBM437,
-}
+// The encoding of a String's bytes (data.Encoding). None is ASCII or
+// UTF-8, whose bytes are kept as they are, so that the tree holds a view of
+// the input; the others are decoded, into UTF-8 (data.decode_text).
+Encoding :: dat.Encoding
 
 // The set instance was read as: node itself, or for a switch-on field the
 // case it records.

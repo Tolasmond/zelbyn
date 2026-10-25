@@ -1,12 +1,19 @@
 package tests
 
+import "../zelbyn/codegen"
+import dmp "../zelbyn/dump"
 import fld "../zelbyn/field"
 import ksy "../zelbyn/ksy"
 import mdata "../zelbyn/metadata"
 import rdr "../zelbyn/reader"
 import "base:intrinsics"
 import "core:fmt"
+import "core:hash"
+import "core:mem/virtual"
+import "core:os"
 import "core:reflect"
+import "core:strings"
+import "core:sync"
 import "core:testing"
 
 // A schema with the shapes the decoder's tests need, none of them from a
@@ -122,10 +129,139 @@ Decoded :: struct {
 // (doc/arch.md, "Memory and ownership").
 decode_bytes :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, spans := false, args: []fld.Value = nil) {
 	d.consumed, d.err = rdr.read_from_bytes(data, ff, &d.tree, spans, args)
+	when CODEGEN_RECORD != "" do record_decode(ff, data, d, args)
 }
 
 decode_file :: proc(ff: ^mdata.File_Format, path: string, d: ^Decoded, spans := false) {
 	d.consumed, d.err = rdr.read(path, ff, &d.tree, spans)
+	when CODEGEN_RECORD != "" {
+		data, err := os.read_entire_file(path, context.temp_allocator)
+		if err == nil do record_decode(ff, data, d, nil)
+	}
+}
+
+// A directory that every decode of decode_bytes and decode_file is
+// recorded in, for tools/codegen_tests/check.py, which decodes each input
+// again with the code generated from its plan and compares the results:
+// -define:ZELBYN_CODEGEN_RECORD=<dir>. "" records nothing.
+CODEGEN_RECORD :: #config(ZELBYN_CODEGEN_RECORD, "")
+
+@(private = "file")
+record_lock: sync.Mutex
+@(private = "file")
+record_count: int
+
+// Records the decode of data with ff, whose result d has: the package
+// generated from the plan, once, in <dir>/<name>, named for the hash of its
+// code, and in that directory's cases, the input, the arguments as the
+// Odin literal of the package's Args, and the result, as the program
+// check.py builds writes it. A decode that reaches one of the decoder's
+// limits, which generated code does not have, or whose arguments are not
+// of their params' types, is not recorded; nor is one whose plan the
+// generator cannot write code for, which is listed in
+// <dir>/not_generated.txt, for check.py to fail on.
+@(private = "file")
+record_decode :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, args: []fld.Value) {
+	#partial switch d.err.kind {
+	case .Too_Deep, .Memory_Limit, .Step_Limit, .File_Read_Failed, .Invalid_Arguments:
+		return
+	}
+	sync.mutex_lock(&record_lock)
+	defer sync.mutex_unlock(&record_lock)
+	// none of it in the test's allocators, which the memory tests check
+	arena: virtual.Arena
+	if virtual.arena_init_growing(&arena) != nil do panic("recording: no memory")
+	defer virtual.arena_destroy(&arena)
+	context.allocator = virtual.arena_allocator(&arena)
+	context.temp_allocator = context.allocator
+
+	// named by the hash of the code generated with a name of its own, as a
+	// recording holds many packages, which check.py builds into one program
+	unnamed, err := codegen.generate(ff, {package_name = "p", runtime = "zelbyn:data"}, context.temp_allocator)
+	if err.message != "" {
+		path := fmt.tprintf("%s/not_generated.txt", CODEGEN_RECORD)
+		line := fmt.tprintf("%s: %s\n", ff.name, err.message)
+		f, open_err := os.open(path, {.Write, .Create, .Append})
+		if open_err == nil {
+			_, _ = os.write_string(f, line)
+			_ = os.close(f)
+		}
+		delete(err.message)
+		return
+	}
+	name := fmt.tprintf("p%016x", hash.fnv64a(transmute([]byte)unnamed))
+	dir := fmt.tprintf("%s/%s", CODEGEN_RECORD, name)
+	if !os.exists(dir) {
+		code, _ := codegen.generate(ff, {package_name = name, runtime = "zelbyn:data"}, context.temp_allocator)
+		if e := os.make_directory_all(fmt.tprintf("%s/cases", dir)); e != nil do panic(fmt.tprintf("recording in %s: %v", dir, e))
+		record_file(fmt.tprintf("%s/%s.odin", dir, name), code)
+	}
+
+	// the arguments, as each param's type has them in Args
+	literal := strings.builder_make(context.temp_allocator)
+	strings.write_byte(&literal, '{')
+	names := codegen.args_names(ff.root)
+	for _, k in ff.root.params {
+		if k >= len(args) do return
+		if k > 0 do strings.write_string(&literal, ", ")
+		fmt.sbprintf(&literal, "%s = ", names[k])
+		switch v in args[k] {
+		case i64:
+			fmt.sbprintf(&literal, "%d", v)
+		case bool:
+			fmt.sbprintf(&literal, "%v", v)
+		case []byte:
+			strings.write_byte(&literal, '{')
+			for x, i in v do fmt.sbprintf(&literal, i > 0 ? ", %d" : "%d", x)
+			strings.write_byte(&literal, '}')
+		case string:
+			fmt.sbprintf(&literal, "%q", v)
+		case i8, i16, i32, u8, u16, u32, u64, f32, f64, ^fld.Instance, []fld.Value:
+			return
+		}
+	}
+	strings.write_byte(&literal, '}')
+	if len(args) != len(ff.root.params) do return
+
+	record_count += 1
+	n := record_count
+	record_file(fmt.tprintf("%s/cases/%d.bin", dir, n), string(data))
+	record_file(fmt.tprintf("%s/cases/%d.args", dir, n), strings.to_string(literal))
+	record_file(fmt.tprintf("%s/cases/%d.want", dir, n), decode_result(ff, d))
+}
+
+@(private = "file")
+record_file :: proc(path, data: string) {
+	if e := os.write_entire_file(path, data); e != nil do panic(fmt.tprintf("recording %s: %v", path, e))
+}
+
+// The result of a decode as the program that tools/codegen_tests/check.py
+// builds writes it: the text dump, or the error, as zelbyn writes it, on a
+// line of its own.
+@(private = "file")
+decode_result :: proc(ff: ^mdata.File_Format, d: ^Decoded) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	if d.err.kind == .None {
+		_ = dmp.write_text(strings.to_writer(&b), ff, &d.tree)
+		return strings.to_string(b)
+	}
+	err := d.err
+	fmt.sbprintf(&b, "error: %v at 0x%08X in %s", err.kind, err.offset, err.path)
+	if err.value != "" do fmt.sbprintf(&b, ": read %s", err.value)
+	if err.expected != "" {
+		strings.write_string(&b, err.value != "" ? ", expected " : ": expected ")
+		#partial switch err.kind {
+		case .Less_Than_Min:
+			strings.write_string(&b, "at least ")
+		case .Greater_Than_Max:
+			strings.write_string(&b, "at most ")
+		case .Not_Any_Of, .Not_In_Enum:
+			strings.write_string(&b, "one of ")
+		}
+		strings.write_string(&b, err.expected)
+	}
+	strings.write_byte(&b, '\n')
+	return strings.to_string(b)
 }
 
 destroy_decoded :: proc(d: ^Decoded) {

@@ -331,6 +331,7 @@ own_enum :: proc(td: ^Type_Def, name: string) -> ^expr.Enum {
 // decoder and the dumps need not look for them.
 @(private)
 compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^mdata.Node, arg_sets: []^mdata.Node = nil) -> bool {
+	set.type_info = type_info(c, td)
 	if td.compiling != nil {
 		set.recursive = td.compiling
 		st := set_type(c, td.compiling)
@@ -391,6 +392,7 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 			// type compiled elsewhere, whose members it has
 			if p.type == .Set {
 				copy_members(params[i], mdata.members(arg_sets[i]))
+				params[i].type_info = arg_sets[i].type_info
 				append(&c.param_args, Param_Arg{params[i], mdata.members(arg_sets[i])})
 			}
 		}
@@ -449,6 +451,18 @@ compile_fields :: proc(c: ^Compiler, td: ^Type_Def, set: ^mdata.Node, chain: []^
 	st.done = true
 	for field in st.reused_by do copy_members(field, set)
 	return true
+}
+
+// The Type_Info of td, and of the types it is declared in, made the first
+// time a set is compiled from it.
+@(private = "file")
+type_info :: proc(c: ^Compiler, td: ^Type_Def) -> ^mdata.Type_Info {
+	if td.info == nil {
+		td.info = new(mdata.Type_Info, c.allocator)
+		td.info.name = td.name
+		if td.parent != nil do td.info.outer = type_info(c, td.parent)
+	}
+	return td.info
 }
 
 // Gives field, a field of a type inside a set of that type (Node.recursive),

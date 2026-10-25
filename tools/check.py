@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the checks a change must pass, as doc/development.md lists them.
 
-    python3 tools/check.py [--formats DIR] [--samples DIR] [--yaml-corpus] [--compare-tests]
+    python3 tools/check.py [--formats DIR] [--samples DIR] [--codegen] [--yaml-corpus] [--compare-tests]
 
 Run from the repository root. Needs Odin, the version that ODIN_VERSION
 names (another is warned of, not refused). Always run, in order:
@@ -12,6 +12,8 @@ names (another is warned of, not refused). Always run, in order:
     uses the most stack, with ODIN_TEST_FAIL_ON_BAD_MEMORY
   - odin check -vet -strict-style of tools/bench, tools/ksy_corpus and
     tools/yaml_corpus
+  - tools/codegen_tests/check.py: every decode of the tests again, with
+    the code generated from its schema
 
 and, only when asked, as each needs what the repository does not hold:
 
@@ -23,6 +25,10 @@ and, only when asked, as each needs what the repository does not hold:
                    gives, and Node.js, PyYAML and npm ci --prefix
                    tools/kaitai_compare. It fails today, on the two samples
                    doc/development.md names, so this script does too.
+  --codegen        with --formats, tools/codegen_corpus/check.py over DIR:
+                   the code of every schema generated and built, and with
+                   --samples, every sample decoded with it and compared
+                   with zelbyn's decode
   --yaml-corpus    with --formats, tools/yaml_corpus/compare.py over DIR;
                    needs PyYAML built with libyaml
   --compare-tests  tools/kaitai_compare/test_compare.py; needs Node.js,
@@ -63,11 +69,12 @@ def main():
     p = argparse.ArgumentParser(usage=__doc__)
     p.add_argument('--formats')
     p.add_argument('--samples')
+    p.add_argument('--codegen', action='store_true')
     p.add_argument('--yaml-corpus', action='store_true')
     p.add_argument('--compare-tests', action='store_true')
     args = p.parse_args()
-    if (args.samples or args.yaml_corpus) and not args.formats:
-        sys.exit('--samples and --yaml-corpus need --formats')
+    if (args.samples or args.codegen or args.yaml_corpus) and not args.formats:
+        sys.exit('--samples, --codegen and --yaml-corpus need --formats')
     if not os.path.isfile('main.odin'):
         sys.exit('run from the repository root')
 
@@ -90,12 +97,18 @@ def main():
         run('tests -debug', ['odin', 'test', 'tests', '-debug', '-out:' + tests] + TEST_DEFINES, results)
         for tool in ('tools/bench', 'tools/ksy_corpus', 'tools/yaml_corpus'):
             run('odin check ' + tool, ['odin', 'check', tool, '-vet', '-strict-style'], results)
+        run('codegen tests', [sys.executable, 'tools/codegen_tests/check.py'], results)
 
     if args.formats:
         cmd = [sys.executable, 'tools/ksy_corpus/check.py']
         if args.samples:
             cmd += ['--samples', args.samples]
         run('ksy corpus' + (' and samples' if args.samples else ''), cmd + [args.formats], results)
+    if args.codegen:
+        cmd = [sys.executable, 'tools/codegen_corpus/check.py']
+        if args.samples:
+            cmd += ['--samples', args.samples]
+        run('codegen corpus' + (' and samples' if args.samples else ''), cmd + [args.formats], results)
     if args.yaml_corpus:
         run('yaml corpus', [sys.executable, 'tools/yaml_corpus/compare.py', args.formats], results)
     if args.compare_tests:

@@ -1,6 +1,6 @@
 # Using zelbyn
 
-How to build and run zelbyn, what it writes, and the subset of Kaitai Struct it supports. Commands are run from the repository root.
+How to build and run zelbyn, what it writes, the Odin code it generates, and the subset of Kaitai Struct it supports. Commands are run from the repository root.
 
 ## Building
 
@@ -117,6 +117,69 @@ Decoding checks every value against its field's `contents` and `valid`. Set inst
 ```
 error: Not_Equal at 0x00000000 in png[0].magic[0]: read <8 bytes> 6e 6f 74 20 61 20 70 6e, expected <8 bytes> 89 50 4e 47 0d 0a 1a 0a
 ```
+
+## Generating code
+
+```
+zelbyn gen <schema.ksy> --out <dir> [--import-path dirs] [--package name] [--runtime path]
+```
+
+Writes Odin source that decodes the schema's format, for a project to build with its own code: a package of one file, `<dir>/<package>.odin`, where `<package>` is the schema's `meta` `id` (followed by `_` when it is an Odin keyword) unless `--package` names another, which must be an Odin identifier. `--out` is made if it does not exist, and `--import-path` is as for decoding. It exits 0 on success and after `--help`, 1 when the schema cannot be loaded or the code cannot be generated or written, and 2 on a usage error. Every schema that zelbyn compiles can be generated, and the code builds with the Odin release zelbyn is built with.
+
+```
+build/zelbyn gen ../kaitai_struct_formats/image/png.ksy --out app/png --import-path ../kaitai_struct_formats
+```
+
+The code imports one package of zelbyn's, `zelbyn/data`, its runtime: the reads, the bit reads, the text decoding, `process: zlib`, the integer operations and the checks that zelbyn's decoder uses too, so the two read every value alike, and the state of a decode. It imports only Odin's `core`. By default the import is `zelbyn:data`, the collection `zelbyn` being zelbyn's `zelbyn/` directory (`odin build app -collection:zelbyn=../zelbyn/zelbyn`); `--runtime` gives another import path, such as that of a copy of the directory in the project (`--runtime ../vendor/data`). It is under the MIT License in [LICENSE](../LICENSE), and contains code adapted from Kaitai Struct's C++ runtime, also MIT, whose notice is in [THIRD_PARTY.md](../THIRD_PARTY.md); a copy should keep both.
+
+### The generated package
+
+- **`read(data: []byte, args := Args{}) -> (root: ^T, err: dat.Parse_Error)`** decodes `data` as an instance of `T`, the struct of the schema's top-level type. For a schema and an input, it decodes the same values as zelbyn, and fails with the same error, at the same offset and path, with the same value and expected value shown, apart from the limits below. On error, `root` may be partly read. `err`'s path, value and expected value are allocated with `context.allocator`; `dat.destroy_parse_error` frees them.
+- **`write_text(w: io.Writer, root: ^T) -> io.Error`** writes `root` as zelbyn's text dump (`--dump tree`) writes it.
+- **`Args`** has a member for each param of the top-level type, as `--param` gives them: an `i64` for an integer type, a `bool`, `[]byte` for `bytes`, a `string` for `str`, and for a user type, the bytes that `read` reads an instance of it from, as a caller of Kaitai's runtimes makes one.
+- **A struct for each type** of the schema: the top-level type by its `meta` `id` in Ada_Case (`png` is `Png`), every other type by its path of types from there (`ihdr_chunk` is `Ihdr_Chunk`, `a::b` is `A_B`), and a type of an imported schema by its path from that schema's top-level type, that type's `id` first (`exif::exif_body` is `Exif_Exif_Body`). A name already taken, `Args` and `Maybe` among them, gets `_2`, `_3` and so on.
+
+A struct has the type's fields in order, each followed by its `-bits` fields, then its parse instances, then its params, each named by its `id` (an Odin keyword followed by `_`: `map_`, `in_`, `proc_`, and in a name that is no identifier, such as a `-bits` `-orig-id`, each character that cannot be in one made `_`). The type of each value is its field's: `u1`–`u8` are `u8`–`u64`, `s1`–`s8` `i8`–`i64`, `f4` and `f8` `f32` and `f64`, `b1` a `bool` and other bit types the least unsigned integer that holds them, `str` a `string`, a byte array `[]byte`, a field with an `enum` its integer, and a user type a pointer to its struct. A `switch-on` field's value is a union of its cases' types, and of `[]byte` for one with a `size` that no case chooses (`png.Chunk_Body`), or that type when they have only one. A field read at most once holds its value, or when it can have none, with an `if`, a `-peek`, or a `switch-on` with neither a `_` case nor a `size`, is a `Maybe`, or a pointer or a union that is then `nil`. A repeated field is a `[dynamic]` array of its values. A param holds its argument, an integer as an `i128`, as Kaitai's expressions range from -2^63 to 2^64 - 1. `_zr`, `_have` and `_read` are the decoder's: the set and `switch-on` case an instance was read as, and which fields have a value and which parse instances have been read.
+
+Value instances are evaluated as the decode needs them, as zelbyn evaluates them, and are not kept, so a program cannot use them once `read` returns: it computes what it needs from the fields.
+
+Strings and byte arrays are views of `data`, and of the bytes in `args`, except the strings decoded from an encoding other than ASCII and UTF-8, those made by expressions, and the bytes `process: zlib` decompresses. They, the instances and the arrays are allocated with `context.allocator`, with nothing to free them one by one, so an arena suits, freed when the program is done with the decode; the decoder's own records are in an arena of its own, freed when `read` returns.
+
+```odin
+import "core:fmt"
+import "core:mem/virtual"
+import "core:os"
+import "png"
+
+main :: proc() {
+	arena: virtual.Arena
+	if virtual.arena_init_growing(&arena) != nil do os.exit(1)
+	defer virtual.arena_destroy(&arena)
+	context.allocator = virtual.arena_allocator(&arena)
+
+	data, read_err := os.read_entire_file(os.args[1], context.allocator)
+	if read_err != nil do os.exit(1)
+	root, err := png.read(data)
+	if err.kind != .None {
+		fmt.eprintfln("error: %v at 0x%08X in %s", err.kind, err.offset, err.path)
+		os.exit(1)
+	}
+	fmt.println(root.ihdr.width, "x", root.ihdr.height)
+	for chunk in root.chunks {
+		if text, is_text := chunk.body.(^png.Text_Chunk); is_text do fmt.println(text.keyword, "=", text.text)
+	}
+}
+```
+
+### Limits that generated code leaves out
+
+Generated code has none of the decoder's limits on depth, memory and steps ([Limits](#limits)), and never fails with `Too_Deep` or `Step_Limit`:
+
+- **Depth.** Set instances, parse instances and expressions nest with native recursion, so an input that nests deeply enough, which only a type that contains itself allows, exhausts the stack, as Kaitai's runtimes do.
+- **Memory.** Nothing bounds what the tree takes: the values, instances and arrays, the strings that expressions make, and the bytes that `process: zlib` decompresses take what `context.allocator` gives. An allocation that fails is `Memory_Limit`, as the system's is in the decoder. As in the decoder, room for a count from the input is made in advance only for as many elements as there are bytes left.
+- **Steps.** A decode takes as long as its schema and input make it, such as a large `repeat-expr` count of elements that read nothing.
+
+A program that decodes untrusted input should limit its size, the nesting of a type that contains itself, or the time the decode takes, itself, or decode with zelbyn.
 
 ## Schemas
 

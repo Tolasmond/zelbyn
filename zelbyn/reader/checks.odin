@@ -87,12 +87,12 @@ fail_check :: proc(d: ^Decoder, kind: dat.Read_Error, offset: int, value: fld.Va
 		write_shown(&expected, scalar_value(kind == .Less_Than_Min ? c.min : c.max))
 	case mdata.Valid_Any_Of:
 		for x, i in c.values {
-			if !write_list_item(&expected, i) do break
+			if !dat.write_list_item(&expected, i) do break
 			write_shown(&expected, scalar_value(x))
 		}
 	case mdata.Valid_In_Enum:
 		for x, i in c.values {
-			if !write_list_item(&expected, i) do break
+			if !dat.write_list_item(&expected, i) do break
 			strings.write_int(&expected, x)
 		}
 	case mdata.Valid_Expr:
@@ -122,19 +122,6 @@ write_shown :: proc(b: ^strings.Builder, v: fld.Value) {
 	if fld.write_value(strings.to_writer(b), v, STRING_PREVIEW) != .None do resize(&b.buf, n)
 }
 
-// Starts item i of a list in b; false when it is past the first
-// LIST_PREVIEW, after ", ..." for the first of those.
-@(private = "file")
-write_list_item :: proc(b: ^strings.Builder, i: int) -> bool {
-	if i > LIST_PREVIEW do return false
-	if i > 0 do strings.write_string(b, ", ")
-	if i == LIST_PREVIEW {
-		strings.write_string(b, "...")
-		return false
-	}
-	return true
-}
-
 // Appends to b, as a list, the value of each operand that cond compares
 // _ with: eq, min and max compare _ with theirs (_ == x, _ >= x, _ <= x),
 // and any-of is an or of such comparisons. items is the number in b so
@@ -147,7 +134,7 @@ write_operands :: proc(d: ^Decoder, b: ^strings.Builder, cond: ^mdata.Expr, inde
 		return write_operands(d, b, x.left, index, element, items) && write_operands(d, b, x.right, index, element, items)
 	}
 	items^ += 1
-	if !write_list_item(b, items^ - 1) do return true
+	if !dat.write_list_item(b, items^ - 1) do return true
 	v, err := eval_check_operand(d, x.right, index, element)
 	if err != .None do return false
 	write_shown(b, eval_as_value(v))
@@ -272,9 +259,7 @@ bit_field_value :: proc(value: fld.Value, bit: mdata.Bit_Field) -> fld.Value {
 		panic("bit_field_value: not an integer")
 	}
 
-	width := uint(bit.high - bit.low + 1)
-	bits := raw >> uint(bit.low)
-	if width < 64 do bits &= (1 << width) - 1
+	bits := dat.bits_of(raw, bit.low, bit.high)
 
 	#partial switch bit.type {
 	case .Int8:

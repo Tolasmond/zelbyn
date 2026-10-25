@@ -1,7 +1,6 @@
 package metadata
 
 import dat "../data"
-import "base:intrinsics"
 
 // A node of a parsed expression (doc/arch.md, "expression: parsing,
 // resolution and direct forms", and in the plan, "Checks and expressions").
@@ -146,63 +145,51 @@ Binary :: struct {
 // integer operation, which fails with Integer_Overflow beyond it. A size,
 // count, offset or index must also fit an int, and an enum's values, as in
 // the official compiler, and a valid bound the type of its field.
-INT_MIN :: i128(min(int))
-INT_MAX :: i128(max(u64))
+INT_MIN :: dat.INT_MIN
+INT_MAX :: dat.INT_MAX
 
 // a op b, of two integers in the range of INT_MIN to INT_MAX, as every
-// integer operation is defined, by the evaluator and by the compiler when
-// it folds a constant: / and % round toward negative infinity, as in
-// Python and so Kaitai's Python runtime; a division by zero, a shift by a
-// negative amount or by 64 or more, and a result outside the range fail.
-// op is an arithmetic or bitwise operator, not a comparison.
+// integer operation is defined, by the evaluator, by the compiler when it
+// folds a constant, and by generated code, through the procedures of
+// package data: / and % round toward negative infinity, as in Python and so
+// Kaitai's Python runtime; a division by zero, a shift by a negative amount
+// or by 64 or more, and a result outside the range fail. op is an
+// arithmetic or bitwise operator, not a comparison.
 int_binary :: proc(op: Binary_Op, a, b: i128) -> (n: i128, err: dat.Read_Error) {
-	overflow: bool
 	#partial switch op {
 	case .Mul:
-		n, overflow = intrinsics.overflow_mul(a, b)
+		return dat.int_mul(a, b)
 	case .Add:
-		n = a + b
+		return dat.int_add(a, b)
 	case .Sub:
-		n = a - b
+		return dat.int_sub(a, b)
 	case .Div:
-		if b == 0 do return 0, .Division_By_Zero
-		n = a / b
-		if a % b != 0 && (a < 0) != (b < 0) do n -= 1
+		return dat.int_div(a, b)
 	case .Mod:
-		if b == 0 do return 0, .Division_By_Zero
-		n = b == -1 ? 0 : a %% b
+		return dat.int_mod(a, b)
 	case .Shl:
-		if b < 0 || b > 63 do return 0, .Invalid_Shift
-		// below 2^64 shifted by at most 63, within an i128
-		n = a << uint(b)
+		return dat.int_shl(a, b)
 	case .Shr:
-		if b < 0 || b > 63 do return 0, .Invalid_Shift
-		n = a >> uint(b)
+		return dat.int_shr(a, b)
 	case .And:
-		n = a & b
+		return dat.int_and(a, b)
 	case .Xor:
-		n = a ~ b
+		return dat.int_xor(a, b)
 	case .Or:
-		n = a | b
-	case:
-		panic("int_binary: not an arithmetic or bitwise operator")
+		return dat.int_or(a, b)
 	}
-	if overflow || n < INT_MIN || n > INT_MAX do return 0, .Integer_Overflow
-	return n, .None
+	panic("int_binary: not an arithmetic or bitwise operator")
 }
 
 // op a, -a or ~a, of an integer in the range, as int_binary is defined.
 int_unary :: proc(op: Unary_Op, a: i128) -> (n: i128, err: dat.Read_Error) {
 	#partial switch op {
 	case .Neg:
-		n = -a
+		return dat.int_neg(a)
 	case .Bit_Not:
-		n = ~a
-	case:
-		panic("int_unary: not - or ~")
+		return dat.int_not(a)
 	}
-	if n < INT_MIN || n > INT_MAX do return 0, .Integer_Overflow
-	return n, .None
+	panic("int_unary: not - or ~")
 }
 
 Ternary :: struct {
