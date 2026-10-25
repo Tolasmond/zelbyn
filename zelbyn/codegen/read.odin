@@ -24,12 +24,41 @@ decl :: proc(g: ^Generator, depth: int, format: string, args: ..any) {
 	write_line(&g.decls, depth, format, ..args)
 }
 
-@(private = "file")
+@(private)
 write_line :: proc(b: ^strings.Builder, depth: int, format: string, args: ..any) {
 	for _ in 0 ..< depth do strings.write_byte(b, '\t')
 	escaped, _ := strings.replace_all(format, "{", "{{", context.temp_allocator)
 	escaped, _ = strings.replace_all(escaped, "}", "}}", context.temp_allocator)
 	fmt.sbprintfln(b, escaped, ..args)
+}
+
+// Writes text as // comment lines of at most 76 characters, indented by
+// depth tabs; an empty line of text, between two \n, is an empty comment
+// line.
+@(private)
+write_comment :: proc(b: ^strings.Builder, depth: int, text: string) {
+	for paragraph, p in strings.split(text, "\n\n", context.temp_allocator) {
+		if p > 0 {
+			for _ in 0 ..< depth do strings.write_byte(b, '\t')
+			strings.write_string(b, "//\n")
+		}
+		width := 0
+		for word in strings.fields(paragraph, context.temp_allocator) {
+			if width > 0 && width + 1 + len(word) > 76 {
+				strings.write_byte(b, '\n')
+				width = 0
+			}
+			if width == 0 {
+				for _ in 0 ..< depth do strings.write_byte(b, '\t')
+				strings.write_string(b, "//")
+				width = 2
+			}
+			strings.write_byte(b, ' ')
+			strings.write_string(b, word)
+			width += 1 + len(word)
+		}
+		if width > 0 do strings.write_byte(b, '\n')
+	}
 }
 
 // A new name for a temporary of the procedure being written.
@@ -158,7 +187,7 @@ push_value :: proc(g: ^Generator, depth: int, f: ^Field, base, value: string) {
 @(private)
 write_set :: proc(g: ^Generator, w: Work) {
 	set := w.node
-	s := struct_of(g, set.type_info)
+	s := struct_of(g, type_of(g, set))
 	id := g.set_ids[set]
 	line(g, 0, "// Reads an instance of %s (set %d), which its parent holds.", s.name, id)
 	line(g, 0, "%s :: proc(d: ^dat.Decoder, self: ^%s) -> dat.Read_Error {", w.name, s.name)
@@ -197,7 +226,7 @@ write_set :: proc(g: ^Generator, w: Work) {
 @(private = "file")
 write_members :: proc(g: ^Generator, w: Work) {
 	set := w.node
-	s := struct_of(g, set.type_info)
+	s := struct_of(g, type_of(g, set))
 	line(g, 0, "%s :: proc(d: ^dat.Decoder, self: ^%s) -> dat.Read_Error {", w.name, s.name)
 	for c in set.children do line(g, 1, "%s(d, self) or_return", field_proc(g, c))
 	for p, k in set.parse_instances {
@@ -538,7 +567,7 @@ write_instance :: proc(g: ^Generator, w: Work) {
 // has a length or a terminator.
 @(private = "file")
 into_proc :: proc(g: ^Generator, node, set: ^mdata.Node, choice: int) -> string {
-	return need(g, {name = fmt.tprintf("read_into_%d_%d", id_of(g, node), g.set_ids[set]), write = write_into, node = node, expr = nil, k = choice, info = struct_of(g, set.type_info)}) if set in g.set_ids else ""
+	return need(g, {name = fmt.tprintf("read_into_%d_%d", id_of(g, node), g.set_ids[set]), write = write_into, node = node, expr = nil, k = choice, info = struct_of(g, type_of(g, set))}) if set in g.set_ids else ""
 }
 
 @(private = "file")
@@ -552,7 +581,7 @@ write_into :: proc(g: ^Generator, w: Work) {
 	} else {
 		set = node
 	}
-	t := struct_of(g, set.type_info)
+	t := struct_of(g, type_of(g, set))
 	line(g, 0, "%s :: proc(d: ^dat.Decoder, self: ^%s, index: int) -> dat.Read_Error {", w.name, s.name)
 	substream := node.length != nil || node.terminator != nil
 	if substream {

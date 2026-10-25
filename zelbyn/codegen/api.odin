@@ -11,10 +11,8 @@ import "core:strings"
 @(private)
 write_api :: proc(g: ^Generator) -> bool {
 	root := g.format.root
-	r := struct_of(g, root.type_info)
-	decl(g, 0, "// The arguments of the params of %s, the schema's top-level type: an", r.name)
-	decl(g, 0, "// integer, a bool, bytes or a string, as each param's type is, and for a")
-	decl(g, 0, "// user type, the bytes that read reads an instance of it from.")
+	r := struct_of(g, type_of(g, root))
+	write_comment(&g.decls, 0, fmt.tprintf("The arguments of the params of %s, the schema's top-level type: an integer, a bool, bytes or a string, as each param's type is, and for a user type, the bytes that read reads an instance of it from.", r.name))
 	decl(g, 0, "Args :: struct {")
 	for p in root.params {
 		t: string
@@ -35,13 +33,7 @@ write_api :: proc(g: ^Generator) -> bool {
 	decl(g, 0, "}")
 	decl(g, 0, "")
 
-	decl(g, 0, "// Decodes data as an instance of %s, whose params args gives, as zelbyn", r.name)
-	decl(g, 0, "// decodes it with the schema: the same values, or the same error, at the")
-	decl(g, 0, "// same offset and path, but with no limit on nesting, memory or steps.")
-	decl(g, 0, "// Strings and byte arrays are views of data, and of args, but for those")
-	decl(g, 0, "// decoded or made by expressions; they, the instances and the arrays are")
-	decl(g, 0, "// allocated with context.allocator, which an arena suits. On error, root")
-	decl(g, 0, "// may be partly read, and err, which destroy_parse_error frees, says where.")
+	write_comment(&g.decls, 0, fmt.tprintf("Decodes data as an instance of %s, whose params args gives, as zelbyn decodes it with the schema: the same values, or the same error at the same offset and path, but with no limit on nesting, memory or steps. Strings and byte arrays are views of data and args, but for those decoded or made by expressions; they, the instances and the arrays are allocated with context.allocator, which an arena suits. On error, root may be partly read, and err, which dat.destroy_parse_error frees, says where.", r.name))
 	decl(g, 0, "read :: proc(data: []byte, args := Args{}) -> (root: ^%s, err: dat.Parse_Error) {", r.name)
 	decl(g, 1, "d: dat.Decoder")
 	decl(g, 1, "dat.decoder_init(&d, data)")
@@ -49,7 +41,7 @@ write_api :: proc(g: ^Generator) -> bool {
 	for p, k in root.params {
 		if p.type != .Set do continue
 		set := root.args[k].variant.(mdata.Root_Arg).set
-		t := struct_of(g, set.type_info)
+		t := struct_of(g, type_of(g, set))
 		// the bytes of the argument, read in a stream of their own, as an
 		// instance of its type
 		decl(g, 1, "arg%d: ^%s", k, t.name)
@@ -94,8 +86,7 @@ write_api :: proc(g: ^Generator) -> bool {
 	decl(g, 0, "}")
 	decl(g, 0, "")
 
-	decl(g, 0, "// Writes root as zelbyn's text dump (--dump tree) writes it: one line for")
-	decl(g, 0, "// each value, its path, \" = \" and the value.")
+	write_comment(&g.decls, 0, "Writes root as zelbyn's text dump (--dump tree) writes it: one line for each value, its path, \" = \" and the value.")
 	decl(g, 0, "write_text :: proc(w: io.Writer, root: ^%s) -> io.Error {", r.name)
 	decl(g, 1, "path := strings.builder_make()")
 	decl(g, 1, "defer strings.builder_destroy(&path)")
@@ -116,7 +107,7 @@ top_proc :: proc(g: ^Generator, set: ^mdata.Node) -> string {
 @(private = "file")
 write_top :: proc(g: ^Generator, w: Work) {
 	set := w.node
-	t := struct_of(g, set.type_info)
+	t := struct_of(g, type_of(g, set))
 	line(g, 0, "%s :: proc(d: ^dat.Decoder, out: ^^%s) -> dat.Read_Error {", w.name, t.name)
 	line(g, 1, "dat.push_path(d, %s, 0) or_return", quoted(set.name))
 	line(g, 1, "instance, alloc_err := new(%s)", t.name)
@@ -151,8 +142,7 @@ write_struct :: proc(g: ^Generator, s: ^Struct_Info) -> bool {
 		strings.write_string(&b, p)
 		if i > 0 do strings.write_string(&b, "::")
 	}
-	decl(g, 0, "// An instance of the type %s. A field read once that can have no value is", strings.to_string(b))
-	decl(g, 0, "// a Maybe, or nil; a repeated field is an array, of its values in order.")
+	decl(g, 0, "// An instance of the type %s.", strings.to_string(b))
 	decl(g, 0, "%s :: struct {", s.name)
 	decl(g, 1, "_zr: dat.Header,")
 	for f in s.fields {

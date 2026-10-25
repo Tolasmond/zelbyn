@@ -28,7 +28,9 @@ A run has four stages. Each stage is the work of one package, and each hands its
 3. **Decode.** The `reader` package walks the plan over the input bytes and builds a *value tree* (`field.Value_Tree`).
 4. **Write.** The `dump` package walks the plan and the value tree together and writes them out.
 
-The plan and the YAML trees live in one arena, which is freed with the plan. The value tree does not refer to the plan, so the plan can be freed while the tree is still in use (§11).
+The plan and the YAML trees live in one arena, which is freed with the plan. The value tree does not refer to the plan, so the plan can be freed while the tree is still in use (§12).
+
+`zelbyn gen` stops after the compile: the `codegen` package writes the plan as Odin source, a package that decodes the format as `reader` does, for other programs to build with their own code (§10).
 
 **Performance is measured cold.** zelbyn is a terminal tool: one process reads one schema and one file, then exits. Every cost of a fresh process counts: compiling the schema, which a generated Kaitai parser does ahead of time, taking memory from the operating system and touching each page of it for the first time, and running code for the first time. On small files the schema compile costs more than the decode. Several mechanisms below exist for those costs, and an optimization that pays only when one process decodes many files, such as reusing a tree's memory, is not made. A profile taken in a loop over one file misleads: its page faults land in whatever touches new memory first.
 
@@ -37,9 +39,9 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | Path | Contents |
 |---|---|
 | `main.odin` | The program (package `main`): runs `cli` on the process's arguments, stdout and stderr |
-| `zelbyn/cli/` | The command line: its options, `--param`, the decode and the dump, writing to the writers it is given |
+| `zelbyn/cli/` | The command line: its options, `--param`, the decode and the dump, and `zelbyn gen`, writing to the writers it is given |
 | `zelbyn/arena/` | `Arena`: the lock-free arena that the plan, the YAML trees and the value tree are allocated in |
-| `zelbyn/data/` | `Data_Type`, and `Reader`: a bounds-checked cursor over a byte slice, with bit reads |
+| `zelbyn/data/` | The runtime: `Data_Type`, `Reader` (a bounds-checked cursor over a byte slice, with bit reads), `Parse_Error`, and what both the decoder and generated code read and evaluate values with; and the state of a decode by generated code |
 | `zelbyn/file/` | `read_entire_file`, which reads a schema file with the system calls it needs |
 | `zelbyn/yaml/` | The YAML-subset parser |
 | `zelbyn/expression/` | The expression parser, resolver, direct-form classifier and printer |
@@ -48,17 +50,20 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `zelbyn/field/` | The value tree: `Value`, `Instance`, `Span` and `Value_Tree`, and `write_value`, which writes a value as the text dump and error messages show it |
 | `zelbyn/reader/` | The decoder, the expression evaluator and the string decoders |
 | `zelbyn/dump/` | The text and JSON writers |
+| `zelbyn/codegen/` | The code generator: Odin source that decodes a plan's format as the decoder does |
 | `tests/` | The test package and the schemas the import, params and recursive-type tests read (`tests/schemas/`) |
 | `tools/bench/` | The cold benchmark and its optional Kaitai Struct C++ reference |
 | `tools/kaitai_compare/` | A comparison of decodes, and of offsets, with the official Kaitai Struct JavaScript runtime |
 | `tools/ksy_corpus/` | The corpus test: every schema of `kaitai_struct_formats` compiled, against a record, and the samples of `kaitai_struct_samples` compared with the official runtime |
+| `tools/codegen_corpus/` | The code of every schema of `kaitai_struct_formats` generated and built, and the samples decoded with it, compared with the decoder's decode |
+| `tools/codegen_tests/` | Every decode of the tests made again with the code generated from its plan, and compared |
 | `tools/yaml_corpus/` | A comparison of the YAML parser with libyaml |
 | `tools/check.py` | The checks a change must pass, in one command, and the optional corpus checks |
 | `.github/workflows/check.yml` | CI: `tools/check.py` on each push to `main` and each pull request |
 | `.github/workflows/release.yml` | A GitHub release of the binaries for Linux and Windows on each tag `v*` |
 | `.github/actions/install-odin/` | Installs the pinned Odin release, for both workflows |
 
-`.gitattributes` normalizes text files to LF. The repository holds no schemas or sample files of real formats; the tools that need them use clones of `kaitai_struct_formats` and `kaitai_struct_samples` kept outside it (§13).
+`.gitattributes` normalizes text files to LF. The repository holds no schemas or sample files of real formats; the tools that need them use clones of `kaitai_struct_formats` and `kaitai_struct_samples` kept outside it (§14).
 
 ## 3. Package dependencies
 
@@ -67,16 +72,18 @@ All packages also import from Odin's `core` library. The internal imports are:
 | Package | Imports |
 |---|---|
 | `arena`, `data`, `file` | none |
-| `field`, `yaml` | `arena` |
+| `yaml` | `arena` |
+| `field` | `arena`, `data` |
 | `metadata` | `arena`, `data`, `field` |
 | `expression` | `metadata` |
 | `ksy` | `arena`, `data`, `expression`, `file`, `metadata`, `yaml` |
-| `reader` | `arena`, `data`, `field`, `metadata`; `core:compress/zlib` |
+| `reader` | `arena`, `data`, `field`, `metadata` |
 | `dump` | `field`, `metadata` |
-| `cli` | `dump`, `field`, `ksy`, `metadata`, `reader` |
+| `codegen` | `data`, `expression`, `metadata` |
+| `cli` | `codegen`, `dump`, `field`, `ksy`, `metadata`, `reader` |
 | `main` | `cli` |
 
-`metadata` imports `field` for one procedure, `instance_set` (§6.7), which reads the case that a value-tree instance records. `reader` and `dump` do not import `ksy` or `yaml`: they see only the plan.
+`metadata` imports `field` for one procedure, `instance_set` (§6.7), which reads the case that a value-tree instance records. `reader`, `dump` and `codegen` do not import `ksy` or `yaml`: they see only the plan. `data` imports nothing of zelbyn's, as code that `codegen` generates imports it in other projects (§10).
 
 Each package is imported under one name in every file, of the packages, `main.odin`, the tests and the tools, so that a name means one package wherever it is read:
 
@@ -90,7 +97,7 @@ Each package is imported under one name in every file, of the packages, `main.od
 | `metadata` | `mdata` |
 | `reader` | `rdr` |
 | `yaml` | `yml` |
-| `cli`, `file`, `ksy` | their own names |
+| `cli`, `codegen`, `file`, `ksy` | their own names |
 
 `tests/imports_test.odin` checks every import against this table.
 
@@ -126,6 +133,14 @@ An `Arena` is a list of `virtual.Memory_Block`s: address space reserved up front
 - `at_eof` is true when every byte and every bit left over has been read. `bit_pos` counts the bits read so far, and `align_to_byte` discards the bits left over.
 
 Byte reads neither use nor discard the bits left over, as in Kaitai's runtimes. Every failure is a `Read_Error`; its kinds are listed in §7.10.
+
+`data` is also the runtime of generated code (§10), which imports it in other projects, so it imports nothing of zelbyn's, and holds what the decoder and generated code must do alike, which both call, so that they cannot read or evaluate a value differently:
+- **Errors.** `Parse_Error`, `Path_Segment`, `format_path`, `destroy_parse_error`, and `STRING_PREVIEW` and `LIST_PREVIEW`, which `reader` gives by the same names (§7.10).
+- **Integers.** `INT_MIN`, `INT_MAX` and the operations on integers of that range, `int_add` to `int_not`, each failing as §6.8 says, which `metadata.int_binary` and `int_unary` dispatch to; `int_size`, a size, count or offset; `float_to_int`, `string_to_int` and `int_digits`, the `.to_i` and `.to_s` of §7.9.
+- **Strings and bytes.** `Encoding` and `decode_text` (§7.6), `inflate`, which decompresses `process: zlib` bytes with an allocator, recording an allocation that fails as `Memory_Limit` (`Failure_Recorder`), `trim`, which removes `pad-right` and cuts at a terminator, `substring`, and `bits_of`, a `-bits` field's bits.
+- **Values as the dump writes them.** `write_int`, `write_uint`, `write_f32`, `write_f64`, `write_bool`, `write_string` and `write_blob`, which `field.write_value` calls for each type, and the `show_` procedures, which append a value to a `Parse_Error`'s text.
+
+The rest of `data`, in `decoder.odin`, is generated code's alone: the state of a decode and the arrays of its expressions (§10).
 
 ### 4.3 `file`
 
@@ -366,7 +381,8 @@ A `Node` is one field, and `plan.odin` documents each of its members where it is
 - how a set's type or byte order is chosen per instance: `switch_on` (§6.7) and `order_switch` (§5.3);
 - how a set stands to the sets around it: `parent_up`, `recursive` (§5.3) and `keeps_stream` (§7.5);
 - its names: `name`, shown in the dumps and error paths, and `ref_name`, the id expressions use;
-- its checks and subfields: `valid` (§6.8) and `bits` (§6.5).
+- its checks and subfields: `valid` (§6.8) and `bits` (§6.5);
+- the type a set is compiled from: `type_info`, a `Type_Info` (its name, and the type it is declared in) that every set compiled from one type shares, made by `compile_fields` the first time it compiles the type, so that generated code can give the type one struct (§10). The decoder does not read it.
 
 The plan is a tree, but for a type that contains itself. Each field has its own node, even when several fields have the same type (§5.3), and there are no cycles but those through the `children` a node of such a type shares with the set it reuses. The decoder and the dumps walk the plan as the value tree leads them, so they never follow a cycle further than the input does.
 
@@ -528,10 +544,10 @@ For a set marked `keeps_stream`, `read_set_instance` records each instance's str
 
 `read_scalar` reads one element of a field that is not a set:
 - Integers and floats are read with `data.read` in the node's byte order.
-- `String` and `Blob` values are views of the stream (`element_bytes`): the bytes of a `Fixed_Length`, `Rule_Length` (evaluated with `_index` set to the element's index) or `Eos_Length`, without `pad_right` and cut at the terminator; or, without a length, the bytes up to the terminator. With `process`, `process_bytes` (not inlined) then decompresses them with `core:compress/zlib` into the tree's arena, which also holds what inflating allocates, as the decoder allocates nothing outside it; a substream of decompressed bytes counts its offsets from its field's start, as there is none in the file. Bytes that are not a zlib stream are `Decompression_Failed`. A `String` whose `encoding` is not `None` is then decoded by `decode_text` into UTF-8, in the tree's arena, which takes at most three bytes for each byte of the input (one and a half for UTF-16).
+- `String` and `Blob` values are views of the stream (`element_bytes`): the bytes of a `Fixed_Length`, `Rule_Length` (evaluated with `_index` set to the element's index) or `Eos_Length`, without `pad_right` and cut at the terminator; or, without a length, the bytes up to the terminator. With `process`, `process_bytes` (not inlined) then decompresses them with `data.inflate`, through `core:compress/zlib`, into the tree's arena, which also holds what inflating allocates, as the decoder allocates nothing outside it; a substream of decompressed bytes counts its offsets from its field's start, as there is none in the file. Bytes that are not a zlib stream are `Decompression_Failed`. A `String` whose `encoding` is not `None` is then decoded by `decode_text`, which calls `data.decode_text`, into UTF-8, in the tree's arena, which takes at most three bytes for each byte of the input (one and a half for UTF-16).
 - `Bool` and `Bits` values are read by `read_bit_type`, with `data.read_bits`.
 
-`decode_text` decodes UTF-16 and UTF-32 as WHATWG's decoders do: an unpaired surrogate, a UTF-32 value that is a surrogate or above U+10FFFF, and the bytes left at the end that make no code unit each become U+FFFD. A byte-order mark is kept. A single-byte encoding maps bytes from 0x80 through a table of 128 code points: windows-1251 and windows-1252 have WHATWG's tables, which give the bytes the code pages leave undefined their own code points, IBM437 has Python's `cp437`, and ISO-8859-1 has none, as each byte is its own code point. The tables are `rodata`.
+`data.decode_text` decodes UTF-16 and UTF-32 as WHATWG's decoders do: an unpaired surrogate, a UTF-32 value that is a surrogate or above U+10FFFF, and the bytes left at the end that make no code unit each become U+FFFD. A byte-order mark is kept. A single-byte encoding maps bytes from 0x80 through a table of 128 code points: windows-1251 and windows-1252 have WHATWG's tables, which give the bytes the code pages leave undefined their own code points, IBM437 has Python's `cp437`, and ISO-8859-1 has none, as each byte is its own code point. The tables are `rodata`.
 
 *Reason for decoding when a string is read:* the dumps and the evaluator work on UTF-8, so a string decoded once is compared, measured with `.length`, matched by a `switch-on` and written as any other. ASCII and UTF-8 strings, the common case, stay views of the input and pay one comparison, and `decode_text` is not inlined into `read_scalar`. The rules for bad input and the tables are those of the reference decoders the decoder was checked against: Node's `TextDecoder`, which Kaitai's JavaScript runtime uses, for UTF-16 and windows-125x, and Python's codecs for UTF-16, UTF-32, ISO-8859-1 and IBM437, which `TextDecoder` either lacks or decodes as windows-1252. A byte-order mark is kept, as Kaitai's C++ and Python runtimes keep it, where `TextDecoder` removes it.
 
@@ -610,7 +626,7 @@ Every schema and input either succeeds or fails with an error that names the lim
 Each of the first four is `Unsupported` at the node or expression that passes it, and `constant`'s `any_of_cond` builds the `or` of an `enum`'s values as a balanced tree, so a `valid: any-of` of many values is not deep. The stack measured at the least `ulimit -s` that each of these takes at its limit, in debug and `-o:speed` builds, was at most 799 KB in a debug build and 624 KB with `-o:speed`; a nesting 100,000 deep of each fails with its error.
 
 Memory and time are bounded by `Limits`, which `read` and `read_from_bytes` take:
-- **`max_memory`** (`DEFAULT_LIMITS`: 1 GiB, some 300 times the largest tree of the samples, 3.3 MB of a PNG with Exif) sets the tree's `Arena.limit` to the bytes used once the input is read, plus it. Every allocation of the tree goes through `arena_make` (`tree_make`, `make_values`, `reserve_exactly`, `reserve_growing`, `make_instance`) or `arena_allocator`, and a failure is `Memory_Limit`. So do the decoder's own records, its path, frames, streams, maps and the parse instances it keeps (`keep_pending`), whose frames, streams and path it copies, as many as a schema has parse instances for each instance, however few steps they take: each append (`push_record`), copy (`clone_dynamic`) and map insert reports a failure. An append to the path just before an error is reported is not checked, as the error it reports is the decode's. `process_bytes` gives inflate the arena through `Failure_Recorder`, which records whether an allocation failed: inflate reports some of those as another error, which is then `Memory_Limit` too, not `Decompression_Failed`. A count larger than the input reserves only what the input can hold, and an element that adds no value takes no room (§7.4).
+- **`max_memory`** (`DEFAULT_LIMITS`: 1 GiB, some 300 times the largest tree of the samples, 3.3 MB of a PNG with Exif) sets the tree's `Arena.limit` to the bytes used once the input is read, plus it. Every allocation of the tree goes through `arena_make` (`tree_make`, `make_values`, `reserve_exactly`, `reserve_growing`, `make_instance`) or `arena_allocator`, and a failure is `Memory_Limit`. So do the decoder's own records, its path, frames, streams, maps and the parse instances it keeps (`keep_pending`), whose frames, streams and path it copies, as many as a schema has parse instances for each instance, however few steps they take: each append (`push_record`), copy (`clone_dynamic`) and map insert reports a failure. An append to the path just before an error is reported is not checked, as the error it reports is the decode's. `decode_text` and `process_bytes` give `data`'s `decode_text` and `inflate` the arena's allocator; `inflate` gives it to `zlib.inflate` through a `Failure_Recorder`, which records whether an allocation failed: inflate reports some of those as another error, which is then `Memory_Limit` too, not `Decompression_Failed`. A count larger than the input reserves only what the input can hold, and an element that adds no value takes no room (§7.4).
 - **`max_steps`** (`DEFAULT_LIMITS`: 100,000,000) is taken by `read_element`, once an element of a field, set instance or parse instance; by `eval_value_ref`, once a value instance evaluated, so that a chain whose links each use the next twice, which doubles the work with each, ends; and by `take_steps` for each item of an array literal, of `values_to_bytes` and of `.min` and `.max`, also each string that string `+` (`join_strings`) copies. A decode that passes it fails with `Step_Limit`. Every other loop of the decoder and evaluator is bounded by the input or by one of these.
 
 0 lifts either limit. *Reason for the defaults:* they are far beyond any input of the corpus, and bound a decode to seconds and its tree to less than the memory of a machine that runs it. A `repeat-expr` of far more elements than `max_steps`, each of which reads nothing, stops with `Step_Limit` in 0.7 s; the elements of GIF files are read with `gif.ksy` at about 40 million a second, so its steps would take some 3 s. One whose elements each add a value stops with `Memory_Limit` at 1 GiB, in 900 MB of resident memory, as the arena commits only what it hands out.
@@ -668,9 +684,43 @@ Both writers walk the plan and the value tree together, from `format.root` and `
 
 Both write to an `io.Writer`. A writer's error stops the dump and is returned.
 
-## 10. The program (`main.odin` and `cli`)
+## 10. Code generation (`codegen`)
 
-`cli.execute(args, stdout, stderr)` runs a command line, whose options doc/usage.md (Running) gives, and returns its exit code; `main` calls it with the process's arguments, stdout and stderr. Everything it writes goes to the writers it is given, so `tests/cli_test.odin` runs it in the test process, on writers of its own, one of which fails. It parses the command line with `core:flags`, whose errors `print_flags_error` writes as `flags.print_errors` does, which writes to the process's own stdout and stderr. `parse_args` takes `--param` out before `core:flags` parses the rest, and `write_usage` adds its line to the usage.
+`codegen.generate(format, options, allocator)` writes the source of one Odin package that decodes the format of a plan, which `zelbyn gen` writes to a file (§11). doc/usage.md ("Generating code") gives what the package declares: a struct for each type of the schema, `Args`, `read` and `write_text`. The package is in five files:
+
+| File | Contents |
+|---|---|
+| `codegen.odin` | `generate`, the generator's state, the walk of the plan, the structs' names and layout, and `merge` |
+| `read.odin` | The procedures that read sets, fields and their elements, and the writing of lines of code |
+| `exprs.odin` | The procedures that evaluate expressions, find the instances enclosing one (`enclosing`), evaluate value instances, and give streams |
+| `checks.odin` | The procedures that check values and record a check that fails |
+| `api.odin` | `Args`, `read` and `write_text`, the structs, and the procedures that dump them |
+
+**The decoder's steps.** Generated code does for the plan what the decoder does, step by step. Each procedure the decoder runs for a node or an expression, `read_values`, `read_element`, `read_instance`, `read_set_instance` and `choose_order`, `read_scalar`, `element_bytes`, `byte_length`, `check_valid`, `fail_check`, `eval` of each variant, `enclosing`, `eval_stream`, `stream_reader` and `eval_value_ref`, has a procedure generated for it, whose comment names it, that reads the same bytes, evaluates the same expressions in the same order, and calls `data.fail` where the decoder calls `fail`, with the same offset, so that the first error recorded, and its path, are the same. The state is the decoder's (§7.2), in `data.Decoder`, kept as the decoder keeps it: the stream and its `base`, the path, the frames, the streams, the kept streams (`keep_stream`), the parse instances to read once the root is (`keep_pending`, `read_pending`), with `read_parse_instance` and `read_kept`, which set aside the frames, streams and path above an instance's, the values of cached value instances (`cached`, `keep_cached`), and the expressions' `Eval_Context`, whose `base` is the procedure generated for the decoder's `enclosing` of the expression that gave `self`. A set instance is known to `data` by its address alone: every struct begins with a `data.Header`, the set it was read as, which a frame records too, and its `switch-on` case (`Instance.choice`). What both must compute alike, reads, integers, text and checks, is in `data`, which both call (§4.2).
+
+*Reason:* the decoder defines every value and every error, and its tests, the corpus check and the comparisons with the official runtime check it. Code that takes the same steps through the same state gives the same results, and a step taken differently shows as a difference, which `tools/codegen_tests` looks for in every decode of the tests (§14). Generating from the plan, which `ksy` compiles, keeps parsing, imports, the resolution of types and expressions, and schema errors in one place, the front end (§5).
+
+Generated code leaves out the limits of §7.11: there is no `MAX_DEPTH`, no stack accounting (`Decoder.stack`) and no `Too_Deep`, no `max_memory` (an allocation that fails is still `Memory_Limit`) and no `max_steps`. Nor does it record spans or write JSON. Direct forms (§5.2) are not generated, as the tree gives the same values, which `expression_direct_test.odin` checks.
+
+**Structs.** Each type has one struct, which every set compiled from it shares (`Node.type_info`), as they all have its members (`same_layout` checks it): a field for each child, followed by each of its bit fields, then each parse instance, then each param. A set of a plan built by hand, which has no type, has a type of its own (`type_of`). A field's storage (`Storage`) holds what the decoder's slot does (§8.1):
+- a field read at most once holds its value: `Plain`, with a bit of `_have` that says whether it has one, or when it can have none once read, `Maybe`, and a set instance or a `switch-on`'s union, which can be `nil` (`Pointer`, `Union`);
+- a repeated field's values are a `[dynamic]` array (`Array`), which, as a slot, has no value missing however many it has;
+- a param holds its argument (`Param`), an integer as an `i128`, as the decoder's slot can hold a `u64`;
+- a parse instance's bit of `_read` is set as the decoder makes its slot not `nil`, when it starts to read it.
+
+The `switch-on` field of cases of several types has a union of them (`switch_variants`), named for the struct and the field; with one type, that type.
+
+**Values.** An expression's value has a type for its `Expr_Type`: `Int` an `i128`, which `data`'s integer operations keep within `INT_MIN` and `INT_MAX`, as the decoder's `int` and `u64` together are; `Float` an `f64`; `Bool`, `Bytes` and `String` as they are; `Struct` an instance's address, cast to its struct where a field of it is read, the struct of the set that holds the field (`Generator.owners`); `Stream` a `data.Stream`; and `Array` a `data.Array`, of a field's values its `[dynamic]` storage, which it reads as the field grows, as the decoder's kept slot (`eval_kept`), and of any other array, its items, made for it. `_` is the address of a value of its field's type (`Eval_Context.element`).
+
+**Procedures.** The procedures are written as the code written before them names them (`need`), from a list of work, starting from the sets: `read_set_N` and `read_members_N` for each set, `N` its number in `Header.set`; `read_field_N`, `read_element_N` and the procedures they call for each member of a set, by its node, so that the sets that share members, a type that contains itself, share them; `ev_N` for each expression, which calls its operands' (`operand`), `enc_N` for each that is the base of a value instance or of such a base, and `vi_N` for each value instance; `parse_T`, a `data.Parse_Proc`, for each struct with parse instances, which reads one as the set its instance was read as, as `Frame.set` says; and `dump_T` for each struct. Each procedure is written into a `Proc` of its own, and its references to others are marked (`ref`). `merge` then keeps one of each class of procedures that are the same: two are the same when their text is, but for their own names, and the procedures they call are the same at each place. A partition is refined, from the text with its references blanked, by the classes of the procedures called, until no class splits, and each reference names the procedure kept of its class (`resolve_refs`).
+
+*Reason for merging:* a type is compiled once for each field of it (§5.3), and the code of most of those fields is the same. Before it, `png.ksy`, with the `exif.ksy` and `icc_4.ksy` it imports, gave 57,000 lines, and the corpus 784,000; merged, 27,000 and 471,000, most of what remains a procedure of each field of a type.
+
+**Names.** A struct has its type's path of names in Ada_Case, without the top-level type of the schema compiled but for that type, and with an imported schema's (`type_name`); a name taken, `Args` among them (`RESERVED`), is followed by a number (`unique_name`). A field has its id, or its `-bits` name, as an identifier (`identifier`, which `field_name` gives the tests): the characters that cannot be in one made `_`, an Odin keyword followed by `_`, and in its struct, followed by a number when it meets another. The procedures are numbered, and the constants of byte literals are `BYTES_N`.
+
+## 11. The program (`main.odin` and `cli`)
+
+`cli.execute(args, stdout, stderr)` runs a command line, whose options doc/usage.md (Running) gives, and returns its exit code; `main` calls it with the process's arguments, stdout and stderr. A command line whose first argument is `gen` is `zelbyn gen` (doc/usage.md, "Generating code"): `gen` parses the rest into `Gen_Options` with `core:flags`, loads the format as `run` does, and writes the package that `codegen.generate` gives it to `<out>/<package>.odin`, making the directory. Everything it writes goes to the writers it is given, so `tests/cli_test.odin` runs it in the test process, on writers of its own, one of which fails. It parses the command line with `core:flags`, whose errors `print_flags_error` writes as `flags.print_errors` does, which writes to the process's own stdout and stderr. `parse_args` takes `--param` out before `core:flags` parses the rest, and `write_usage` adds its line to the usage.
 
 *Reason for parsing `--param` apart:* as a list field of the options, `core:flags` costs every run some 7,000 instructions, given or not, 0.3% of decoding a small file.
 - `--help` prints the usage and exits 0.
@@ -686,7 +736,7 @@ Errors go to stderr, and nothing reaches stdout unless decoding succeeds. A sche
 
 In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_Allocator`. Leaked or doubly freed memory is reported on stderr and turns exit code 0 into 1. The program frees everything it allocates before it exits, so that this check holds.
 
-## 11. Memory and ownership
+## 12. Memory and ownership
 
 | Data | Allocated in | Freed by | Refers to |
 |---|---|---|---|
@@ -696,16 +746,19 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | Value tree, with its decoded strings | `Value_Tree.arena` | `field.destroy_value_tree` | Its input: owned when it came from `read`, borrowed when it came from `read_from_bytes` |
 | Decoder's `path`, `frames`, `streams`, `kept`, `cache` and arguments | The tree's arena, within its limit (§7.11) | With the tree | — |
 | Error messages, `ksy.Error.path`, and `Parse_Error.path`, `value` and `expected` | `context.allocator` | The matching `destroy_error` / `destroy_parse_error` | — |
+| Generated code: the generator's working data and the source | `context.temp_allocator`, and the source is copied to the allocator `generate` is given | The caller | — |
+| Generated code: the instances, arrays, strings decoded and made, and bytes decompressed by `read` | `context.allocator` | The caller, best as an arena | Its input and the bytes of `Args` |
+| Generated code: `data.Decoder`'s records | An arena of its own (`decoder_init`) | `decoder_destroy`, as `read` returns | — |
 
 `Value_Tree` and `File_Format` each hold their `Arena` by value, so a copy shares its blocks: only one copy may be destroyed, and a block that one copy adds is unknown to the other. They are filled in place, through a pointer, and the tests' `Decoded`, which embeds a tree, is never returned by value. Because the tree does not refer to the plan (§6.7), the plan can be destroyed before the tree. The test `value_tree_outlives_schema` checks this. The test `value_tree_from_read_outlives_file` checks that a tree from `read` survives the deletion of its file.
 
-## 12. Tests
+## 13. Tests
 
 `tests/` is one package, `tests`. `doc/development.md` lists the commands that must pass before a commit: three `odin check` runs with `-vet -strict-style`, and the tests built without and with `-o:speed`, with `ODIN_TEST_FAIL_ON_BAD_MEMORY`.
 
 | File | What it covers |
 |---|---|
-| `helpers.odin` | `SAMPLE_KSY`, a schema of no real format with the shapes the decoder's tests need, and `sample_input`, which makes its inputs of any size; decoding helpers, with or without spans; finding a field's slot and values by name |
+| `helpers.odin` | `SAMPLE_KSY`, a schema of no real format with the shapes the decoder's tests need, and `sample_input`, which makes its inputs of any size; decoding helpers, with or without spans, which with `-define:ZELBYN_CODEGEN_RECORD=<dir>` record each decode for `tools/codegen_tests` (`record_decode`); finding a field's slot and values by name |
 | `decode_malformed_test.odin` | Empty, malformed and truncated inputs and a missing file, their error kinds, offsets and paths; counts larger than the input; negative counts, which read nothing, and lengths |
 | `memory_test.odin` | That decoding, with and without spans and with `process: zlib`, `read` and `ksy.compile` make no heap allocations; that errors allocate only their message or path, and a failed check's value and expected; tree lifetime and reuse after destroy |
 | `checks_test.odin` | Byte order, `valid` checks and bit fields, on hand-built plans, with the value and the expected value each failed check reports, shortened when long |
@@ -723,10 +776,11 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | `file_test.odin` | `file.read_entire_file` with injected `read` failures, at once and after partial reads, and `EINTR`: the error kept, and nothing left allocated, with the heap or an arena (Linux, macOS and the BSDs) |
 | `data_reader_test.odin` | `data.Reader` reads and bounds checks, and bit reads in both orders |
 | `dump_test.odin` | The text and JSON dumps of `SAMPLE_KSY`, exactly, from trees read with and without spans, and the JSON of a large tree parsing; dump format details, and `field.write_value` |
+| `codegen_test.odin` | What generated code declares: names made identifiers and kept apart, the package's name and `data`'s import path, `Args` and the params' types, the same code from each generation, and `zelbyn gen` and its errors; what the code does is `tools/codegen_tests`' check |
 
 Hand-built plans in the tests are made with `plan_node`, which sets `slot_count` from the children it is given. Bit fields are set on a child before the parent is built. `tests/schemas/` holds the schemas that the import, params and recursive-type tests read from files.
 
-## 13. Tools
+## 14. Tools
 
 These are not part of the program's build.
 
@@ -740,4 +794,6 @@ These are not part of the program's build.
 
   `test_compare.py` tests these helpers, and decodes schemas that need them.
 - **`tools/ksy_corpus/`** is the corpus test. `main.odin` compiles every `.ksy` file under a directory, with the directory as the import path, and prints one line for each: compiled, or its first error's kind, file, line, column and message. `check.py` compares those lines with `expected.txt`, which records them and the commit of `kaitai_struct_formats` they were made at, and `--record` rewrites it. With `--samples`, it runs `tools/kaitai_compare/compare.py`, on values and on offsets, over the samples in a clone of `kaitai_struct_samples` of every format that compiles: the files of the format's directory that have a `.license` file beside them, other than `.txt` and `.json` files.
+- **`tools/codegen_tests/`** checks generated code against the decoder on every input the tests decode. `check.py` runs the tests with `-define:ZELBYN_CODEGEN_RECORD=<dir>`, which makes `decode_bytes` and `decode_file` record each decode: the package generated from its plan, once, named by the hash of its code, the input, the arguments as the literal of its `Args`, and the decoder's result, the text dump or the error as the command line writes it. Decodes that reach a limit of §7.11 are not recorded. It then builds one program, with `-vet -strict-style`, that imports every package and decodes each case with its plan's, and compares each result with the decoder's. `tools/check.py` runs it with the other checks.
+- **`tools/codegen_corpus/`** checks generated code on the corpus. `check.py` generates the package of every `.ksy` file of a clone of `kaitai_struct_formats` that zelbyn compiles, builds each, with `-vet -strict-style`, with a program that decodes a file and writes its dump or error as the command line does, and with `--samples`, decodes the samples that `tools/ksy_corpus` decodes with both, comparing exit code, output and error.
 - **`tools/yaml_corpus/`** checks the YAML parser. `main.odin` prints the YAML parser's node tree for each file. `compare.py` compares it with libyaml's, through PyYAML, over every `.ksy` file in a clone of `kaitai_struct_formats` kept outside the repository.

@@ -1,6 +1,6 @@
 # Developing zelbyn
 
-The checks a change must pass, the benchmark, and the tools that compare zelbyn with the official Kaitai Struct runtime and with libyaml. Commands are run from the repository root. The design is described in [arch.md](arch.md).
+The checks a change must pass, the benchmark, and the tools that compare zelbyn with the official Kaitai Struct runtime and with libyaml, and the code it generates with zelbyn. Commands are run from the repository root. The design is described in [arch.md](arch.md).
 
 ## Checks and tests
 
@@ -16,7 +16,10 @@ odin test tests -debug -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TE
 odin check tools/bench -vet -strict-style
 odin check tools/ksy_corpus -vet -strict-style
 odin check tools/yaml_corpus -vet -strict-style
+python3 tools/codegen_tests/check.py
 ```
+
+The last decodes every input the tests decode again, with the code generated from its schema ([Generated code](#generated-code)).
 
 `tools/check.py` runs them all, each whatever the ones before it give, and ends with a summary; it exits 1 if any failed. It builds the tests in a temporary directory. The checks are pinned to Odin `dev-2026-10` (commit `84bc3fc`), and the script warns when another is on the `PATH`.
 
@@ -24,10 +27,10 @@ odin check tools/yaml_corpus -vet -strict-style
 python3 tools/check.py
 ```
 
-The checks that need what the repository does not hold run only when asked: `--formats ../kaitai_struct_formats` runs the corpus check, and with it `--samples ../kaitai_struct_samples` the sample comparison and `--yaml-corpus` the YAML corpus check (each below, with the clones and tools it needs, and the commits the clones must be at), and `--compare-tests` the tests of `tools/kaitai_compare`. Their results are reported as they are: the sample comparison fails on the two samples that "Corpus check" names, so a run with `--samples` exits 1.
+The checks that need what the repository does not hold run only when asked: `--formats ../kaitai_struct_formats` runs the corpus check, and with it `--samples ../kaitai_struct_samples` the sample comparison, `--codegen` the generated code's corpus check, on the samples too with `--samples`, and `--yaml-corpus` the YAML corpus check (each below, with the clones and tools it needs, and the commits the clones must be at), and `--compare-tests` the tests of `tools/kaitai_compare`. Their results are reported as they are: the sample comparison fails on the two samples that "Corpus check" names, so a run with `--samples` exits 1.
 
 ```
-python3 tools/check.py --formats ../kaitai_struct_formats --samples ../kaitai_struct_samples --yaml-corpus --compare-tests
+python3 tools/check.py --formats ../kaitai_struct_formats --samples ../kaitai_struct_samples --codegen --yaml-corpus --compare-tests
 ```
 
 `.github/workflows/check.yml` runs `tools/check.py` on every push to `main` and every pull request, on Linux and on Windows, with the Odin release it is pinned to, checked against its SHA-256. `.github/actions/install-odin` installs that release for it and for the release workflow, so a new pin, with its checksums, is made there and in `tools/check.py`. The debug build of the tests uses the most stack, and on Windows checks the stack limits against the 1 MB stack they are sized for (arch.md §7.5). The optional checks are not run there.
@@ -110,6 +113,22 @@ python3 tools/ksy_corpus/check.py --samples ../kaitai_struct_samples ../kaitai_s
 ```
 
 The record names the commit of kaitai_struct_formats it was made at, and the clone must be at it. At these commits, 18 formats have samples, 43 files, and 41 of them agree in values and in offsets, so the script exits 1. The two that fail are `image/png/libpng-pngtest.png`, which is malformed and which both decoders reject, and `executable/mach_o_fat/MachO-iOS-armv7-armv7s-arm64-Helloworld`, whose schema tests a field it did not read (`mach_o.ksy`'s `uleb128`, where `b3`'s `if` tests `b2`): the JavaScript runtime takes it as 0, and zelbyn, like the Python and Java runtimes, fails with `Absent_Field`. The script exits 1 if any file differs from the record, a file that no longer compiles, now compiles, or fails with another first error, or if any sample differs from the official runtime's decode. Run it when the `.ksy` compiler changes. When a change is meant to change the results, check the differences and run it again with `--record`, which rewrites the record; its diff then shows what the change did to the corpus.
+
+## Generated code
+
+The code that `zelbyn gen` writes must decode as zelbyn does: the same values, or the same error at the same offset and path, with the same value and expected value shown, but for the limits it leaves out ([usage.md](usage.md#limits-that-generated-code-leaves-out)). Two scripts check it, each building the code with `-vet -strict-style`.
+
+`tools/codegen_tests/check.py` runs the tests with `-define:ZELBYN_CODEGEN_RECORD=<dir>`, which records every decode they make with `decode_bytes` and `decode_file` (`tests/helpers.odin`): the package generated from its plan, the input, the arguments of the top-level params, and the decoder's result. It then builds one program with every package recorded, decodes each input again with its package, and compares the results. A decode that reaches one of the decoder's limits is not recorded. It needs only Odin, and `tools/check.py` runs it with the other checks; it exits 1 if any result differs.
+
+```
+python3 tools/codegen_tests/check.py
+```
+
+`tools/codegen_corpus/check.py` generates and builds the code of every schema of a clone of kaitai_struct_formats that zelbyn compiles, and with `--samples`, decodes the samples that the corpus check decodes, each with zelbyn and with the generated code, which must agree in exit code, output and error message. At the commits of [Corpus check](#corpus-check), all 190 schemas build, and the 43 samples of 18 formats decode alike, the two that fail there failing the same way. It exits 1 if a schema fails to generate or build, or a sample differs. `--keep DIR` keeps the packages and programs in `DIR`. Run both when the decoder, `zelbyn/data` or the generator changes.
+
+```
+python3 tools/codegen_corpus/check.py --samples ../kaitai_struct_samples ../kaitai_struct_formats
+```
 
 ## YAML corpus check
 

@@ -152,10 +152,10 @@ record_lock: sync.Mutex
 record_count: int
 
 // Records the decode of data with ff, whose result d has: the package
-// generated from the plan, once in <dir>/<hash of the code>/pkg, and in
-// that directory's cases, the input, the arguments as an Odin literal of
-// the package's Args, and the result, as the program check.py builds writes
-// it. A decode that reaches one of the decoder's limits, which generated
+// generated from the plan, once, in <dir>/<name>, named for the hash of its
+// code, and in that directory's cases, the input, the arguments as the
+// Odin literal of the package's Args, and the result, as the program
+// check.py builds writes it. A decode that reaches one of the decoder's limits, which generated
 // code does not have, or whose arguments are not of their params' types, is
 // not recorded; nor is one whose plan the generator cannot write code for,
 // which is listed in <dir>/not_generated.txt.
@@ -174,7 +174,9 @@ record_decode :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, args: [
 	context.allocator = virtual.arena_allocator(&arena)
 	context.temp_allocator = context.allocator
 
-	code, err := codegen.generate(ff, {package_name = "pkg", runtime = "zelbyn:data"}, context.temp_allocator)
+	// named by the hash of the code generated with no name, as a recording
+	// holds many packages, which check.py builds into one program
+	unnamed, err := codegen.generate(ff, {package_name = "p", runtime = "zelbyn:data"}, context.temp_allocator)
 	if err.message != "" {
 		path := fmt.tprintf("%s/not_generated.txt", CODEGEN_RECORD)
 		line := fmt.tprintf("%s: %s\n", ff.name, err.message)
@@ -186,17 +188,17 @@ record_decode :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, args: [
 		delete(err.message)
 		return
 	}
-	dir := fmt.tprintf("%s/%016x", CODEGEN_RECORD, hash.fnv64a(transmute([]byte)code))
-	pkg := fmt.tprintf("%s/pkg", dir)
-	if !os.exists(pkg) {
+	name := fmt.tprintf("p%016x", hash.fnv64a(transmute([]byte)unnamed))
+	dir := fmt.tprintf("%s/%s", CODEGEN_RECORD, name)
+	if !os.exists(dir) {
+		code, _ := codegen.generate(ff, {package_name = name, runtime = "zelbyn:data"}, context.temp_allocator)
 		if e := os.make_directory_all(fmt.tprintf("%s/cases", dir)); e != nil do panic(fmt.tprintf("recording in %s: %v", dir, e))
-		if e := os.make_directory_all(pkg); e != nil do panic(fmt.tprintf("recording in %s: %v", dir, e))
-		record_file(fmt.tprintf("%s/pkg.odin", pkg), code)
+		record_file(fmt.tprintf("%s/%s.odin", dir, name), code)
 	}
 
 	// the arguments, as each param's type has them in Args
 	literal := strings.builder_make(context.temp_allocator)
-	strings.write_string(&literal, "pkg.Args{")
+	strings.write_byte(&literal, '{')
 	for p, k in ff.root.params {
 		if k >= len(args) do return
 		if k > 0 do strings.write_string(&literal, ", ")
@@ -216,7 +218,7 @@ record_decode :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, args: [
 			return
 		}
 	}
-	strings.write_string(&literal, "}")
+	strings.write_byte(&literal, '}')
 	if len(args) != len(ff.root.params) do return
 
 	record_count += 1

@@ -128,6 +128,7 @@ write_ev :: proc(g: ^Generator, w: Work) {
 		write_index(g, e, x)
 	case mdata.String_Length:
 		o := operand(g, 1, x.operand)
+		g.uses_utf8 = true
 		line(g, 1, "return i128(utf8.rune_count_in_string(%s)), .None", o)
 	case mdata.To_S:
 		o := operand(g, 1, x.operand)
