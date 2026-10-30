@@ -95,8 +95,10 @@ show :: proc(file_path: string, rows: []string) -> hnoss.Error {
 	term := hnoss.init() or_return
 	defer hnoss.deinit(&term)
 
-	// the title is markup, in which [[ is a literal [
-	title, _ := strings.replace_all(filepath.base(file_path), "[", "[[", context.temp_allocator)
+	// the title is markup, in which [[ is a literal [; it lasts every frame,
+	// so not in context.temp_allocator, which each frame frees
+	title, allocated := strings.replace_all(filepath.base(file_path), "[", "[[")
+	defer if allocated do delete(title)
 	list: hnoss.List_State
 	events: []hnoss.Event
 	loop: for {
