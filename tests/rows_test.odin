@@ -248,6 +248,172 @@ rows_million :: proc(t: ^testing.T) {
 	testing.expect(t, rows.collapse(&m, 2), "collapsing bytes")
 	check(t, &m, "collapsing bytes", 0)
 	testing.expect_value(t, rows.count(&m), 4 + N / 2 + 2)
+
+	// every pair expanded: half a million expanded rows under one, which
+	// are found, added and removed in steps of their logarithm, far fewer
+	// than there are
+	many: rows.Model
+	rows.init(&many, &ff, &d.tree)
+	defer rows.destroy(&many)
+	testing.expect(t, rows.expand(&many, 3), "expanding pairs")
+	// from the last, so that the rows of those before do not move
+	for i := N / 2 - 1; i >= 0; i -= 1 do rows.expand(&many, 4 + i)
+	total := rows.count(&many)
+	testing.expect_value(t, total, 4 + 3 * (N / 2))
+	MANY_STEPS :: 10_000
+	check_many :: proc(t: ^testing.T, m: ^rows.Model, what: string, loc := #caller_location) {
+		testing.expectf(t, m.steps <= MANY_STEPS, "%s: %v steps", what, m.steps, loc = loc)
+		m.steps = 0
+	}
+	many.steps = 0
+	window = rows.rows(&many, total - 20, 20)
+	check_many(t, &many, "the last rows")
+	if testing.expect_value(t, len(window), 20) {
+		testing.expect_value(t, window[19].name, "b")
+		testing.expect_value(t, window[18].name, "a")
+		testing.expect_value(t, window[17].index, N / 2 - 1)
+	}
+	testing.expect_value(t, rows.parent(&many, total - 1), total - 3)
+	check_many(t, &many, "the parent of the last row")
+	testing.expect_value(t, rows.prev_sibling(&many, total - 3), total - 6)
+	check_many(t, &many, "the pair before the last")
+	window = rows.rows(&many, 4 + 3 * (N / 4), 3)
+	check_many(t, &many, "the middle rows")
+	if testing.expect_value(t, len(window), 3) do testing.expect_value(t, window[0].index, N / 4)
+	testing.expect(t, rows.collapse(&many, total - 3), "collapsing the last pair")
+	check_many(t, &many, "collapsing the last pair")
+	testing.expect(t, rows.collapse(&many, 4), "collapsing the first pair")
+	check_many(t, &many, "collapsing the first pair")
+	testing.expect_value(t, rows.count(&many), total - 4)
+	testing.expect_value(t, rows.next_sibling(&many, 4), 5)
+	check_many(t, &many, "the pair after the first")
+}
+
+// Random expands and collapses of SAMPLE_KSY's rows, and moves from random
+// rows, against an outline that makes every row: the rows of a model with
+// every one expanded, of which those under a row not expanded are hidden.
+@(test)
+rows_random :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
+	if !load_sample(t, &ff) do return
+	data := sample_input(300)
+	defer delete(data)
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, data[:], &d)
+
+	full_model: rows.Model
+	rows.init(&full_model, &ff, &d.tree)
+	defer rows.destroy(&full_model)
+	rows.expand_all(&full_model)
+	// not in the temp allocator, which each op frees
+	full := rows.rows(&full_model, 0, rows.count(&full_model), allocator = context.allocator)
+	defer {
+		for r in full do delete(r.text)
+		delete(full)
+	}
+	expanded := make([]bool, len(full))
+	defer delete(expanded)
+	expanded[0] = true // as init leaves the root
+
+	m: rows.Model
+	rows.init(&m, &ff, &d.tree)
+	defer rows.destroy(&m)
+
+	// the rows of full that are shown
+	visible :: proc(full: []rows.Row, expanded: []bool) -> []int {
+		shown := make([dynamic]int, context.temp_allocator)
+		for i := 0; i < len(full); {
+			append(&shown, i)
+			j := i + 1
+			if !expanded[i] do for j < len(full) && full[j].depth > full[i].depth do j += 1
+			i = j
+		}
+		return shown[:]
+	}
+	seed := u64(0x2545f4914f6cdd1d)
+	random :: proc(seed: ^u64, n: int) -> int {
+		seed^ ~= seed^ << 13
+		seed^ ~= seed^ >> 7
+		seed^ ~= seed^ << 17
+		return int(seed^ % u64(n))
+	}
+	for op in 0 ..< 3000 {
+		shown := visible(full, expanded)
+		got := rows.rows(&m, 0, rows.count(&m))
+		if !testing.expectf(t, len(got) == len(shown), "op %v: %v rows, want %v", op, len(got), len(shown)) do return
+		for r, k in got {
+			w := full[shown[k]]
+			if !testing.expectf(t, r.depth == w.depth && r.name == w.name && r.index == w.index && r.expanded == expanded[shown[k]], "op %v, row %v: %v %s[%v] expanded %v, want %v %s[%v] expanded %v", op, k, r.depth, r.name, r.index, r.expanded, w.depth, w.name, w.index, expanded[shown[k]]) do return
+		}
+
+		k := random(&seed, len(shown))
+		depth := full[shown[k]].depth
+		want_parent, want_next, want_prev := -1, -1, -1
+		for j := k - 1; j >= 0; j -= 1 {
+			if full[shown[j]].depth < depth {
+				want_parent = j
+				break
+			}
+		}
+		for j := k + 1; j < len(shown) && full[shown[j]].depth >= depth; j += 1 {
+			if full[shown[j]].depth == depth {
+				want_next = j
+				break
+			}
+		}
+		for j := k - 1; j >= 0 && full[shown[j]].depth >= depth; j -= 1 {
+			if full[shown[j]].depth == depth {
+				want_prev = j
+				break
+			}
+		}
+		testing.expectf(t, rows.parent(&m, k) == want_parent, "op %v: parent of %v is %v, want %v", op, k, rows.parent(&m, k), want_parent)
+		testing.expectf(t, rows.next_sibling(&m, k) == want_next, "op %v: next sibling of %v is %v, want %v", op, k, rows.next_sibling(&m, k), want_next)
+		testing.expectf(t, rows.prev_sibling(&m, k) == want_prev, "op %v: previous sibling of %v is %v, want %v", op, k, rows.prev_sibling(&m, k), want_prev)
+
+		i := shown[k]
+		if expanded[i] {
+			testing.expectf(t, rows.collapse(&m, k), "op %v: collapsing row %v", op, k)
+			// collapsing forgets the rows under it that were expanded
+			expanded[i] = false
+			for j := i + 1; j < len(full) && full[j].depth > full[i].depth; j += 1 do expanded[j] = false
+		} else {
+			testing.expectf(t, rows.expand(&m, k) == full[i].expandable, "op %v: expanding row %v", op, k)
+			expanded[i] = full[i].expandable
+		}
+		free_all(context.temp_allocator)
+	}
+}
+
+// A preview cuts a string at that many characters and a blob at that many
+// bytes, never more than the dump's.
+@(test)
+rows_preview :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
+	err := ksy.compile("meta:\n  id: p\nseq:\n  - id: b\n    size: 32\n", &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "compile: %s", err.message) do return
+	data: [32]byte
+	for i in 0 ..< len(data) do data[i] = byte(i)
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, data[:], &d)
+
+	m: rows.Model
+	rows.init(&m, &ff, &d.tree)
+	defer rows.destroy(&m)
+	for c in ([?]struct {
+			preview: int,
+			want:    string,
+		}{{0, "<32 bytes> 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f ..."}, {3, "<32 bytes> 00 01 02 ..."}, {40, "<32 bytes> 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f ..."}}) {
+		got := rows.rows(&m, 1, 1, preview = c.preview)
+		if testing.expect_value(t, len(got), 1) do testing.expectf(t, got[0].text == c.want, "preview %v: %s, want %s", c.preview, got[0].text, c.want)
+	}
 }
 
 // Once made, a model allocates through context.allocator nowhere: it
@@ -287,4 +453,18 @@ rows_allocate_only_where_given :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, track.total_allocation_count, 0)
 	free_all(context.temp_allocator)
+
+	// rows in an allocator that frees: what it gives is all it keeps
+	out: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&out, context.allocator)
+	defer mem.tracking_allocator_destroy(&out)
+	{
+		given := mem.tracking_allocator(&out)
+		for _ in 0 ..< 10 {
+			rs := rows.rows(&m, 0, 5, allocator = given)
+			for r in rs do delete(r.text, given)
+			delete(rs, given)
+		}
+	}
+	testing.expect_value(t, len(out.allocation_map), 0)
 }

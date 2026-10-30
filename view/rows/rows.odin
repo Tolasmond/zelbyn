@@ -51,14 +51,22 @@ Item :: struct {
 @(private)
 TOP :: -2
 
-// An expanded row: its position among the rows of the row it is under, the
-// rows visible under it, and those of them that are expanded, by position.
+// An expanded row: its position among the rows of the row it is under, and
+// the rows visible under it. The expanded rows under one row are a treap
+// ordered by position, whose root is that row's children, and each keeps
+// the rows visible under all the expanded rows of its subtree (sum), so
+// that the rows before a position are counted, and an expanded row is
+// found, added or removed, in steps of the logarithm of how many rows are
+// expanded beside it, however many rows there are.
 @(private)
 Open :: struct {
-	parent:   ^Open,
-	pos:      int,
-	below:    int,
-	children: [dynamic]^Open,
+	parent:      ^Open,
+	pos:         int,
+	below:       int,
+	children:    ^Open, // the root of the treap of the expanded rows under it
+	left, right: ^Open, // in the treap of the row it is under
+	sum:         int,
+	priority:    u64,
 }
 
 // The rows of a tree read with format. Both must outlive it: the tree holds
@@ -71,6 +79,7 @@ Model :: struct {
 	tree:      ^fld.Value_Tree,
 	top:       Open, // the rows at depth 0, under no row
 	allocator: mem.Allocator,
+	seed:      u64, // for the treaps' priorities
 	// for the tests: the expanded rows and fields stepped over to find
 	// rows, and the values formatted
 	steps:     int,
@@ -79,15 +88,13 @@ Model :: struct {
 
 // Makes the rows of tree, read with format, with the root's set expanded.
 init :: proc(m: ^Model, format: ^mdata.File_Format, tree: ^fld.Value_Tree, allocator := context.allocator) {
-	m^ = {format = format, tree = tree, allocator = allocator}
-	m.top.children = make([dynamic]^Open, allocator)
+	m^ = {format = format, tree = tree, allocator = allocator, seed = 0x9e3779b97f4a7c15}
 	m.top.below = child_count(m, top_item())
 	if m.top.below > 0 do expand(m, 0)
 }
 
 destroy :: proc(m: ^Model) {
-	for o in m.top.children do free_open(m, o)
-	delete(m.top.children)
+	free_treap(m, m.top.children)
 	m^ = {}
 }
 
@@ -97,11 +104,14 @@ count :: proc(m: ^Model) -> int {
 }
 
 // Rows first to first + n - 1, or to the last row, with their text in
-// allocator, a string's cut at preview characters when it is above 0.
+// allocator. With preview above 0, a string shows at most preview
+// characters, and a blob at most preview bytes, and never more than
+// field.BLOB_PREVIEW, as in the dump.
 rows :: proc(m: ^Model, first, n: int, preview := 0, allocator := context.temp_allocator) -> []Row {
 	if first < 0 || first >= count(m) || n <= 0 do return nil
 	out := make([dynamic]Row, 0, min(n, count(m) - first), allocator)
 	c := locate(m, first, allocator)
+	defer delete(c.frames)
 	for len(out) < n {
 		append(&out, make_row(m, &c, preview, allocator))
 		if !advance(m, &c) do break
@@ -114,18 +124,18 @@ rows :: proc(m: ^Model, first, n: int, preview := 0, allocator := context.temp_a
 expand :: proc(m: ^Model, r: int) -> bool {
 	if r < 0 || r >= count(m) do return false
 	c := locate(m, r, context.temp_allocator)
+	defer delete(c.frames)
+	if current_open(m, &c) != nil do return false
 	f := &c.frames[len(c.frames) - 1]
-	if current_open(&c) != nil do return false
 	item := child(m, f.item, c.pos)
 	if !can_expand(item) do return false
 	n := child_count(m, item)
 	if n == 0 do return false
 
 	o := new(Open, m.allocator)
-	o^ = {parent = f.open, pos = c.pos, below = n}
-	o.children = make([dynamic]^Open, m.allocator)
-	inject_at(&f.open.children, f.next, o)
-	for a := f.open; a != nil; a = a.parent do a.below += n
+	o^ = {parent = f.open, pos = c.pos, priority = next_priority(m)}
+	insert(m, f.open, o)
+	grow(m, o, n)
 	return true
 }
 
@@ -134,11 +144,11 @@ expand :: proc(m: ^Model, r: int) -> bool {
 collapse :: proc(m: ^Model, r: int) -> bool {
 	if r < 0 || r >= count(m) do return false
 	c := locate(m, r, context.temp_allocator)
-	o := current_open(&c)
+	defer delete(c.frames)
+	o := current_open(m, &c)
 	if o == nil do return false
-	f := &c.frames[len(c.frames) - 1]
-	ordered_remove(&f.open.children, f.next)
-	for a := f.open; a != nil; a = a.parent do a.below -= o.below
+	grow(m, o, -o.below)
+	remove(m, o.parent, o.pos)
 	free_open(m, o)
 	return true
 }
@@ -146,8 +156,8 @@ collapse :: proc(m: ^Model, r: int) -> bool {
 // Expands every row, as the dump shows every value. It takes the time and
 // memory of every set and array in the tree.
 expand_all :: proc(m: ^Model) {
-	for o in m.top.children do free_open(m, o)
-	clear(&m.top.children)
+	free_treap(m, m.top.children)
+	m.top.children = nil
 	m.top.below = open_all(m, &m.top, top_item())
 }
 
@@ -155,6 +165,7 @@ expand_all :: proc(m: ^Model) {
 parent :: proc(m: ^Model, r: int) -> int {
 	if r < 0 || r >= count(m) do return -1
 	c := locate(m, r, context.temp_allocator)
+	defer delete(c.frames)
 	return c.frames[len(c.frames) - 1].row
 }
 
@@ -163,10 +174,10 @@ parent :: proc(m: ^Model, r: int) -> int {
 next_sibling :: proc(m: ^Model, r: int) -> int {
 	if r < 0 || r >= count(m) do return -1
 	c := locate(m, r, context.temp_allocator)
-	f := &c.frames[len(c.frames) - 1]
-	if c.pos + 1 >= f.count do return -1
+	defer delete(c.frames)
+	if c.pos + 1 >= c.frames[len(c.frames) - 1].count do return -1
 	below := 0
-	if o := current_open(&c); o != nil do below = o.below
+	if o := current_open(m, &c); o != nil do below = o.below
 	return r + 1 + below
 }
 
@@ -174,13 +185,10 @@ next_sibling :: proc(m: ^Model, r: int) -> int {
 prev_sibling :: proc(m: ^Model, r: int) -> int {
 	if r < 0 || r >= count(m) do return -1
 	c := locate(m, r, context.temp_allocator)
+	defer delete(c.frames)
 	if c.pos == 0 do return -1
-	f := &c.frames[len(c.frames) - 1]
-	// the expanded rows before the current one end just before f.next
 	below := 0
-	if f.next > 0 {
-		if o := f.open.children[f.next - 1]; o.pos == c.pos - 1 do below = o.below
-	}
+	if o := find(m, c.frames[len(c.frames) - 1].open, c.pos - 1); o != nil do below = o.below
 	return r - 1 - below
 }
 
@@ -201,60 +209,59 @@ Frame :: struct {
 	count: int, // the rows directly under it
 	pos:   int, // its position among the rows of the frame before
 	row:   int, // its row; -1 for the top
-	next:  int, // the first of open.children at or after the cursor's position
 }
 
-// The cursor of row r, which must be a row. It steps over the expanded rows
-// before r at each depth, not over the rows themselves.
+// The cursor of row r, which must be a row. At each depth it descends the
+// treap of the expanded rows, counting the rows under those before r.
 @(private)
 locate :: proc(m: ^Model, r: int, allocator: mem.Allocator) -> (c: Cursor) {
 	c.frames = make([dynamic]Frame, 0, 8, allocator)
 	append(&c.frames, Frame{open = &m.top, item = top_item(), count = child_count(m, top_item()), row = -1})
 	c.row = r
 	base := 0 // the row of the first row of the last frame
-	descend: for {
+	for {
 		f := &c.frames[len(c.frames) - 1]
-		extra := 0 // rows under the expanded rows before
-		for o, i in f.open.children {
+		rel := r - base
+		before := 0 // rows under the expanded rows before the subtree descended into
+		inside: ^Open
+		start: int
+		for x := f.open.children; x != nil; {
 			m.steps += 1
-			start := base + o.pos + extra
-			if r < start do break
-			if r == start {
-				f.next = i
-				c.pos = o.pos
+			start = x.pos + before + sum_of(x.left)
+			if rel < start {
+				x = x.left
+			} else if rel == start {
+				c.pos = x.pos
 				return
+			} else if rel <= start + x.below {
+				inside = x
+				break
+			} else {
+				before += sum_of(x.left) + x.below
+				x = x.right
 			}
-			if r <= start + o.below {
-				f.next = i + 1
-				item := child(m, f.item, o.pos)
-				append(&c.frames, Frame{open = o, item = item, count = child_count(m, item), pos = o.pos, row = start})
-				base = start + 1
-				continue descend
-			}
-			extra += o.below
-			f.next = i + 1
 		}
-		c.pos = r - base - extra
-		return
+		if inside == nil {
+			c.pos = rel - before
+			return
+		}
+		item := child(m, f.item, inside.pos)
+		append(&c.frames, Frame{open = inside, item = item, count = child_count(m, item), pos = inside.pos, row = base + start})
+		base += start + 1
 	}
 }
 
 // The expanded row at the cursor, or nil.
 @(private)
-current_open :: proc(c: ^Cursor) -> ^Open {
-	f := &c.frames[len(c.frames) - 1]
-	if f.next < len(f.open.children) {
-		if o := f.open.children[f.next]; o.pos == c.pos do return o
-	}
-	return nil
+current_open :: proc(m: ^Model, c: ^Cursor) -> ^Open {
+	return find(m, c.frames[len(c.frames) - 1].open, c.pos)
 }
 
 // Moves c to the next row; false after the last.
 @(private)
 advance :: proc(m: ^Model, c: ^Cursor) -> bool {
-	f := &c.frames[len(c.frames) - 1]
-	if o := current_open(c); o != nil {
-		f.next += 1
+	if o := current_open(m, c); o != nil {
+		f := &c.frames[len(c.frames) - 1]
 		item := child(m, f.item, c.pos)
 		append(&c.frames, Frame{open = o, item = item, count = child_count(m, item), pos = c.pos, row = c.row})
 		c.pos = 0
@@ -271,6 +278,99 @@ advance :: proc(m: ^Model, c: ^Cursor) -> bool {
 	return true
 }
 
+// The expanded row at position pos under o, or nil.
+@(private)
+find :: proc(m: ^Model, o: ^Open, pos: int) -> ^Open {
+	for x := o.children; x != nil; x = pos < x.pos ? x.left : x.right {
+		m.steps += 1
+		if x.pos == pos do return x
+	}
+	return nil
+}
+
+// Adds delta to the rows under o and the rows it is under, and to the sums
+// of the treaps they are in, on the path from each treap's root to it.
+@(private)
+grow :: proc(m: ^Model, o: ^Open, delta: int) {
+	for a := o; a != nil; a = a.parent {
+		a.below += delta
+		if a.parent == nil do continue
+		for x := a.parent.children; x != nil; x = a.pos < x.pos ? x.left : x.right {
+			m.steps += 1
+			x.sum += delta
+			if x == a do break
+		}
+	}
+}
+
+// Adds o, which is not expanded under anything, to the treap of the rows
+// expanded under parent.
+@(private)
+insert :: proc(m: ^Model, parent: ^Open, o: ^Open) {
+	o.sum = o.below
+	before, after := split(m, parent.children, o.pos)
+	parent.children = merge(m, merge(m, before, o), after)
+}
+
+// Removes the row expanded at pos from the treap of those under parent.
+@(private)
+remove :: proc(m: ^Model, parent: ^Open, pos: int) {
+	before, rest := split(m, parent.children, pos)
+	_, after := split(m, rest, pos + 1)
+	parent.children = merge(m, before, after)
+}
+
+// The rows of treap t before pos, and those at or after it.
+@(private)
+split :: proc(m: ^Model, t: ^Open, pos: int) -> (before, after: ^Open) {
+	if t == nil do return nil, nil
+	m.steps += 1
+	if t.pos < pos {
+		t.right, after = split(m, t.right, pos)
+		update(t)
+		return t, after
+	}
+	before, t.left = split(m, t.left, pos)
+	update(t)
+	return before, t
+}
+
+// The treap of a and b, every row of a before every row of b.
+@(private)
+merge :: proc(m: ^Model, a, b: ^Open) -> ^Open {
+	if a == nil do return b
+	if b == nil do return a
+	m.steps += 1
+	if a.priority > b.priority {
+		a.right = merge(m, a.right, b)
+		update(a)
+		return a
+	}
+	b.left = merge(m, a, b.left)
+	update(b)
+	return b
+}
+
+@(private)
+update :: proc(o: ^Open) {
+	o.sum = sum_of(o.left) + o.below + sum_of(o.right)
+}
+
+@(private)
+sum_of :: proc(o: ^Open) -> int {
+	return o == nil ? 0 : o.sum
+}
+
+// A priority for a treap's row, from a xorshift of the model's seed: the
+// same model makes the same treaps.
+@(private)
+next_priority :: proc(m: ^Model) -> u64 {
+	m.seed ~= m.seed << 13
+	m.seed ~= m.seed >> 7
+	m.seed ~= m.seed << 17
+	return m.seed
+}
+
 @(private)
 make_row :: proc(m: ^Model, c: ^Cursor, preview: int, allocator: mem.Allocator) -> Row {
 	f := &c.frames[len(c.frames) - 1]
@@ -280,7 +380,7 @@ make_row :: proc(m: ^Model, c: ^Cursor, preview: int, allocator: mem.Allocator) 
 		name     = item.name,
 		element  = !item.single && item.index >= 0,
 		index    = item.index,
-		expanded = current_open(c) != nil,
+		expanded = current_open(m, c) != nil,
 	}
 	if item.index < 0 {
 		row.kind = .Array
@@ -303,7 +403,8 @@ make_row :: proc(m: ^Model, c: ^Cursor, preview: int, allocator: mem.Allocator) 
 		return row
 	}
 	b := strings.builder_make(allocator)
-	_ = fld.write_value(strings.to_writer(&b), item.values[item.index], preview)
+	blob_preview := preview > 0 ? min(preview, fld.BLOB_PREVIEW) : fld.BLOB_PREVIEW
+	_ = fld.write_value(strings.to_writer(&b), item.values[item.index], preview, blob_preview)
 	row.text = strings.to_string(b)
 	m.formatted += 1
 	return row
@@ -399,10 +500,9 @@ open_all :: proc(m: ^Model, o: ^Open, item: Item) -> (below: int) {
 		c := child(m, item, p)
 		if !can_expand(c) || child_count(m, c) == 0 do continue
 		co := new(Open, m.allocator)
-		co^ = {parent = o, pos = p}
-		co.children = make([dynamic]^Open, m.allocator)
-		append(&o.children, co)
+		co^ = {parent = o, pos = p, priority = next_priority(m)}
 		co.below = open_all(m, co, c)
+		insert(m, o, co)
 		below += co.below
 	}
 	return
@@ -410,7 +510,14 @@ open_all :: proc(m: ^Model, o: ^Open, item: Item) -> (below: int) {
 
 @(private)
 free_open :: proc(m: ^Model, o: ^Open) {
-	for c in o.children do free_open(m, c)
-	delete(o.children)
+	free_treap(m, o.children)
 	free(o, m.allocator)
+}
+
+@(private)
+free_treap :: proc(m: ^Model, t: ^Open) {
+	if t == nil do return
+	free_treap(m, t.left)
+	free_treap(m, t.right)
+	free_open(m, t)
 }
