@@ -139,7 +139,12 @@ decode_file :: proc(ff: ^mdata.File_Format, path: string, d: ^Decoded, spans := 
 	d.consumed, d.err = rdr.read(path, ff, &d.tree, spans)
 	if d.err.kind != .None && d.err.kind != .File_Read_Failed do check_failed_tree(ff, nil, path, d.err, &d.tree, spans, nil)
 	when CODEGEN_RECORD != "" {
-		data, err := os.read_entire_file(path, context.temp_allocator)
+		// read again in an arena of its own: none of the recording is in the
+		// test's allocators, which the memory tests check
+		arena: virtual.Arena
+		if virtual.arena_init_growing(&arena) != nil do panic("recording: no memory")
+		defer virtual.arena_destroy(&arena)
+		data, err := os.read_entire_file(path, virtual.arena_allocator(&arena))
 		if err == nil do record_decode(ff, data, d, nil)
 	}
 }
