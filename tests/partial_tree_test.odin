@@ -119,6 +119,16 @@ p[0].far[0].x[0] = 5 @1+1
 `,
 		},
 		{
+			// a value may hold what a span is written with
+			name = "string",
+			ksy = "meta:\n  id: p\nseq:\n  - id: s\n    type: str\n    size: 6\n    encoding: ASCII\n  - id: n\n    type: u1\n",
+			input = transmute([]byte)string("a+- @1"),
+			err = "Unexpected_EOF at 0x00000006 in p[0].n[0]",
+			want = `p[0] {} @0+6
+p[0].s[0] = "a+- @1" @0+6
+`,
+		},
+		{
 			// the root's own instance is there from its start
 			name = "empty input",
 			ksy = "meta:\n  id: p\nseq:\n  - id: a\n    type: u1\n",

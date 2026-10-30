@@ -53,6 +53,7 @@ decode_limited :: proc(t: ^testing.T, src: string, input: []byte, limits: rdr.Li
 	}
 	defer rdr.destroy_parse_error(&err)
 	if err.kind == .None do return "ok", used
+	check_failed_tree(&ff, input, "", err, &tree, false, nil, limits)
 	return fmt.tprintf("error: %v in %s", err.kind, err.path), used
 }
 
