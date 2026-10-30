@@ -71,3 +71,31 @@ These Kaitai Project works are used only by the development tools, are downloade
 | [kaitai_struct_samples](https://github.com/kaitai-io/kaitai_struct_samples) | each sample's own, in its `.license` file | `tools/ksy_corpus --samples`, and the examples in the documentation |
 
 `tools/kaitai_compare/package-lock.json` records the npm packages' versions and checksums. It contains none of their code.
+
+## hnoss
+
+The viewer, `view/`, draws with [hnoss](https://github.com/Huseynteymurzade28/hnoss), a terminal UI library in Odin, which `view/hnoss` holds as a git submodule, at the commit this repository records. Its code is not in this repository, in zelbyn's binaries or in its releases, only in the viewer's build. It is under this license:
+
+```
+MIT License
+
+Copyright (c) 2026 Huseyn Teymurzade
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

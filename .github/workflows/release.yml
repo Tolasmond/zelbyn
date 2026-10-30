@@ -33,6 +33,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true # view/hnoss, for the viewer's check on Linux; the viewer is not released
 
       - uses: ./.github/actions/install-odin
 

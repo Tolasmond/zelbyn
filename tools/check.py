@@ -12,6 +12,9 @@ names (another is warned of, not refused). Always run, in order:
     uses the most stack, with ODIN_TEST_FAIL_ON_BAD_MEMORY
   - odin check -vet -strict-style of tools/bench, tools/ksy_corpus and
     tools/yaml_corpus
+  - on Linux, odin check view -vet -strict-style: the viewer, with hnoss,
+    the submodule view/hnoss, which runs on Linux only. Without the
+    submodule, the check fails.
   - tools/codegen_tests/check.py: every decode of the tests again, with
     the code generated from its schema
 
@@ -65,6 +68,19 @@ def run(name, cmd, results):
     results.append((name, ok))
 
 
+def check_view(results):
+    """Checks the viewer, view/, on Linux, the one platform hnoss runs on."""
+    name = 'odin check view'
+    if not sys.platform.startswith('linux'):
+        print('== %s\n   skipped: the viewer runs on Linux only\n' % name, flush=True)
+        return
+    if not os.path.isfile('view/hnoss/hnoss.odin'):
+        print('== %s\n   view/hnoss is not checked out: git submodule update --init\n   FAILED\n' % name, flush=True)
+        results.append((name, False))
+        return
+    run(name, ['odin', 'check', 'view', '-vet', '-strict-style'], results)
+
+
 def main():
     p = argparse.ArgumentParser(usage=__doc__)
     p.add_argument('--formats')
@@ -98,6 +114,7 @@ def main():
         for tool in ('tools/bench', 'tools/ksy_corpus', 'tools/yaml_corpus'):
             run('odin check ' + tool, ['odin', 'check', tool, '-vet', '-strict-style'], results)
         run('codegen tests', [sys.executable, 'tools/codegen_tests/check.py'], results)
+        check_view(results)
 
     if args.formats:
         cmd = [sys.executable, 'tools/ksy_corpus/check.py']
