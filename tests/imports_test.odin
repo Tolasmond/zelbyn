@@ -22,6 +22,7 @@ IMPORT_NAMES := [?][2]string {
 	{"metadata", "mdata"},
 	{"reader", "rdr"},
 	{"rows", "rows"}, // the viewer's, view/rows
+	{"outline", "outline"}, // the viewer's, view/outline
 	{"yaml", "yml"},
 }
 
@@ -57,6 +58,8 @@ import_names :: proc(t: ^testing.T) {
 			target := strings.trim(line[quote:], "\"")
 			// zelbyn's own: ../x, ../../zelbyn/x, zelbyn/x; not core: or base:
 			if strings.contains(target, ":") || !(strings.has_prefix(target, "../") || strings.has_prefix(target, "zelbyn/")) do continue
+			// hnoss's packages, which the viewer imports, are not zelbyn's
+			if strings.contains(target, "hnoss/") do continue
 			pkg := target[strings.last_index_byte(target, '/') + 1:]
 			want, known := "", false
 			for n in IMPORT_NAMES do if n[0] == pkg do want, known = n[1], true

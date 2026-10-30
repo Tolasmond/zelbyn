@@ -1,6 +1,7 @@
 // zelbyn-view: a viewer of a file decoded with a schema, in the terminal.
 // It runs on Linux only, as hnoss, the library it draws with (a submodule
-// in view/hnoss), does. So far it lists the fields of the top-level type.
+// in view/hnoss), does. It shows the decoded tree as an outline
+// (view/outline) of its rows (view/rows).
 package main
 
 import "core:fmt"
@@ -12,6 +13,8 @@ import fld "../zelbyn/field"
 import mdata "../zelbyn/metadata"
 import rdr "../zelbyn/reader"
 import "hnoss"
+import "outline"
+import "rows"
 
 USAGE :: "Usage: %s <schema.ksy> <file>\n"
 
@@ -41,75 +44,59 @@ run :: proc(args: []string) -> int {
 	defer mdata.destroy_file_format(&file_format)
 	if !cli.load_format(schema_path, nil, &file_format, stderr) do return 1
 
+	// read here, not by reader.read, to keep the bytes for the hex pane
+	data, read_err := os.read_entire_file(file_path, context.allocator)
+	if read_err != nil {
+		cli.write_parse_error(stderr, file_path, {kind = .File_Read_Failed, os_error = read_err})
+		return 1
+	}
+	defer delete(data)
+
 	tree: fld.Value_Tree
 	// the tree may be partially filled after a parse error; free it either way
 	defer fld.destroy_value_tree(&tree)
-	_, parse_err := rdr.read(file_path, &file_format, &tree, spans = true)
+	_, parse_err := rdr.read_from_bytes(data, &file_format, &tree, spans = true)
 	defer rdr.destroy_parse_error(&parse_err)
 	if parse_err.kind != .None {
 		cli.write_parse_error(stderr, file_path, parse_err)
 		return 1
 	}
 
-	rows := field_rows(&file_format, &tree)
-	defer {
-		for row in rows do delete(row)
-		delete(rows)
-	}
+	model: rows.Model
+	rows.init(&model, &file_format, &tree)
+	defer rows.destroy(&model)
 
 	// show has given the terminal back by now, so the message is seen
-	if err := show(file_path, rows); err != .None {
+	if err := show(file_path, &model, len(data)); err != .None {
 		fmt.eprintfln("error: terminal: %v", err)
 		return 1
 	}
 	return 0
 }
 
-// One row for each field of the top-level type of tree, each followed by
-// its bit fields, then each parse instance, as the text dump orders them,
-// with the number of values each has.
-field_rows :: proc(format: ^mdata.File_Format, tree: ^fld.Value_Tree) -> []string {
-	rows := make([dynamic]string)
-	if len(tree.root) == 0 do return rows[:]
-	instance, is_instance := tree.root[0].(^fld.Instance)
-	if !is_instance do return rows[:]
-
-	add :: proc(rows: ^[dynamic]string, name: string, values: []fld.Value) {
-		append(rows, fmt.aprintf("%s (%d)", name, len(values)))
-	}
-	set := mdata.instance_set(format.root, instance)
-	slot := len(set.parse_instances)
-	for child in set.children {
-		add(&rows, child.name, instance.slots[slot])
-		for bit, b in child.bits do add(&rows, bit.name, instance.slots[slot + 1 + b])
-		slot += 1 + len(child.bits)
-	}
-	for p, j in set.parse_instances do add(&rows, p.name, instance.slots[j])
-	return rows[:]
-}
-
-// Takes the terminal and shows rows in a list, titled with file_path,
-// until q, Esc or Ctrl+C, then gives the terminal back.
-show :: proc(file_path: string, rows: []string) -> hnoss.Error {
+// Takes the terminal and shows the rows of model, of a file of size bytes,
+// in an outline titled with file_path, until q, Esc or Ctrl+C, then gives
+// the terminal back.
+show :: proc(file_path: string, model: ^rows.Model, size: int) -> hnoss.Error {
 	context.assertion_failure_proc = hnoss.assertion_failure_proc
-	term := hnoss.init() or_return
+	term := hnoss.init(hnoss.DEFAULT_OPTIONS + {.Mouse_Capture}) or_return
 	defer hnoss.deinit(&term)
 
 	// the title is markup, in which [[ is a literal [; it lasts every frame,
 	// so not in context.temp_allocator, which each frame frees
 	title, allocated := strings.replace_all(filepath.base(file_path), "[", "[[")
 	defer if allocated do delete(title)
-	list: hnoss.List_State
+	tree := outline.State{model = model, digits = outline.offset_digits(size)}
 	events: []hnoss.Event
 	loop: for {
 		f := hnoss.begin_frame(&term)
 		ui := hnoss.ui(f, events)
 		area := f.area
 		footer := hnoss.cut_bottom(&area, 1)
-		hnoss.label(ui, footer, "[dim]↑↓ jk PgUp PgDn Home End · q quit[/]")
-		hnoss.focus(ui, &list)
+		hnoss.focus(ui, &tree)
 		inner := hnoss.box(ui, area, title, {focused = true})
-		hnoss.list(ui, inner, rows, &list, {scrollbar = true})
+		outline.draw(ui, inner, &tree)
+		hnoss.label(ui, footer, fmt.tprintf("[dim]row %d of %d · ↑↓ jk PgUp PgDn Home End move · → l ← h Enter expand, collapse · q quit[/]", tree.selected + 1, rows.count(model)))
 		for ev in hnoss.unhandled(ui) {
 			if hnoss.is_char(ev, 'q') || hnoss.is_key(ev, .Esc) || hnoss.is_char(ev, 'c', {.Ctrl}) do break loop
 		}

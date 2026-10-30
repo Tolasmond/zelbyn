@@ -61,6 +61,8 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `tools/check.py` | The checks a change must pass, in one command, and the optional corpus checks |
 | `view/` | The viewer (`zelbyn-view`), a program of its own that shows a decoded file in the terminal, on Linux only; nothing of zelbyn's imports it |
 | `view/rows/` | The viewer's rows: a decoded tree as an outline of values, sets and arrays, expanded and collapsed, whose window is found without stepping through the rows before it, the expanded rows under each kept in a treap that counts the rows under them; it imports no terminal library, and is tested with zelbyn |
+| `view/outline/` | The viewer's tree pane: the rows of `view/rows` drawn with hnoss as an outline, with a marker, name, value and offset on each, and its keys and mouse |
+| `view/tests/` | The viewer's tests, which draw its panes into a hnoss buffer, on Linux only |
 | `view/hnoss/` | [hnoss](https://github.com/Huseynteymurzade28/hnoss), the terminal UI library the viewer draws with, a git submodule pinned to a commit |
 | `.github/workflows/check.yml` | CI: `tools/check.py` on each push to `main` and each pull request |
 | `.github/workflows/release.yml` | A GitHub release of the binaries for Linux and Windows on each tag `v*` |
@@ -86,7 +88,8 @@ All packages also import from Odin's `core` library. The internal imports are:
 | `cli` | `codegen`, `dump`, `field`, `ksy`, `metadata`, `reader` |
 | `main` | `cli` |
 | `view/rows` | `field`, `metadata` |
-| `view` (the viewer's `main`) | `cli`, `field`, `metadata`, `reader`, and hnoss |
+| `view/outline` | `view/rows`, and hnoss |
+| `view` (the viewer's `main`) | `cli`, `field`, `metadata`, `reader`, `view/rows`, `view/outline`, and hnoss |
 
 `metadata` imports `field` for one procedure, `instance_set` (§6.7), which reads the case that a value-tree instance records. `reader`, `dump` and `codegen` do not import `ksy` or `yaml`: they see only the plan. `data` imports nothing of zelbyn's, as code that `codegen` generates imports it in other projects (§10).
 
@@ -102,7 +105,7 @@ Each package is imported under one name in every file, of the packages, `main.od
 | `metadata` | `mdata` |
 | `reader` | `rdr` |
 | `yaml` | `yml` |
-| `cli`, `codegen`, `file`, `ksy`, and the viewer's `rows` | their own names |
+| `cli`, `codegen`, `file`, `ksy`, and the viewer's `rows` and `outline` | their own names |
 
 `tests/imports_test.odin` checks every import against this table.
 
