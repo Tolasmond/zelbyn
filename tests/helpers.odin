@@ -9,6 +9,7 @@ import rdr "../zelbyn/reader"
 import "base:intrinsics"
 import "core:fmt"
 import "core:hash"
+import "core:log"
 import "core:mem/virtual"
 import "core:os"
 import "core:reflect"
@@ -129,16 +130,62 @@ Decoded :: struct {
 // (doc/arch.md, "Memory and ownership").
 decode_bytes :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, spans := false, args: []fld.Value = nil) {
 	d.consumed, d.err = rdr.read_from_bytes(data, ff, &d.tree, spans, args)
+	if d.err.kind != .None do check_failed_tree(ff, data, d, spans, args)
 	when CODEGEN_RECORD != "" do record_decode(ff, data, d, args)
 }
 
 decode_file :: proc(ff: ^mdata.File_Format, path: string, d: ^Decoded, spans := false) {
 	d.consumed, d.err = rdr.read(path, ff, &d.tree, spans)
+	if d.err.kind != .None && d.err.kind != .File_Read_Failed {
+		// the input read is in the tree's arena, with the tree
+		data, err := os.read_entire_file(path, context.temp_allocator)
+		if err == nil do check_failed_tree(ff, data, d, spans, nil)
+	}
 	when CODEGEN_RECORD != "" {
 		data, err := os.read_entire_file(path, context.temp_allocator)
 		if err == nil do record_decode(ff, data, d, nil)
 	}
 }
+
+// After a decode of data that failed, with the result d, checks that its
+// tree can be walked as a complete one can, and holds what doc/arch.md
+// §7.10 says: decoded again, with spans if d was not and without if it was,
+// it has the same error and the same values and sets, and with spans,
+// every one of them has a span. A difference is logged as an error, which
+// fails the test. Nothing of it is in the test's allocators, which the
+// memory tests check.
+@(private = "file")
+check_failed_tree :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, spans: bool, args: []fld.Value) {
+	arena: virtual.Arena
+	if virtual.arena_init_growing(&arena) != nil do panic("check_failed_tree: no memory")
+	defer virtual.arena_destroy(&arena)
+	context.allocator = virtual.arena_allocator(&arena)
+	context.temp_allocator = context.allocator
+
+	other: fld.Value_Tree
+	defer fld.destroy_value_tree(&other)
+	_, err := rdr.read_from_bytes(data, ff, &other, !spans, args)
+	if err.kind != d.err.kind || err.offset != d.err.offset || err.path != d.err.path {
+		log.errorf("%s: with spans %v, %v at 0x%08X in %s; with spans %v, %v at 0x%08X in %s", ff.name, spans, d.err.kind, d.err.offset, d.err.path, !spans, err.kind, err.offset, err.path)
+		return
+	}
+
+	with, without := tree_lines(ff, spans ? &d.tree : &other), tree_lines(ff, spans ? &other : &d.tree)
+	if without_spans(with) != without {
+		log.errorf("%s: after %v at 0x%08X in %s, the tree with spans\n%s\nis not the one without\n%s", ff.name, d.err.kind, d.err.offset, d.err.path, with, without)
+	}
+	rest := with
+	for line in strings.split_lines_iterator(&rest) {
+		if strings.contains(line, " @-") || strings.contains(line, "+-") {
+			log.errorf("%s: after %v at 0x%08X in %s, a negative span: %s", ff.name, d.err.kind, d.err.offset, d.err.path, line)
+		}
+	}
+	// and as the dumps walk it
+	b := strings.builder_make()
+	_ = dmp.write_text(strings.to_writer(&b), ff, spans ? &d.tree : &other, offsets = true)
+	_ = dmp.write_json(strings.to_writer(&b), ff, &d.tree)
+}
+
 
 // A directory that every decode of decode_bytes and decode_file is
 // recorded in, for tools/codegen_tests/check.py, which decodes each input
@@ -324,4 +371,53 @@ field_instance :: proc(s: Set_Instance, name: string, index := 0) -> Set_Instanc
 variant_equal :: proc(a, b: $U) -> bool where intrinsics.type_is_union(U) {
 	x, y := reflect.get_union_variant(a), reflect.get_union_variant(b)
 	return x.id == y.id && reflect.equal(x, y, including_indirect_array_recursion = true)
+}
+
+// Every value of tree, sets included, one per line: its path, then " {}"
+// for a set instance or " = " and the value, and in a tree read with spans
+// " @" and its offset "+" its size. Children are in the order of the text
+// dump, then parse instances, which it writes after them too.
+tree_lines :: proc(ff: ^mdata.File_Format, tree: ^fld.Value_Tree) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	walk :: proc(b: ^strings.Builder, tree: ^fld.Value_Tree, path, name: string, node: ^mdata.Node, values: []fld.Value, owner: ^fld.Instance, k: int) {
+		set := node != nil && node.type == .Set ? node : nil
+		for v, i in values {
+			p := path == "" ? fmt.tprintf("%s[%d]", name, i) : fmt.tprintf("%s.%s[%d]", path, name, i)
+			instance, is_instance := v.(^fld.Instance)
+			if is_instance {
+				fmt.sbprintf(b, "%s {{}}", p)
+			} else {
+				fmt.sbprintf(b, "%s = ", p)
+				_ = fld.write_value(strings.to_writer(b), v)
+			}
+			if tree.spans {
+				span := owner == nil ? fld.root_span(tree, i) : fld.value_span(owner, k, i)
+				fmt.sbprintf(b, " @%d+%d", span.offset, span.size)
+			}
+			strings.write_byte(b, '\n')
+			if !is_instance do continue
+			read_as := mdata.instance_set(set, instance)
+			slot := len(read_as.parse_instances)
+			for child in read_as.children {
+				walk(b, tree, p, child.name, child, instance.slots[slot], instance, slot)
+				for bit, j in child.bits do walk(b, tree, p, bit.name, nil, instance.slots[slot + 1 + j], instance, slot + 1 + j)
+				slot += 1 + len(child.bits)
+			}
+			for pi, j in read_as.parse_instances do walk(b, tree, p, pi.name, pi, instance.slots[j], instance, j)
+		}
+	}
+	walk(&b, tree, "", ff.root.name, ff.root, tree.root, nil, 0)
+	return strings.to_string(b)
+}
+
+// lines without the " @offset+size" at their end.
+without_spans :: proc(lines: string) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	rest := lines
+	for line in strings.split_lines_iterator(&rest) {
+		at := strings.last_index(line, " @")
+		strings.write_string(&b, at >= 0 ? line[:at] : line)
+		strings.write_byte(&b, '\n')
+	}
+	return strings.to_string(b)
 }

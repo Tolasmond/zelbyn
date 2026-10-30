@@ -45,7 +45,9 @@ DEFAULT_LIMITS :: Limits {
 // param's type: an i64 for an integer type, a bool, []byte for bytes or a
 // string for str, which the tree copies, or for a user type, []byte, read
 // as an instance of it in a stream of their own; else Invalid_Arguments.
-// limits bound the decode (Limits).
+// limits bound the decode (Limits). After an error, the tree holds what was
+// read before it, and can be walked as a complete tree can (doc/arch.md,
+// "Errors"); it is destroyed either way.
 @(require_results)
 read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false, args: []fld.Value = nil, limits := DEFAULT_LIMITS) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read: tree must be zero or destroyed")
@@ -68,7 +70,8 @@ read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, sp
 // blobs are views of data, which the tree borrows, but for strings in an
 // encoding that is decoded, which are in the tree's arena: keep data alive and
 // unchanged for as long as the tree is used. The tree references nothing
-// in the schema. spans and args are as for read.
+// in the schema. spans, args, limits and the tree after an error are as
+// for read.
 @(require_results)
 read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false, args: []fld.Value = nil, limits := DEFAULT_LIMITS) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
@@ -284,6 +287,32 @@ set_span :: proc(d: ^Decoder, s: ^Sink, k: int, start: int) {
 	fld.cell_spans(instance)[(uintptr(raw_data(slot)) - uintptr(raw_data(cells))) / size_of(fld.Value)] = span
 }
 
+// Records the span of the last value of slot 0 of s, a set instance whose
+// read failed, as set_span does: from start to the stream's position when
+// it failed, which for an instance of a substream is past the substream.
+// The frames of the instances being read are left pushed on error, so the
+// instance whose cell holds it, when one does, is found among them. Not
+// inlined: only a failed read calls it.
+@(private = "file")
+set_failed_span :: #force_no_inline proc(d: ^Decoder, s: ^Sink, start: int) {
+	slot := s.slots[0]
+	span := fld.Span{d.base + start, max(d.r.pos - start, 0)}
+	if s.cells == nil || raw_data(slot) != &s.cells[0] {
+		fld.array_span(slot, len(slot) - 1)^ = span
+		return
+	}
+	at := uintptr(raw_data(slot))
+	#reverse for frame in d.frames {
+		cells := fld.instance_cells(frame.instance)
+		first := uintptr(raw_data(cells))
+		if at >= first && at < first + uintptr(len(cells) * size_of(fld.Value)) {
+			fld.cell_spans(frame.instance)[(at - first) / size_of(fld.Value)] = span
+			return
+		}
+	}
+	panic("set_failed_span: no frame's instance holds the cell")
+}
+
 // Reads every value of node into s: the instances of a set, or the elements
 // of any other field, with their bit fields. A parse instance is read at
 // its pos, which moves the stream: read_parse_instance puts it back.
@@ -431,7 +460,11 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 
 	if node.type == .Set {
 		n := len(s.slots[0])
-		read_instance(d, s, node, index, SPANS) or_return
+		if err := read_instance(d, s, node, index, SPANS); err != .None {
+			// an instance whose read failed is kept, with what it read
+			when SPANS do if len(s.slots[0]) > n do set_failed_span(d, s, start)
+			return err
+		}
 		// a switch-on that chooses no case adds no value, so in a repeat the
 		// elements before may have added fewer values than index
 		read := len(s.slots[0]) > n
