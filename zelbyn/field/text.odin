@@ -9,12 +9,12 @@ BLOB_PREVIEW :: dat.BLOB_PREVIEW
 // Writes one scalar as the text dump shows it, with the writers of package
 // data, which generated code uses too: integers in decimal, floats with %v,
 // strings with %q, booleans as true or false, and a blob as "<N bytes>"
-// followed by its first BLOB_PREVIEW bytes in hex and " ..." if there are
-// more. With string_preview above 0, a string of more characters shows its
-// first string_preview, followed by " ...". Anything else (a set, an array
-// or nil) is .Unsupported.
+// followed by its first blob_preview bytes in hex, BLOB_PREVIEW unless
+// another is given, and " ..." if there are more. With string_preview above
+// 0, a string of more characters shows its first string_preview, followed
+// by " ...". Anything else (a set, an array or nil) is .Unsupported.
 @(require_results)
-write_value :: proc(w: io.Writer, v: Value, string_preview := 0) -> io.Error {
+write_value :: proc(w: io.Writer, v: Value, string_preview := 0, blob_preview := BLOB_PREVIEW) -> io.Error {
 	switch x in v {
 	case i8:     return dat.write_int(w, i64(x))
 	case i16:    return dat.write_int(w, i64(x))
@@ -27,7 +27,7 @@ write_value :: proc(w: io.Writer, v: Value, string_preview := 0) -> io.Error {
 	case f32:    return dat.write_f32(w, x)
 	case f64:    return dat.write_f64(w, x)
 	case string: return dat.write_string(w, x, string_preview)
-	case []byte: return dat.write_blob(w, x)
+	case []byte: return dat.write_blob(w, x, blob_preview)
 	case bool:   return dat.write_bool(w, x)
 	case ^Instance, []Value:
 		return .Unsupported

@@ -66,18 +66,20 @@ write_string :: proc(w: io.Writer, s: string, string_preview := 0) -> io.Error {
 	return err
 }
 
+// Writes b as the dump shows it: "<N bytes>", its first preview bytes in
+// hex, and " ..." when there are more.
 @(require_results)
-write_blob :: proc(w: io.Writer, b: []byte) -> io.Error {
+write_blob :: proc(w: io.Writer, b: []byte, preview := BLOB_PREVIEW) -> io.Error {
 	io.write_byte(w, '<') or_return
 	io.write_int(w, len(b)) or_return
 	io.write_string(w, " bytes>") or_return
 	digits := "0123456789abcdef"
-	for x in b[:min(len(b), BLOB_PREVIEW)] {
+	for x in b[:min(len(b), preview)] {
 		io.write_byte(w, ' ') or_return
 		io.write_byte(w, digits[x >> 4]) or_return
 		io.write_byte(w, digits[x & 0xf]) or_return
 	}
-	if len(b) > BLOB_PREVIEW do io.write_string(w, " ...") or_return
+	if len(b) > preview do io.write_string(w, " ...") or_return
 	return .None
 }
 
