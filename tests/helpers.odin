@@ -132,12 +132,14 @@ Decoded :: struct {
 decode_bytes :: proc(ff: ^mdata.File_Format, data: []byte, d: ^Decoded, spans := false, args: []fld.Value = nil) {
 	d.consumed, d.err = rdr.read_from_bytes(data, ff, &d.tree, spans, args)
 	if d.err.kind != .None do check_failed_tree(ff, data, "", d.err, &d.tree, spans, args)
+	check_rows(ff, &d.tree)
 	when CODEGEN_RECORD != "" do record_decode(ff, data, d, args)
 }
 
 decode_file :: proc(ff: ^mdata.File_Format, path: string, d: ^Decoded, spans := false) {
 	d.consumed, d.err = rdr.read(path, ff, &d.tree, spans)
 	if d.err.kind != .None && d.err.kind != .File_Read_Failed do check_failed_tree(ff, nil, path, d.err, &d.tree, spans, nil)
+	check_rows(ff, &d.tree)
 	when CODEGEN_RECORD != "" {
 		// read again in an arena of its own: none of the recording is in the
 		// test's allocators, which the memory tests check

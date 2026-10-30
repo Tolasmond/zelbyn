@@ -21,6 +21,7 @@ IMPORT_NAMES := [?][2]string {
 	{"ksy", "ksy"},
 	{"metadata", "mdata"},
 	{"reader", "rdr"},
+	{"rows", "rows"}, // the viewer's, view/rows
 	{"yaml", "yml"},
 }
 
