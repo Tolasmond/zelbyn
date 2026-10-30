@@ -18,11 +18,13 @@ odin check tools/ksy_corpus -vet -strict-style
 odin check tools/yaml_corpus -vet -strict-style
 python3 tools/codegen_tests/check.py
 odin check view -vet -strict-style
+odin check view/tests -vet -strict-style -no-entry-point
+odin test view/tests -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true -define:ODIN_TEST_LOG_LEVEL=warning
 ```
 
 `tools/codegen_tests/check.py` decodes every input the tests decode again, with the code generated from its schema ([Generated code](#generated-code)).
 
-The last checks the viewer, `view/`, on Linux only: it draws with hnoss, a library that runs on Linux only, which the git submodule `view/hnoss` holds at a pinned commit. Clone with `git clone --recursive`, or in a clone run `git submodule update --init`. Without the submodule, `tools/check.py` fails the check and says so; on other platforms it skips it. The viewer is built with `odin build view -out:build/zelbyn-view`, and is not part of the releases. A new pin of hnoss is a commit of the submodule, made on purpose, with the checks passing.
+The last three check the viewer, `view/`, and run its tests, `view/tests`, on Linux only: it draws with hnoss, a library that runs on Linux only, which the git submodule `view/hnoss` holds at a pinned commit. Clone with `git clone --recursive`, or in a clone run `git submodule update --init`. Without the submodule, `tools/check.py` fails these checks and says so; on other platforms it skips them. The viewer's rows, `view/rows`, import no part of hnoss, and are tested with zelbyn's tests, on every platform. The viewer is built with `odin build view -out:build/zelbyn-view`, and is not part of the releases. A new pin of hnoss is a commit of the submodule, made on purpose, with the checks passing.
 
 `tools/check.py` runs them all, each whatever the ones before it give, and ends with a summary; it exits 1 if any failed. It builds the tests in a temporary directory. The checks are pinned to Odin `dev-2026-10` (commit `84bc3fc`), and the script warns when another is on the `PATH`.
 
