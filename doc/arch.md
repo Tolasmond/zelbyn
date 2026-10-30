@@ -62,6 +62,7 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `view/` | The viewer (`zelbyn-view`), a program of its own that shows a decoded file in the terminal, on Linux only; nothing of zelbyn's imports it |
 | `view/rows/` | The viewer's rows: a decoded tree as an outline of values, sets and arrays, expanded and collapsed, whose window is found without stepping through the rows before it, the expanded rows under each kept in a treap that counts the rows under them; it imports no terminal library, and is tested with zelbyn |
 | `view/outline/` | The viewer's tree pane: the rows of `view/rows` drawn with hnoss as an outline, with a marker, name, value and offset on each, and its keys and mouse |
+| `view/hexdump/` | The viewer's hex pane: the file's bytes, a line of offset, hex and text each, fewer bytes a line when narrow, with the selected value's bytes highlighted, the set's around them shaded, a mark for a value of no bytes, and a note; it follows the selection, and scrolls with its keys and mouse |
 | `view/tests/` | The viewer's tests, which draw its panes into a hnoss buffer, on Linux only |
 | `view/hnoss/` | [hnoss](https://github.com/Huseynteymurzade28/hnoss), the terminal UI library the viewer draws with, a git submodule pinned to a commit |
 | `.github/workflows/check.yml` | CI: `tools/check.py` on each push to `main` and each pull request |
@@ -89,7 +90,8 @@ All packages also import from Odin's `core` library. The internal imports are:
 | `main` | `cli` |
 | `view/rows` | `field`, `metadata` |
 | `view/outline` | `view/rows`, and hnoss |
-| `view` (the viewer's `main`) | `cli`, `field`, `metadata`, `reader`, `view/rows`, `view/outline`, and hnoss |
+| `view/hexdump` | hnoss |
+| `view` (the viewer's `main`) | `cli`, `field`, `metadata`, `reader`, `view/rows`, `view/outline`, `view/hexdump`, and hnoss |
 
 `metadata` imports `field` for one procedure, `instance_set` (§6.7), which reads the case that a value-tree instance records. `reader`, `dump` and `codegen` do not import `ksy` or `yaml`: they see only the plan. `data` imports nothing of zelbyn's, as code that `codegen` generates imports it in other projects (§10).
 
@@ -105,7 +107,7 @@ Each package is imported under one name in every file, of the packages, `main.od
 | `metadata` | `mdata` |
 | `reader` | `rdr` |
 | `yaml` | `yml` |
-| `cli`, `codegen`, `file`, `ksy`, and the viewer's `rows` and `outline` | their own names |
+| `cli`, `codegen`, `file`, `ksy`, and the viewer's `rows`, `outline` and `hexdump` | their own names |
 
 `tests/imports_test.odin` checks every import against this table.
 
@@ -779,7 +781,7 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | `helpers.odin` | `SAMPLE_KSY`, a schema of no real format with the shapes the decoder's tests need, and `sample_input`, which makes its inputs of any size; decoding helpers, with or without spans, which with `-define:ZELBYN_CODEGEN_RECORD=<dir>` record each decode for `tools/codegen_tests` (`record_decode`), check the tree of each that fails (`check_failed_tree`, §7.10), and that the viewer's rows of each tree, all expanded, give its text dump (`check_rows`, in `rows_test.odin`); `tree_lines`, every value of a tree, sets and spans included; finding a field's slot and values by name |
 | `decode_malformed_test.odin` | Empty, malformed and truncated inputs and a missing file, their error kinds, offsets and paths; counts larger than the input; negative counts, which read nothing, and lengths |
 | `partial_tree_test.odin` | What the tree holds after a failed decode (§7.10), with and without spans: arrays, instances and parse instances cut short, a value that fails its check, with and without `-bits`, a substream, a `switch-on`, `process: zlib`, and an error before the root |
-| `rows_test.odin` | The viewer's rows (`view/rows`): those of `SAMPLE_KSY` as they are expanded and collapsed, their spans and text, and moving to a parent and siblings; random expands, collapses and moves against an outline that makes every row; an array of a million values and of sets, whose windows, expanding and collapsing take steps that do not grow with it and format only the window's values, also with half a million of its rows expanded, whose steps grow with their logarithm; a preview that cuts strings and blobs; no allocation through `context.allocator` once a model is made, and none kept of a window's rows once freed |
+| `rows_test.odin` | The viewer's rows (`view/rows`): those of `SAMPLE_KSY` as they are expanded and collapsed, their spans and text, and moving to a parent and siblings; random expands, collapses and moves against an outline that makes every row; an array of a million values and of sets, whose windows, expanding and collapsing take steps that do not grow with it and format only the window's values, also with half a million of its rows expanded, whose steps grow with their logarithm; a preview that cuts strings and blobs; values read from bytes that `process: zlib` decompressed, marked with the span in the file of the field they came from; no allocation through `context.allocator` once a model is made, and none kept of a window's rows once freed |
 | `memory_test.odin` | That decoding, with and without spans and with `process: zlib`, `read` and `ksy.compile` make no heap allocations; that errors allocate only their message or path, and a failed check's value and expected; tree lifetime and reuse after destroy |
 | `checks_test.odin` | Byte order, `valid` checks and bit fields, on hand-built plans, with the value and the expected value each failed check reports, shortened when long |
 | `expression_parse_test.odin` | Parsing, precedence and syntax errors, and type errors, also of floats |

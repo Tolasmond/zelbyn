@@ -31,6 +31,13 @@ Row :: struct {
 	expanded:   bool,
 	span:       fld.Span, // in a tree read with spans; an Array's, from its first value's start to its last's end
 	has_span:   bool,
+	// under a field with process (zlib): the span is in the bytes it
+	// decompressed, not in the file, and source is the span in the file of
+	// the outermost such field it is under, whose bytes it was read from
+	// (doc/usage.md). A parse instance there with an io of another stream
+	// is taken to be in them too.
+	decompressed: bool,
+	source:       fld.Span,
 }
 
 // A row's place in the tree: value index of values, slot k of owner, or of
@@ -381,6 +388,16 @@ make_row :: proc(m: ^Model, c: ^Cursor, preview: int, allocator: mem.Allocator) 
 		element  = !item.single && item.index >= 0,
 		index    = item.index,
 		expanded = current_open(m, c) != nil,
+	}
+	if m.tree.spans {
+		// the frames past the top are the rows this one is under
+		for f in c.frames[1:] {
+			if f.item.index >= 0 && f.item.node != nil && f.item.node.process != .None {
+				row.decompressed = true
+				row.source = value_span(m, f.item, f.item.index)
+				break
+			}
+		}
 	}
 	if item.index < 0 {
 		row.kind = .Array

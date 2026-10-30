@@ -468,3 +468,36 @@ rows_allocate_only_where_given :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, len(out.allocation_map), 0)
 }
+
+// A value read from bytes that process: zlib decompressed is marked, with
+// the span in the file of the field they came from; that field itself, and
+// what follows it, are not.
+@(test)
+rows_decompressed :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
+	err := ksy.compile("meta:\n  id: z\nseq:\n  - id: len\n    type: u1\n  - id: body\n    type: body\n    size: len\n    process: zlib\n  - id: tail\n    type: u1\ntypes:\n  body:\n    seq:\n      - id: a\n        type: u1\n      - id: b\n        type: u1\n", &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "compile: %s", err.message) do return
+	// "AB", compressed, then a tail
+	input := []byte{10, 0x78, 0x9c, 0x73, 0x74, 0x02, 0x00, 0x00, 0xc6, 0x00, 0x84, 7}
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, input, &d, spans = true)
+	if !testing.expect_value(t, d.err.kind, nil) do return
+
+	m: rows.Model
+	rows.init(&m, &ff, &d.tree)
+	defer rows.destroy(&m)
+	rows.expand_all(&m)
+	rs := rows.rows(&m, 0, rows.count(&m))
+	if !testing.expect_value(t, len(rs), 6) do return
+	for r in rs {
+		inside := r.name == "a" || r.name == "b"
+		testing.expectf(t, r.decompressed == inside, "%s: decompressed %v", r.name, r.decompressed)
+		if inside do testing.expectf(t, r.source == fld.Span{1, 10}, "%s: from %v, want the 10 bytes of body at 1", r.name, r.source)
+	}
+	testing.expect_value(t, rs[3].span, fld.Span{1, 1}) // a: body's offset, plus its position in the bytes
+	testing.expect_value(t, rs[4].span, fld.Span{2, 1})
+}
