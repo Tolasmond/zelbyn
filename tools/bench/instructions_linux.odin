@@ -11,7 +11,12 @@ PMU_DEVICES :: "/sys/bus/event_source/devices"
 
 // Counters of the instructions this process retires in user space, one per
 // kind of core: a hybrid CPU has a PMU for each (cpu_core and cpu_atom), and
-// a counter of one counts nothing while the process runs on the other.
+// a counter of one counts nothing while the process runs on the other. They
+// are pinned: the kernel puts them on their PMU before any event that is not,
+// so other users of the PMU cannot take turns with them and leave part of a
+// phase uncounted. One that cannot be put on it, as pinned events of others
+// hold every counter, is in error, and reads of it give nothing until it is
+// closed.
 Instruction_Counters :: struct {
 	fds: [dynamic]linux.Fd,
 }
@@ -44,7 +49,7 @@ open_instruction_counters :: proc() -> (c: Instruction_Counters) {
 		attr := linux.Perf_Event_Attr {
 			type = .HARDWARE,
 			size = size_of(linux.Perf_Event_Attr),
-			flags = {.Exclude_Kernel, .Exclude_HV},
+			flags = {.Pinned, .Exclude_Kernel, .Exclude_HV},
 		}
 		// The PMU's type in the high half of the event's selects it.
 		attr.config.other = type << 32 | u64(linux.Perf_Hardware_Id.INSTRUCTIONS)
@@ -65,7 +70,7 @@ close_instruction_counters :: proc(c: ^Instruction_Counters) {
 }
 
 // The instructions retired since the counters were opened, or -1 if none are
-// open or one cannot be read.
+// open or one cannot be read, which a counter in error cannot.
 instructions :: proc(c: ^Instruction_Counters) -> i64 {
 	if len(c.fds) == 0 do return -1
 	total: i64

@@ -22,7 +22,8 @@ programs:
 
 With --spans the one-shot program decodes with spans. Prints the median
 of every figure, and `-` for instructions that cannot be counted (off Linux,
-or where perf_event_paranoid forbids it). The C++ reference must have been built from the same
+where perf_event_paranoid forbids it, or where pinned events of others hold
+every counter). The C++ reference must have been built from the same
 schema. A program that fails stops the run.
 """
 

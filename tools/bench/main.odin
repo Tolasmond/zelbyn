@@ -10,7 +10,8 @@
 // Prints one line of name=value pairs: compile_us, read_us, decode_us and
 // json_us; compile_ins, read_ins, decode_ins and json_ins, the instructions
 // each phase retired in user space (-1 where they cannot be counted: off
-// Linux, or where perf_event_paranoid forbids it); faults, the page faults
+// Linux, where perf_event_paranoid forbids it, or where pinned events of
+// others hold every counter); faults, the page faults
 // taken during the decode (-1 where the platform cannot count them);
 // tree_bytes, the bytes the tree's arena handed out, which do not include the
 // input; and input_bytes. With --spans the tree records the span of each
