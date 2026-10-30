@@ -46,11 +46,12 @@ run :: proc(args: []string) -> int {
 
 	// read here, not by reader.read, to keep the bytes for the hex pane
 	data, read_err := os.read_entire_file(file_path, context.allocator)
+	// a read that fails part way may have allocated
+	defer delete(data)
 	if read_err != nil {
 		cli.write_parse_error(stderr, file_path, {kind = .File_Read_Failed, os_error = read_err})
 		return 1
 	}
-	defer delete(data)
 
 	tree: fld.Value_Tree
 	// the tree may be partially filled after a parse error; free it either way

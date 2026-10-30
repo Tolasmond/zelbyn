@@ -35,11 +35,11 @@ offset_digits :: proc(size: int) -> int {
 // moves to the row it is under; Enter expands or collapses it. A click
 // selects a row, and on its marker expands or collapses it too; the wheel
 // scrolls. The selection is kept on screen when a key moves it. Returns
-// true when the selection, or the rows shown, changed.
+// true when the selection, the rows, or the first row on screen changed.
 draw :: proc(ui: ^widgets.Ui, area: layout.Rect, s: ^State) -> (changed: bool) {
 	if area.width <= 0 || area.height <= 0 do return false
 	m := s.model
-	old_selected, old_count := s.selected, rows.count(m)
+	old_selected, old_count, old_offset := s.selected, rows.count(m), s.offset
 	// the scrollbar's column, while the rows did not fit, is its own
 	clicks := area
 	if old_count > area.height do layout.cut_right(&clicks, 1)
@@ -59,17 +59,28 @@ draw :: proc(ui: ^widgets.Ui, area: layout.Rect, s: ^State) -> (changed: bool) {
 	s.offset = clamp(s.offset, 0, max(n - body.height, 0))
 	if bar.width > 0 do widgets.scrollbar(ui, bar, n, body.height, &s.offset)
 
-	for r, i in rows.rows(m, s.offset, body.height, preview = body.width) {
-		draw_row(ui, {body.x, body.y + i, body.width, 1}, s, r, s.offset + i == s.selected)
+	// only a scrollbar fits: no row is drawn, nor formatted
+	if body.width > 0 {
+		for r, i in rows.rows(m, s.offset, body.height, preview = body.width) {
+			draw_row(ui, {body.x, body.y + i, body.width, 1}, s, r, s.offset + i == s.selected)
+		}
 	}
-	return s.selected != old_selected || n != old_count
+	return s.selected != old_selected || n != old_count || s.offset != old_offset
 }
 
-// The selected row, when there are rows.
-selected_row :: proc(s: ^State) -> (row: rows.Row, ok: bool) {
-	r := rows.rows(s.model, s.selected, 1)
-	if len(r) == 0 do return {}, false
-	return r[0], true
+// The selected row, when there are rows, its text cut at preview
+// characters (rows.rows).
+selected_row :: proc(s: ^State, preview := 1) -> (row: rows.Row, ok: bool) {
+	return row_at(s.model, s.selected, preview)
+}
+
+// Row r, for what it is rather than its text, which is cut at preview
+// characters, so that a long value is not formatted whole.
+@(private)
+row_at :: proc(m: ^rows.Model, r: int, preview := 1) -> (row: rows.Row, ok: bool) {
+	found := rows.rows(m, r, 1, preview = preview)
+	if len(found) == 0 do return {}, false
+	return found[0], true
 }
 
 // Handles the keys meant for the pane, which has height rows; returns
@@ -111,14 +122,16 @@ handle_keys :: proc(ui: ^widgets.Ui, s: ^State, height: int) -> (moved: bool) {
 		if used {
 			widgets.consume(ui, i)
 			moved = true
+			// each key moves from a row there is, also in one frame
+			s.selected = clamp(s.selected, 0, max(rows.count(m) - 1, 0))
 		}
 	}
 	return
 }
 
 // Handles the mouse in body, where the rows are drawn: a click selects a
-// row and gives the pane focus, and on a row's marker expands or collapses
-// it; the wheel scrolls.
+// row and gives the pane focus, and on a row's marker, where it is drawn,
+// expands or collapses it; the wheel scrolls.
 @(private)
 handle_mouse :: proc(ui: ^widgets.Ui, s: ^State, body: layout.Rect) {
 	m := s.model
@@ -130,9 +143,12 @@ handle_mouse :: proc(ui: ^widgets.Ui, s: ^State, body: layout.Rect) {
 			r := s.offset + e.y - body.y
 			if e.button == .Left && r < rows.count(m) {
 				s.selected = r
-				if row := rows.rows(m, r, 1); len(row) > 0 {
-					marker := body.x + 2 * row[0].depth
-					if e.x >= marker && e.x < marker + 2 && !rows.collapse(m, r) do rows.expand(m, r)
+				if row, ok := row_at(m, r); ok {
+					// a marker cut off, or under the offset, is not there to click
+					marker := body.x + 2 * row.depth
+					text_right := body.x + text_width(s, row, body.width)
+					on_marker := e.x >= marker && e.x < marker + 2 && marker + 2 < text_right
+					if on_marker && !rows.collapse(m, r) do rows.expand(m, r)
 				}
 			}
 			widgets.consume(ui, i)
@@ -141,6 +157,8 @@ handle_mouse :: proc(ui: ^widgets.Ui, s: ^State, body: layout.Rect) {
 			case .Wheel_Up:   s.offset -= 3
 			case .Wheel_Down: s.offset += 3
 			}
+			// each event scrolls from rows there are, also in one frame
+			s.offset = clamp(s.offset, 0, max(rows.count(m) - body.height, 0))
 			widgets.consume(ui, i)
 		}
 	}
@@ -148,8 +166,21 @@ handle_mouse :: proc(ui: ^widgets.Ui, s: ^State, body: layout.Rect) {
 
 @(private)
 is_expanded :: proc(m: ^rows.Model, r: int) -> bool {
-	row := rows.rows(m, r, 1)
-	return len(row) > 0 && row[0].expanded
+	row, ok := row_at(m, r)
+	return ok && row.expanded
+}
+
+// The columns of a line of width that row r's text takes: all of them, or
+// those left of its offset, when that is shown.
+@(private)
+text_width :: proc(s: ^State, r: rows.Row, width: int) -> int {
+	return offset_shown(s, r, width) ? width - (s.digits + 1) : width
+}
+
+// Whether row r shows its offset, in a line of width.
+@(private)
+offset_shown :: proc(s: ^State, r: rows.Row, width: int) -> bool {
+	return s.digits > 0 && r.has_span && width >= 2 * (s.digits + 1)
 }
 
 // Draws row r in line: indent, marker, name, value or count, and the offset
@@ -168,7 +199,7 @@ draw_row :: proc(ui: ^widgets.Ui, line: layout.Rect, s: ^State, r: rows.Row, sel
 	}
 
 	text_area := line
-	if s.digits > 0 && r.has_span && line.width >= 2 * (s.digits + 1) {
+	if offset_shown(s, r, line.width) {
 		offset_area := layout.cut_right(&text_area, s.digits + 1)
 		buf: [32]byte
 		hex := hex_text(buf[:], r.span.offset, s.digits)
