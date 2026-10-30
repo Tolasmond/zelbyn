@@ -240,13 +240,8 @@ run :: proc(schema_path: string, file_path: string, import_path: string, dump: D
 	_, parse_err := rdr.read(file_path, &file_format, &tree, spans = offsets, args = args, limits = limits)
 	defer rdr.destroy_parse_error(&parse_err)
 
-	if parse_err.kind == .File_Read_Failed {
-		fmt.wprintfln(stderr, "error: cannot read %s: %v", file_path, parse_err.os_error)
-		return 1
-	} else if parse_err.kind != .None {
-		fmt.wprintf(stderr, "error: %v at 0x%08X in %s", parse_err.kind, parse_err.offset, parse_err.path)
-		write_check_values(stderr, parse_err)
-		fmt.wprintln(stderr)
+	if parse_err.kind != .None {
+		write_parse_error(stderr, file_path, parse_err)
 		return 1
 	}
 
@@ -401,6 +396,19 @@ load_format :: proc(schema_path: string, import_paths: []string, file_format: ^m
 		fmt.wprintfln(stderr, "error: %s:%v:%v: %v: %s", file, err.line, err.column, err.kind, err.message)
 	}
 	return false
+}
+
+// Writes err, the error of decoding file_path, as one line: that the file
+// cannot be read, or the error's kind, offset and path, and for a failed
+// check what it read and expected.
+write_parse_error :: proc(w: io.Writer, file_path: string, err: rdr.Parse_Error) {
+	if err.kind == .File_Read_Failed {
+		fmt.wprintfln(w, "error: cannot read %s: %v", file_path, err.os_error)
+		return
+	}
+	fmt.wprintf(w, "error: %v at 0x%08X in %s", err.kind, err.offset, err.path)
+	write_check_values(w, err)
+	fmt.wprintln(w)
 }
 
 // Writes what a failed check read and expected, after its error:
