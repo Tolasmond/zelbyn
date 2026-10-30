@@ -9,8 +9,9 @@ program in tools/bench with -o:speed, then runs each of these RUNS times
 programs:
 
 - the one-shot program, which compiles the schema, reads the file, decodes
-  it and writes its JSON dump to memory, timing each phase, and counts the
-  page faults taken during the decode;
+  it and writes its JSON dump to memory, timing each phase and counting the
+  instructions it retires in user space (on Linux), and counts the page
+  faults taken during the decode;
 - the CLI, `zelbyn <schema> <file> --dump json`, with its output discarded,
   timed from spawn to exit (with --spans, `--offsets`, the text dump with
   each value's offset, instead);
@@ -20,7 +21,9 @@ programs:
   reads the file and decodes it with the official runtime.
 
 With --spans the one-shot program decodes with spans. Prints the median
-of every figure. The C++ reference must have been built from the same
+of every figure, and `-` for instructions that cannot be counted (off Linux,
+where perf_event_paranoid forbids it, or where pinned events of others hold
+every counter). The C++ reference must have been built from the same
 schema. A program that fails stops the run.
 """
 
@@ -54,6 +57,13 @@ def median(rows, name):
     return statistics.median(row[name] for row in rows)
 
 
+def instructions(rows, name):
+    """The median count of a phase's instructions, or `-` if any run could not count them."""
+    if any(row[name] < 0 for row in rows):
+        return '-'
+    return '%d' % median(rows, name)
+
+
 def main():
     p = argparse.ArgumentParser(description='Measures zelbyn cold, one fresh process per measurement.')
     p.add_argument('files', nargs='+')
@@ -82,17 +92,22 @@ def main():
                     fields['wall'] = wall
                     r['cpp'].append(fields)
 
-    print('schema %s%s, %d runs per file, medians; times in µs' % (args.schema, ', with spans' if args.spans else '', args.runs))
-    head = '%-14s %8s %8s %7s %8s %7s %8s %8s %9s' % ('file', 'input KB', 'tree KB', 'faults', 'compile', 'read', 'decode', 'json', 'CLI+offs' if args.spans else 'CLI+json')
+    print('schema %s%s, %d runs per file, medians; times in µs, each beside the instructions it retired in user space' % (
+        args.schema, ', with spans' if args.spans else '', args.runs))
+    head = '%-14s %8s %8s %7s %8s %10s %7s %7s %8s %10s %8s %10s %9s' % (
+        'file', 'input KB', 'tree KB', 'faults', 'compile', 'instr', 'read', 'instr', 'decode', 'instr', 'json', 'instr',
+        'CLI+offs' if args.spans else 'CLI+json')
     if args.cpp:
         head += ' | %8s %7s %6s %9s' % ('C++ dec', 'faults', 'ratio', 'C++ proc')
     print(head)
     for f in files:
         r = results[f]
         o = r['odin']
-        line = '%-14s %8.1f %8.1f %7.0f %8.0f %7.0f %8.0f %8.0f %9.0f' % (
+        line = '%-14s %8.1f %8.1f %7.0f %8.0f %10s %7.0f %7s %8.0f %10s %8.0f %10s %9.0f' % (
             os.path.basename(f), median(o, 'input_bytes') / 1024, median(o, 'tree_bytes') / 1024, median(o, 'faults'),
-            median(o, 'compile_us'), median(o, 'read_us'), median(o, 'decode_us'), median(o, 'json_us'), median(r['cli'], 'wall'))
+            median(o, 'compile_us'), instructions(o, 'compile_ins'), median(o, 'read_us'), instructions(o, 'read_ins'),
+            median(o, 'decode_us'), instructions(o, 'decode_ins'), median(o, 'json_us'), instructions(o, 'json_ins'),
+            median(r['cli'], 'wall'))
         if args.cpp:
             c = r['cpp']
             line += ' | %8.0f %7.0f %5.2fx %9.0f' % (median(c, 'decode_us'), median(c, 'faults'), median(o, 'decode_us') / median(c, 'decode_us'), median(c, 'wall'))
