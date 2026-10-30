@@ -6,7 +6,7 @@ import "core:strings"
 import "core:testing"
 
 // The name each of zelbyn's packages is imported under, everywhere: in
-// zelbyn/, main.odin, tests/ and tools/ (doc/arch.md, "Package
+// zelbyn/, main.odin, tests/, tools/ and view/ (doc/arch.md, "Package
 // dependencies").
 @(private = "file")
 IMPORT_NAMES := [?][2]string {
@@ -36,13 +36,14 @@ import_names :: proc(t: ^testing.T) {
 		for e in entries {
 			path, _ := filepath.join({dir, e.name}, context.temp_allocator)
 			if e.type == .Directory {
-				if e.name != "node_modules" && !strings.has_prefix(e.name, ".") do collect(path, files)
+				// view/hnoss is a submodule, whose ../ imports are its own
+				if e.name != "node_modules" && !strings.has_prefix(e.name, ".") && !(dir == "view" && e.name == "hnoss") do collect(path, files)
 			} else if strings.has_suffix(e.name, ".odin") {
 				append(files, path)
 			}
 		}
 	}
-	for dir in ([]string{"zelbyn", "tests", "tools"}) do collect(dir, &files)
+	for dir in ([]string{"zelbyn", "tests", "tools", "view"}) do collect(dir, &files)
 
 	imports := 0
 	for path in files {

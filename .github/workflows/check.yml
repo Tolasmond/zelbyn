@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true # view/hnoss, for the viewer's check, on Linux only
 
       - uses: ./.github/actions/install-odin
 

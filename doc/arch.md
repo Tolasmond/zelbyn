@@ -59,6 +59,8 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `tools/codegen_tests/` | Every decode of the tests made again with the code generated from its plan, and compared |
 | `tools/yaml_corpus/` | A comparison of the YAML parser with libyaml |
 | `tools/check.py` | The checks a change must pass, in one command, and the optional corpus checks |
+| `view/` | The viewer (`zelbyn-view`), a program of its own that shows a decoded file in the terminal, on Linux only; nothing of zelbyn's imports it |
+| `view/hnoss/` | [hnoss](https://github.com/Huseynteymurzade28/hnoss), the terminal UI library the viewer draws with, a git submodule pinned to a commit |
 | `.github/workflows/check.yml` | CI: `tools/check.py` on each push to `main` and each pull request |
 | `.github/workflows/release.yml` | A GitHub release of the binaries for Linux and Windows on each tag `v*` |
 | `.github/actions/install-odin/` | Installs the pinned Odin release, for both workflows |
@@ -82,10 +84,11 @@ All packages also import from Odin's `core` library. The internal imports are:
 | `codegen` | `data`, `expression`, `metadata` |
 | `cli` | `codegen`, `dump`, `field`, `ksy`, `metadata`, `reader` |
 | `main` | `cli` |
+| `view` (the viewer's `main`) | `cli`, `field`, `metadata`, `reader`, and hnoss |
 
 `metadata` imports `field` for one procedure, `instance_set` (§6.7), which reads the case that a value-tree instance records. `reader`, `dump` and `codegen` do not import `ksy` or `yaml`: they see only the plan. `data` imports nothing of zelbyn's, as code that `codegen` generates imports it in other projects (§10).
 
-Each package is imported under one name in every file, of the packages, `main.odin`, the tests and the tools, so that a name means one package wherever it is read:
+Each package is imported under one name in every file, of the packages, `main.odin`, the tests, the tools and the viewer, so that a name means one package wherever it is read:
 
 | Package | Imported as |
 |---|---|

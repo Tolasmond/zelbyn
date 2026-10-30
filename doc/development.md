@@ -17,9 +17,12 @@ odin check tools/bench -vet -strict-style
 odin check tools/ksy_corpus -vet -strict-style
 odin check tools/yaml_corpus -vet -strict-style
 python3 tools/codegen_tests/check.py
+odin check view -vet -strict-style
 ```
 
-The last decodes every input the tests decode again, with the code generated from its schema ([Generated code](#generated-code)).
+`tools/codegen_tests/check.py` decodes every input the tests decode again, with the code generated from its schema ([Generated code](#generated-code)).
+
+The last checks the viewer, `view/`, on Linux only: it draws with hnoss, a library that runs on Linux only, which the git submodule `view/hnoss` holds at a pinned commit. Clone with `git clone --recursive`, or in a clone run `git submodule update --init`. Without the submodule, `tools/check.py` fails the check and says so; on other platforms it skips it. The viewer is built with `odin build view -out:build/zelbyn-view`, and is not part of the releases. A new pin of hnoss is a commit of the submodule, made on purpose, with the checks passing.
 
 `tools/check.py` runs them all, each whatever the ones before it give, and ends with a summary; it exits 1 if any failed. It builds the tests in a temporary directory. The checks are pinned to Odin `dev-2026-10` (commit `84bc3fc`), and the script warns when another is on the `PATH`.
 
@@ -33,7 +36,7 @@ The checks that need what the repository does not hold run only when asked: `--f
 python3 tools/check.py --formats ../kaitai_struct_formats --samples ../kaitai_struct_samples --codegen --yaml-corpus --compare-tests
 ```
 
-`.github/workflows/check.yml` runs `tools/check.py` on every push to `main` and every pull request, on Linux and on Windows, with the Odin release it is pinned to, checked against its SHA-256. `.github/actions/install-odin` installs that release for it and for the release workflow, so a new pin, with its checksums, is made there and in `tools/check.py`. The debug build of the tests uses the most stack, and on Windows checks the stack limits against the 1 MB stack they are sized for (arch.md §7.5). The optional checks are not run there.
+`.github/workflows/check.yml` runs `tools/check.py` on every push to `main` and every pull request, on Linux, with the submodule, and on Windows, with the Odin release it is pinned to, checked against its SHA-256. `.github/actions/install-odin` installs that release for it and for the release workflow, so a new pin, with its checksums, is made there and in `tools/check.py`. The debug build of the tests uses the most stack, and on Windows checks the stack limits against the 1 MB stack they are sized for (arch.md §7.5). The optional checks are not run there.
 
 Debug builds (`odin build . -debug -out:build/zelbyn`) run under a tracking allocator and exit 1 if anything leaks or is freed twice.
 

@@ -27,12 +27,16 @@ jobs:
           - os: ubuntu-22.04
             target: linux-amd64
             python: python3
+            submodules: true # view/hnoss, for the viewer's check, on Linux only
           - os: windows-2025
             target: windows-amd64
             python: python
+            submodules: false
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: ${{ matrix.submodules }} # the viewer is not released
 
       - uses: ./.github/actions/install-odin
 
