@@ -55,12 +55,14 @@ python3 tools/bench/bench.py --schema ../kaitai_struct_formats/executable/elf.ks
 
 For each file it prints medians of:
 - the input size, the tree size (the bytes the tree's arena handed out), and the page faults taken during the decode;
-- the time to compile the schema, read the file, decode it and write the JSON dump to memory, each timed inside one process;
+- the time to compile the schema, read the file, decode it and write the JSON dump to memory, each timed inside one process, and beside each the instructions it retired in user space;
 - the whole-process time of `zelbyn <schema> <file> --dump json`, with its output discarded.
 
 It also prints the time to start a process that exits at once, which is part of every whole-process time. Options: `--runs N`, and `--spans` (decode with spans, and time the CLI with `--offsets` instead of `--dump json`). The schema must not import others, as the C++ reference cannot.
 
-Run it before and after a change meant to make decoding faster or the tree smaller, in the same session, and give both sets of figures in the commit message. A sampling profiler may loop over one file to show where time goes, but its percentages leave out the cost of touching memory for the first time, so the figures come from this benchmark.
+The instructions are counted on Linux with `perf_event_open`, on every kind of core of a hybrid CPU. Times move by a few percent with code layout alone, which a change elsewhere in the binary can shift, and with the machine's load; the instruction counts do not, and their medians repeat to about 0.02%. Read the two together: a change whose count moves did more or less work, even where its time cannot be told from noise, and one whose time moves while its count stays changed how fast the same work ran, through cache misses, branch mispredictions or page faults, or only the code's layout, which a few more runs can tell apart. The counts leave out the kernel's work, so `read` counts little of what it takes. Counting needs `kernel.perf_event_paranoid` at 2 or below; where it is above, and off Linux, the counts are printed as `-`.
+
+Run it before and after a change meant to make decoding faster or the tree smaller, in the same session, and give both sets of figures, times and counts, in the commit message. A sampling profiler may loop over one file to show where time goes, but its percentages leave out the cost of touching memory for the first time, so the figures come from this benchmark.
 
 ### Kaitai Struct C++ reference
 
