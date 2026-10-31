@@ -23,6 +23,7 @@ IMPORT_NAMES := [?][2]string {
 	{"reader", "rdr"},
 	{"rows", "rows"}, // the viewer's, view/rows
 	{"outline", "outline"}, // the viewer's, view/outline
+	{"hexdump", "hexdump"}, // the viewer's, view/hexdump
 	{"yaml", "yml"},
 }
 
