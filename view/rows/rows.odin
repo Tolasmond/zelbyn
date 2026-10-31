@@ -10,6 +10,7 @@ package rows
 import fld "../../zelbyn/field"
 import mdata "../../zelbyn/metadata"
 import "core:mem"
+import "core:strconv"
 import "core:strings"
 
 Kind :: enum u8 {
@@ -205,6 +206,88 @@ prev_sibling :: proc(m: ^Model, r: int) -> int {
 	below := 0
 	if o := find(m, c.frames[len(c.frames) - 1].open, c.pos - 1); o != nil do below = o.below
 	return r - 1 - below
+}
+
+// The path of row r as the dump and errors write one, Name[i].Name[i],
+// from the root (reader.Parse_Error.path), in allocator: an Array's ends in
+// its name, without an index. "" when there is no row r.
+path :: proc(m: ^Model, r: int, allocator := context.temp_allocator) -> string {
+	if r < 0 || r >= count(m) do return ""
+	c := locate(m, r, context.temp_allocator)
+	defer delete(c.frames)
+	b := strings.builder_make(allocator)
+	add :: proc(b: ^strings.Builder, item: Item) {
+		if strings.builder_len(b^) > 0 do strings.write_byte(b, '.')
+		strings.write_string(b, item.name)
+		if item.index < 0 do return
+		strings.write_byte(b, '[')
+		strings.write_int(b, item.index)
+		strings.write_byte(b, ']')
+	}
+	// an Array's own row adds nothing: its values are name[i]
+	for f in c.frames[1:] do if f.item.index >= 0 do add(&b, f.item)
+	add(&b, child(m, c.frames[len(c.frames) - 1].item, c.pos))
+	return strings.to_string(b)
+}
+
+// Expands the rows along path, written as the dump and errors write one
+// (reader.Parse_Error.path), and returns the deepest row of it there is,
+// or -1 when there is none, not even the root. A path whose names hold
+// "[" or "]" is followed as far as it can be told apart.
+reveal :: proc(m: ^Model, path: string) -> int {
+	found := -1
+	rest := path
+	for len(rest) > 0 {
+		open := strings.index_byte(rest, '[')
+		close := strings.index_byte(rest, ']')
+		if open <= 0 || close < open do break
+		name := rest[:open]
+		index, is_index := strconv.parse_int(rest[open + 1:close], 10)
+		if !is_index do break
+		rest = rest[close + 1:]
+		if len(rest) > 0 {
+			if rest[0] != '.' do break
+			rest = rest[1:]
+		}
+
+		// the row of name under found, or at the top
+		row := -1
+		first := found + 1
+		if found >= 0 {
+			if !expand(m, found) && !is_expanded(m, found) do break
+		}
+		for c := first; c >= 0 && c < count(m); c = next_sibling(m, c) {
+			r := rows(m, c, 1, preview = 1, allocator = context.temp_allocator)
+			if len(r) > 0 && r[0].name == name {
+				row = c
+				break
+			}
+		}
+		if row < 0 do break
+		r := rows(m, row, 1, preview = 1, allocator = context.temp_allocator)
+		if r[0].kind == .Array {
+			if index >= r[0].count do break
+			if expand(m, row) {
+				// freshly expanded, none of its values are: value index is
+				// the index-th row under it
+				row += 1 + index
+			} else {
+				// already expanded, maybe some of them too
+				row += 1
+				for _ in 0 ..< index do row = next_sibling(m, row)
+			}
+		} else if index != 0 {
+			break
+		}
+		found = row
+	}
+	return found
+}
+
+@(private)
+is_expanded :: proc(m: ^Model, r: int) -> bool {
+	found := rows(m, r, 1, preview = 1, allocator = context.temp_allocator)
+	return len(found) > 0 && found[0].expanded
 }
 
 // A row's place: the rows it is under, outermost first, each with the

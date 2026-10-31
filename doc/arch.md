@@ -63,7 +63,9 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `view/rows/` | The viewer's rows: a decoded tree as an outline of values, sets and arrays, expanded and collapsed, whose window is found without stepping through the rows before it, the expanded rows under each kept in a treap that counts the rows under them; it imports no terminal library, and is tested with zelbyn |
 | `view/outline/` | The viewer's tree pane: the rows of `view/rows` drawn with hnoss as an outline, with a marker, name, value and offset on each, and its keys and mouse |
 | `view/hexdump/` | The viewer's hex pane: the file's bytes, a line of offset, hex and text each, fewer bytes a line when narrow, with the selected value's bytes highlighted, the set's around them shaded, a mark for a value of no bytes, also at the end of the data, and a note; it follows the selection, and scrolls with its keys and mouse |
-| `view/tests/` | The viewer's tests, which draw its panes into a hnoss buffer, on Linux only |
+| `view/session/` | What the viewer shows, made from its command line, taken as zelbyn takes it: the schema loaded, the file read and decoded, and the rows of its tree, with the decode's error when it failed; it imports no terminal library, and is tested with zelbyn |
+| `view/screen/` | The viewer's whole screen, drawn with hnoss: an error line after a failed decode, the tree and the bytes, a status line and the keys, and Tab between the panes |
+| `view/tests/` | The viewer's tests, which draw its panes and screen into a hnoss buffer, on Linux only |
 | `view/hnoss/` | [hnoss](https://github.com/Huseynteymurzade28/hnoss), the terminal UI library the viewer draws with, a git submodule pinned to a commit |
 | `.github/workflows/check.yml` | CI: `tools/check.py` on each push to `main` and each pull request |
 | `.github/workflows/release.yml` | A GitHub release of the binaries for Linux and Windows on each tag `v*` |
@@ -91,7 +93,9 @@ All packages also import from Odin's `core` library. The internal imports are:
 | `view/rows` | `field`, `metadata` |
 | `view/outline` | `view/rows`, and hnoss |
 | `view/hexdump` | hnoss |
-| `view` (the viewer's `main`) | `cli`, `field`, `metadata`, `reader`, `view/rows`, `view/outline`, `view/hexdump`, and hnoss |
+| `view/session` | `cli`, `field`, `metadata`, `reader`, `view/rows` |
+| `view/screen` | `view/session`, `view/rows`, `view/outline`, `view/hexdump`, and hnoss |
+| `view` (the viewer's `main`) | `view/session`, `view/screen`, and hnoss |
 
 `metadata` imports `field` for one procedure, `instance_set` (§6.7), which reads the case that a value-tree instance records. `reader`, `dump` and `codegen` do not import `ksy` or `yaml`: they see only the plan. `data` imports nothing of zelbyn's, as code that `codegen` generates imports it in other projects (§10).
 
@@ -107,7 +111,7 @@ Each package is imported under one name in every file, of the packages, `main.od
 | `metadata` | `mdata` |
 | `reader` | `rdr` |
 | `yaml` | `yml` |
-| `cli`, `codegen`, `file`, `ksy`, and the viewer's `rows`, `outline` and `hexdump` | their own names |
+| `cli`, `codegen`, `file`, `ksy`, and the viewer's `rows`, `outline`, `hexdump`, `session` and `screen` | their own names |
 
 `tests/imports_test.odin` checks every import against this table.
 
@@ -790,7 +794,7 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | `expression_direct_test.odin` | That direct forms and the tree evaluator give the same results and errors (§7.9) |
 | `ksy_test.odin` | The `.ksy` compiler end to end: compile errors with their kinds, lines and columns, and each Kaitai feature of the subset and each extension compiled and decoded, alone and in the combinations that have needed care: types that contain themselves and the depth limits, imports, params (also of the top-level type), parse and value instances, `switch-on`, `valid`, expressions and their methods and casts, encodings, `process: zlib`, and `endian` `switch-on`s. The comment of each test says what it covers. |
 | `yaml_test.odin` | The YAML parser's node trees and errors; escapes at the edge of the Unicode range and beyond it; characters allowed raw and those that are not, and bytes that are not UTF-8; comments right after flow punctuation and a block scalar's indicators, and `#` inside a plain scalar; a flow key and its `:` on two lines; a duplicate key after 63, 64, 65 and 100,000 others, block and flow, in ASCII and not, within a timeout |
-| `cli_test.odin` | The command line, run in the test process (`cli.execute`): `--help`, the usage errors, `--offsets` with `--dump json`, `--param` in both forms with an argument of each type and each of its errors, `--max-memory` and `--max-steps` and their errors, the errors of loading and decoding, each failed check's message with what it read and expected, and output that cannot be written, each with its exit code and with nothing on stdout when it fails |
+| `cli_test.odin` | The command line, run in the test process (`cli.execute`): `--help`, the usage errors, `--offsets` with `--dump json`, `--param` in both forms with an argument of each type and each of its errors, `--max-memory` and `--max-steps` and their errors, the errors of loading and decoding, each failed check's message with what it read and expected, and output that cannot be written, each with its exit code and with nothing on stdout when it fails; and each of those cases but the dump's options and output given to the viewer (`view/session`), which must exit as zelbyn does, with its first line of stderr, or show the error of the decode that zelbyn reports |
 | `limits_test.odin` | The limits of §7.11: counts far beyond the input, the steps counted, `Step_Limit` and `Memory_Limit` at their limits and below them, never past `max_memory`, from bytes and from a file, also the decoder's own records, and each nesting limit at it and one past it, with its error |
 | `literal_item_test.odin` | That an index of a constant array literal, which evaluates only the item it gives, decodes as the whole array does, with every item type, nested, through value instances and with failing indexes; which array literals are constant; and that an error in an unused item of any other fails the expression |
 | `imports_test.odin` | That every import of one of zelbyn's packages names it as §3 says |

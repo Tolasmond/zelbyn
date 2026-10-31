@@ -51,27 +51,14 @@ parse_args :: proc(args: []string, stdout, stderr: io.Writer) -> (opts: Options,
 	opts = Options{dump = "tree"}
 	program := filepath.base(args[0])
 
-	rest := make([dynamic]string, context.temp_allocator)
-	given := make([dynamic]string, context.temp_allocator)
-	for i := 1; i < len(args); i += 1 {
-		switch {
-		case args[i] == "--param":
-			if i + 1 == len(args) {
-				fmt.wprintln(stderr, "error: --param needs name=value")
-				write_usage(stderr, program)
-				return opts, dump, nil, limits, 2, false
-			}
-			i += 1
-			append(&given, args[i])
-		case strings.has_prefix(args[i], "--param="):
-			append(&given, args[i][len("--param="):])
-		case:
-			append(&rest, args[i])
-		}
+	rest, given, params_ok := split_params(args[1:], stderr)
+	if !params_ok {
+		write_usage(stderr, program)
+		return opts, dump, nil, limits, 2, false
 	}
-	params = given[:]
+	params = given
 
-	if err := flags.parse(&opts, rest[:], .Unix, allocator = context.temp_allocator); err != nil {
+	if err := flags.parse(&opts, rest, .Unix, allocator = context.temp_allocator); err != nil {
 		print_flags_error(stdout, stderr, err, program, Options)
 		if _, is_help := err.(flags.Help_Request); is_help {
 			fmt.wprintln(stdout, PARAM_USAGE)
@@ -99,27 +86,66 @@ parse_args :: proc(args: []string, stdout, stderr: io.Writer) -> (opts: Options,
 		return opts, dump, params, limits, 2, false
 	}
 
-	limits = rdr.DEFAULT_LIMITS
-	if opts.max_memory != "" {
-		n, is_size := size_value(opts.max_memory)
-		if !is_size {
-			fmt.wprintfln(stderr, "error: --max-memory must be bytes, or with K, M or G, not %q", opts.max_memory)
-			write_usage(stderr, program)
-			return opts, dump, params, limits, 2, false
-		}
-		limits.max_memory = n
-	}
-	if opts.max_steps != "" {
-		n, is_count := strconv.parse_int(opts.max_steps, 10)
-		if !is_count || n < 0 {
-			fmt.wprintfln(stderr, "error: --max-steps must be a count, not %q", opts.max_steps)
-			write_usage(stderr, program)
-			return opts, dump, params, limits, 2, false
-		}
-		limits.max_steps = n
+	limits_ok: bool
+	limits, limits_ok = parse_limits(opts.max_memory, opts.max_steps, stderr)
+	if !limits_ok {
+		write_usage(stderr, program)
+		return opts, dump, params, limits, 2, false
 	}
 
 	return opts, dump, params, limits, 0, true
+}
+
+// Takes the --params out of args, a command line without the program's
+// name, before core:flags parses the rest: --param name=value and
+// --param=name=value, each name=value in params, in context.temp_allocator.
+// When --param ends the line without its value, the error is written to
+// stderr and ok is false; the caller writes its usage. zelbyn and the
+// viewer take them alike.
+split_params :: proc(args: []string, stderr: io.Writer) -> (rest, params: []string, ok: bool) {
+	others := make([dynamic]string, context.temp_allocator)
+	given := make([dynamic]string, context.temp_allocator)
+	for i := 0; i < len(args); i += 1 {
+		switch {
+		case args[i] == "--param":
+			if i + 1 == len(args) {
+				fmt.wprintln(stderr, "error: --param needs name=value")
+				return nil, nil, false
+			}
+			i += 1
+			append(&given, args[i])
+		case strings.has_prefix(args[i], "--param="):
+			append(&given, args[i][len("--param="):])
+		case:
+			append(&others, args[i])
+		}
+	}
+	return others[:], given[:], true
+}
+
+// The limits of a decode that --max-memory and --max-steps give, each ""
+// when not given, for the default. A value that is not one is an error,
+// written to stderr, and ok is false; the caller writes its usage. zelbyn
+// and the viewer take them alike.
+parse_limits :: proc(max_memory, max_steps: string, stderr: io.Writer) -> (limits: rdr.Limits, ok: bool) {
+	limits = rdr.DEFAULT_LIMITS
+	if max_memory != "" {
+		n, is_size := size_value(max_memory)
+		if !is_size {
+			fmt.wprintfln(stderr, "error: --max-memory must be bytes, or with K, M or G, not %q", max_memory)
+			return limits, false
+		}
+		limits.max_memory = n
+	}
+	if max_steps != "" {
+		n, is_count := strconv.parse_int(max_steps, 10)
+		if !is_count || n < 0 {
+			fmt.wprintfln(stderr, "error: --max-steps must be a count, not %q", max_steps)
+			return limits, false
+		}
+		limits.max_steps = n
+	}
+	return limits, true
 }
 
 // Writes err, from flags.parse of options of type T, as flags.print_errors

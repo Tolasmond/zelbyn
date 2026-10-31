@@ -18,6 +18,8 @@ build/zelbyn ../kaitai_struct_formats/image/png.ksy ../kaitai_struct_samples/ima
 
 To generate a package that decodes PNG files, `build/zelbyn gen ../kaitai_struct_formats/image/png.ksy --out png --import-path ../kaitai_struct_formats`; [doc/usage.md](doc/usage.md#generating-code) says how to build and use it.
 
+To browse a decoded file in the terminal, the decoded tree beside the file's bytes, `zelbyn-view` takes the same command line, on Linux: `odin build view -out:build/zelbyn-view`, after `git submodule update --init`; [doc/usage.md](doc/usage.md#the-viewer) describes it.
+
 On Windows the build is `build\zelbyn.exe`. It has no other dependencies. The repository holds no schemas or sample files of real formats, so the examples use those of the Kaitai Project's [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) and [kaitai_struct_samples](https://github.com/kaitai-io/kaitai_struct_samples).
 
 ## What a schema can use
@@ -40,7 +42,7 @@ All 190 schemas in [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_s
 
 ## Documentation
 
-- [Usage](doc/usage.md): building, the command line, the output, errors and exit codes, generating code, and the supported subset of Kaitai Struct.
+- [Usage](doc/usage.md): building, the command line, the output, errors and exit codes, the viewer, generating code, and the supported subset of Kaitai Struct.
 - [Development](doc/development.md): the checks a change must pass, the benchmark, and the comparisons with the official runtime, with libyaml and of generated code.
 - [Architecture](doc/arch.md): how the implementation works, and why.
 

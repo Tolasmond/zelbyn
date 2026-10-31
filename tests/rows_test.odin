@@ -600,3 +600,41 @@ types:
 		testing.expectf(t, found, "no row %s", w.name)
 	}
 }
+
+// A row's path, as the dump writes it, and revealing the rows along a path,
+// as an error gives one, expanding them; as far as there are rows, also
+// through an array already expanded.
+@(test)
+rows_paths :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
+	if !load_sample(t, &ff) do return
+	data := sample_input(4)
+	defer delete(data)
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, data[:], &d, spans = true)
+
+	m: rows.Model
+	rows.init(&m, &ff, &d.tree)
+	defer rows.destroy(&m)
+	testing.expect_value(t, rows.path(&m, 0), "sample[0]")
+	testing.expect_value(t, rows.path(&m, 5), "sample[0].records")
+	testing.expect_value(t, rows.path(&m, 6), "sample[0].last[0]")
+	testing.expect_value(t, rows.path(&m, 99), "")
+
+	r := rows.reveal(&m, "sample[0].records[1].body[0].hi[0]")
+	testing.expect_value(t, rows.path(&m, r), "sample[0].records[1].body[0].hi[0]")
+	testing.expect_value(t, rows.count(&m), 17) // records, records[1] and body expanded
+	// through records, expanded already, with records[1] expanded in it
+	r = rows.reveal(&m, "sample[0].records[3].kind[0]")
+	testing.expect_value(t, rows.path(&m, r), "sample[0].records[3].kind[0]")
+	// as far as there are rows: no records[9], no field nope
+	r = rows.reveal(&m, "sample[0].records[9].kind[0]")
+	testing.expect_value(t, rows.path(&m, r), "sample[0]")
+	r = rows.reveal(&m, "sample[0].records[2].nope[0]")
+	testing.expect_value(t, rows.path(&m, r), "sample[0].records[2]")
+	testing.expect_value(t, rows.reveal(&m, "other[0].a[0]"), -1)
+	testing.expect_value(t, rows.reveal(&m, ""), -1)
+}

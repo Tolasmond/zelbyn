@@ -24,6 +24,8 @@ IMPORT_NAMES := [?][2]string {
 	{"rows", "rows"}, // the viewer's, view/rows
 	{"outline", "outline"}, // the viewer's, view/outline
 	{"hexdump", "hexdump"}, // the viewer's, view/hexdump
+	{"session", "session"}, // the viewer's, view/session
+	{"screen", "screen"}, // the viewer's, view/screen
 	{"yaml", "yml"},
 }
 
