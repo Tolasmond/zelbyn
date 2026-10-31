@@ -113,16 +113,88 @@ screen_failed_decode :: proc(t: ^testing.T) {
 	testing.expect(t, strings.has_prefix(lines[10], "zelbyn_view_"), "the status line names the file")
 	testing.expect(t, strings.contains(lines[10], ", 9 bytes · chk[0].items[2].kind[0] · 0x5, 1 byte"), "the status line gives the size, path, offset and size")
 
-	// the error's byte, 5, is the selected value's; selecting the one
-	// before shows it marked as the error
-	_ = frame_screen(&buf, &mem, &app, key(.Up))
-	_ = frame_screen(&buf, &mem, &app, key(.Up))
-	// the hex pane, 16 bytes a line, at the right: past its border and the
-	// offset, byte 5, on its first line, under the error line and the border
-	right := 110 - (hexdump.line_width(16, 4) + 3)
-	hex_x := right + 1 + 6 + 3 * 5
-	testing.expectf(t, is_error_cell(&buf, hex_x, 2), "byte 5 at column %v is not marked as the error", hex_x)
-	testing.expect(t, !is_error_cell(&buf, hex_x - 3, 2), "byte 4 is marked as the error")
+	// the error's byte, 5, marked over the selected value that failed
+	testing.expectf(t, is_error_cell(&buf, hex_x(110, 5), 2), "byte 5 is not marked as the error")
+	testing.expect(t, !is_error_cell(&buf, hex_x(110, 4), 2), "byte 4 is marked as the error")
+	testing.expect_value(t, error_cells(&buf, 2), 3) // its two hex digits and its text
+}
+
+// The column of byte i's hex, on the hex pane's lines of 16, in a screen
+// width columns wide: past the pane's border and the offset.
+hex_x :: proc(width, i: int) -> int {
+	right := width - (hexdump.line_width(16, 4) + 3)
+	return right + 1 + 6 + 3 * i + (i >= 8 ? 1 : 0)
+}
+
+// The cells of row y marked as the error.
+error_cells :: proc(buf: ^buffer.Buffer, y: int) -> (n: int) {
+	for x in 0 ..< buf.area.width do if is_error_cell(buf, x, y) do n += 1
+	return
+}
+
+// An error deep in the tree: its row selected, and on screen.
+@(test)
+screen_error_row_on_screen :: proc(t: ^testing.T) {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, "meta:\n  id: many\nseq:\n")
+	for i in 0 ..< 30 do fmt.sbprintf(&b, "  - id: f%d\n    type: u1\n", i)
+	strings.write_string(&b, "  - id: last\n    type: u1\n    valid: 0\n")
+	schema := temp_file(t, ".ksy", strings.to_string(b))
+	data := temp_file(t, ".bin", strings.repeat("\x01", 31, context.temp_allocator))
+	defer for p in ([]string{schema, data}) do if p != "" do os.remove(p)
+	if schema == "" || data == "" do return
+
+	s: session.Session
+	defer session.destroy(&s)
+	app: screen.App
+	defer screen.destroy(&app)
+	buf: buffer.Buffer
+	defer buffer.destroy(&buf)
+	mem: widgets.Memory
+	got, ok := draw_screen(t, &s, &app, &buf, &mem, {schema, data}, 110, 12)
+	if !ok do return
+	testing.expect_value(t, app.tree.selected, 31)
+	testing.expectf(t, strings.contains(got, "last = 1"), "the error's row is not on screen:\n%s", got)
+}
+
+// An error in decompressed bytes marks the bytes they came from; one in a
+// param's bytes, read before the root, marks none.
+@(test)
+screen_error_not_in_file :: proc(t: ^testing.T) {
+	zlib := temp_file(t, ".ksy", "meta:\n  id: z\nseq:\n  - id: len\n    type: u1\n  - id: body\n    type: body\n    size: len\n    process: zlib\ntypes:\n  body:\n    seq:\n      - id: a\n        type: u1\n      - id: b\n        type: u1\n        valid: 65\n")
+	// "AB", compressed: b, 66, fails at its offset in them, 1 + 1
+	zdata := temp_file(t, ".bin", "\x0a\x78\x9c\x73\x74\x02\x00\x00\xc6\x00\x84")
+	param := temp_file(t, ".ksy", "meta:\n  id: p\n  endian: le\nparams:\n  - id: h\n    type: hdr\nseq:\n  - id: a\n    type: u1\ntypes:\n  hdr:\n    seq:\n      - id: x\n        type: u2\n")
+	pdata := temp_file(t, ".bin", "\x05")
+	defer for p in ([]string{zlib, zdata, param, pdata}) do if p != "" do os.remove(p)
+	if zlib == "" || zdata == "" || param == "" || pdata == "" do return
+
+	{
+		s: session.Session
+		defer session.destroy(&s)
+		app: screen.App
+		defer screen.destroy(&app)
+		buf: buffer.Buffer
+		defer buffer.destroy(&buf)
+		mem: widgets.Memory
+		_, ok := draw_screen(t, &s, &app, &buf, &mem, {zlib, zdata}, 110, 10)
+		if !ok do return
+		testing.expect_value(t, s.err.offset, 2)
+		for i in 0 ..< 11 do testing.expectf(t, is_error_cell(&buf, hex_x(110, i), 2) == (i >= 1), "byte %v marked %v", i, is_error_cell(&buf, hex_x(110, i), 2))
+	}
+	{
+		s: session.Session
+		defer session.destroy(&s)
+		app: screen.App
+		defer screen.destroy(&app)
+		buf: buffer.Buffer
+		defer buffer.destroy(&buf)
+		mem: widgets.Memory
+		got, ok := draw_screen(t, &s, &app, &buf, &mem, {param, pdata, "--param", "h=07"}, 110, 10)
+		if !ok do return
+		testing.expectf(t, strings.has_prefix(got, "decoding stopped: Unexpected_EOF at 0x00000000 in h[0].x[0]"), "the error line: %q", got[:min(len(got), 80)])
+		for y in 1 ..< 10 do testing.expectf(t, error_cells(&buf, y) == 0, "row %v has cells marked as the error", y)
+	}
 }
 
 // A decode that reaches a limit says which, and one that succeeds has no

@@ -8,6 +8,7 @@ package screen
 import "core:fmt"
 import "core:path/filepath"
 import "core:strings"
+import fld "../../zelbyn/field"
 import "../hexdump"
 import "../hnoss/layout"
 import "../hnoss/pen"
@@ -24,6 +25,10 @@ App :: struct {
 	shown_row: int,    // the row selected in the frame before, -1 at first
 	title:     string, // the file's name, as markup
 	error:     string, // the decode's error, "" when it succeeded
+	// where in the file the error is: its byte, or the bytes of the field
+	// it was decompressed from; none when it cannot be placed
+	error_at:  hexdump.Range,
+	has_error: bool,
 }
 
 // Makes the screen of s. After a failed decode, the rows along the error's
@@ -42,11 +47,32 @@ init :: proc(app: ^App, s: ^session.Session) {
 	app.title = allocated ? title : strings.clone(title)
 	app.error = session.error_text(s, context.allocator)
 	if s.err.kind != .None {
-		if r := rows.reveal(&s.model, s.err.path); r >= 0 do app.tree.selected = r
+		r, exact := rows.reveal(&s.model, s.err.path)
+		if r >= 0 {
+			app.tree.selected = r
+			app.tree.show_selection = true
+		}
+		// the error is in the stream of its value, when it is a row, else
+		// in that of the values of the deepest row of its path; an error
+		// in no row, as in a param read before the root, is not placed
+		stream: rows.Stream = .Unknown
+		source: fld.Span
+		if exact {
+			if row := rows.rows(&s.model, r, 1, preview = 1); len(row) > 0 do stream, source = row[0].stream, row[0].source
+		} else if r >= 0 {
+			stream, source = rows.stream_within(&s.model, r)
+		}
+		switch stream {
+		case .File:
+			app.error_at, app.has_error = {s.err.offset, 1}, true
+		case .Decompressed:
+			app.error_at, app.has_error = {source.offset, source.size}, true
+		case .Unknown:
+		}
 		// the selection's bytes, followed in the first frame, give way to
 		// the error's
 		app.shown_row = app.tree.selected
-		app.bytes.follow = s.err.offset
+		if app.has_error do app.bytes.follow = app.error_at.offset
 	}
 }
 
@@ -107,10 +133,7 @@ draw :: proc(ui: ^widgets.Ui, area: layout.Rect, app: ^App) {
 @(private)
 highlight :: proc(app: ^App) -> (h: hexdump.Highlight, place: string) {
 	s := app.session
-	if s.err.kind != .None {
-		h.error = s.err.offset
-		h.has_error = true
-	}
+	h.error, h.has_error = app.error_at, app.has_error
 	row, ok := outline.selected_row(&app.tree)
 	if !ok || !row.has_span do return
 	switch row.stream {

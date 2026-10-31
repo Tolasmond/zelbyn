@@ -24,16 +24,17 @@ Range :: struct {
 
 // What the pane highlights: the bytes of value, the selected one's, and
 // shaded around them those of outer, the set it is in. A value of size 0,
-// of bits left over, is a mark at its offset. error is the offset where a
-// failed decode stopped: its byte is marked as an error, or past the last
-// byte, a mark where the next would be. note, when it is not "", is a line
-// at the bottom of the pane.
+// of bits left over, is a mark at its offset. error is where a failed
+// decode stopped, marked over both: a byte, or the bytes a value in
+// decompressed bytes came from, or past the last byte, a mark where the
+// next would be. note, when it is not "", is a line at the bottom of the
+// pane.
 Highlight :: struct {
 	value:     Range,
 	has_value: bool,
 	outer:     Range,
 	has_outer: bool,
-	error:     int,
+	error:     Range,
 	has_error: bool,
 	note:      string,
 }
@@ -147,7 +148,7 @@ draw :: proc(ui: ^widgets.Ui, area: layout.Rect, s: ^State, h: Highlight) -> (ch
 // at the end, or an error there or past it.
 @(private)
 end_mark :: proc(s: ^State, h: Highlight) -> bool {
-	return (h.has_value && h.value.size == 0 && h.value.offset == len(s.data)) || (h.has_error && h.error >= len(s.data))
+	return (h.has_value && h.value.size == 0 && h.value.offset == len(s.data)) || (h.has_error && h.error.offset >= len(s.data))
 }
 
 // The column of byte i's hex in a line of n bytes.
@@ -172,8 +173,9 @@ draw_line :: proc(ui: ^widgets.Ui, line: layout.Rect, s: ^State, start, n: int, 
 
 	// the style of the byte at offset, and whether it is highlighted
 	byte_style :: proc(t: widgets.Theme, h: Highlight, offset: int) -> (st: style.Style, on: bool) {
+		// the error first: the value selected at first is often the one that failed
+		if h.has_error && offset >= h.error.offset && offset < h.error.offset + max(h.error.size, 1) do return ERROR_STYLE, true
 		if h.has_value && h.value.size > 0 && offset >= h.value.offset && offset < h.value.offset + h.value.size do return t.selected, true
-		if h.has_error && offset == h.error do return ERROR_STYLE, true
 		if h.has_outer && offset >= h.outer.offset && offset < h.outer.offset + h.outer.size do return t.selected_unfocused, true
 		return {}, false
 	}
@@ -185,7 +187,7 @@ draw_line :: proc(ui: ^widgets.Ui, line: layout.Rect, s: ^State, start, n: int, 
 			// a value of no bytes, or an error, at the end: a mark where the
 			// next byte would be
 			if at == len(s.data) && end_mark(s, h) {
-				st := h.has_value && h.value.size == 0 && h.value.offset == at ? mark : style.patch(ERROR_STYLE, {add = {.Underlined}})
+				st := h.has_error && h.error.offset >= at ? style.patch(ERROR_STYLE, {add = {.Underlined}}) : mark
 				x := line.x + hex_column(i, n, s.digits)
 				if x + 2 <= right do buffer.set_string(ui.buf, x, line.y, "  ", st)
 				if tx := line.x + text_column(n, s.digits) + i; tx < right do buffer.set_string(ui.buf, tx, line.y, " ", st)
@@ -195,7 +197,7 @@ draw_line :: proc(ui: ^widgets.Ui, line: layout.Rect, s: ^State, start, n: int, 
 		b := s.data[at]
 		st, on := byte_style(t, h, at)
 		x := line.x + hex_column(i, n, s.digits)
-		if h.has_value && h.value.size == 0 && at == h.value.offset {
+		if h.has_value && h.value.size == 0 && at == h.value.offset && st != ERROR_STYLE {
 			// a value of bits left over: a mark on the byte it starts in
 			st = mark
 		}

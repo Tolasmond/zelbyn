@@ -139,7 +139,7 @@ The command line is zelbyn's ([Running](#running)) without `--dump` and `--offse
 
 **Values not in the file.** A value read from bytes that `process: zlib` decompressed has an offset in them, not in the file ([Running](#running)): the bytes highlighted are those of the field they were decompressed from, and a note gives the value's offset. A parse instance with an `io` is placed in the stream of an enclosing type (`_io`, `_parent._io`, `_root._io`) or of a field of one (`body._io`); for any other, nothing is highlighted, and a note says so.
 
-**A failed decode.** When the decode fails, the viewer still starts: a line at the top gives the error as zelbyn writes it, and for a limit reached, the option that sets it. The tree holds what was read before the error, with the rows along the error's path expanded and its last row selected, and the error's offset is marked in red in the bytes.
+**A failed decode.** When the decode fails, the viewer still starts: a line at the top gives the error as zelbyn writes it, and for a limit reached, the option that sets it. The tree holds what was read before the error, with the rows along the error's path expanded and its last row selected and on screen. The error's byte is marked in red in the bytes, over the selection; for an error in decompressed bytes, the bytes of the field they came from are; an error in the bytes of a param, read before the root, is not marked. A path that two rows could match, as one whose `-orig-id` holds `[`, `]` or `.` can be, is followed only as far as it is clear.
 
 ## Generating code
 
