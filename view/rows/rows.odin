@@ -18,6 +18,13 @@ Kind :: enum u8 {
 	Array, // the values of a field read more than once
 }
 
+// The stream a row's span is in.
+Stream :: enum u8 {
+	File,         // the file's bytes, or a substream of them, at its offset
+	Decompressed, // bytes that a field with process (zlib) decompressed
+	Unknown,      // that of an io the plan alone cannot place
+}
+
 // One row, as rows gives it.
 Row :: struct {
 	kind:       Kind,
@@ -31,12 +38,13 @@ Row :: struct {
 	expanded:   bool,
 	span:       fld.Span, // in a tree read with spans; an Array's, from its first value's start to its last's end
 	has_span:   bool,
-	// under a field with process (zlib): the span is in the bytes it
-	// decompressed, not in the file, and source is the span in the file of
-	// the outermost such field it is under, whose bytes it was read from
-	// (doc/usage.md). A parse instance there with an io of another stream
-	// is taken to be in them too.
-	decompressed: bool,
+	// The stream its span is in: for Decompressed, read from bytes that a
+	// field with process decompressed, the span is in them, not in the file
+	// (doc/usage.md), and source is the span in the file of the field they
+	// came from, the outermost one. A parse instance's io is followed when
+	// it is the stream of an enclosing set (_io, _parent._io, _root._io) or
+	// of a set field of one (body._io); any other is Unknown.
+	stream:       Stream,
 	source:       fld.Span,
 }
 
@@ -389,16 +397,7 @@ make_row :: proc(m: ^Model, c: ^Cursor, preview: int, allocator: mem.Allocator) 
 		index    = item.index,
 		expanded = current_open(m, c) != nil,
 	}
-	if m.tree.spans {
-		// the frames past the top are the rows this one is under
-		for f in c.frames[1:] {
-			if f.item.index >= 0 && f.item.node != nil && f.item.node.process != .None {
-				row.decompressed = true
-				row.source = value_span(m, f.item, f.item.index)
-				break
-			}
-		}
-	}
+	if m.tree.spans do row.stream, row.source = stream_of(m, c, item)
 	if item.index < 0 {
 		row.kind = .Array
 		row.count = len(item.values)
@@ -425,6 +424,101 @@ make_row :: proc(m: ^Model, c: ^Cursor, preview: int, allocator: mem.Allocator) 
 	row.text = strings.to_string(b)
 	m.formatted += 1
 	return row
+}
+
+// Where a span is: in a stream, and for Decompressed, the span in the file
+// of the field it came from.
+@(private)
+Where :: struct {
+	stream: Stream,
+	source: fld.Span,
+}
+
+// A set instance among the rows a row is under, with where the values read
+// in it are.
+@(private)
+Level :: struct {
+	item:  Item,
+	inner: Where,
+}
+
+// The stream that the span of item, at cursor c, is in, and the span of its
+// source: following, from the root, the rows it is under, each into the
+// bytes its process decompressed, or the stream of its io. An Array's is
+// that of its first value.
+@(private)
+stream_of :: proc(m: ^Model, c: ^Cursor, item: Item) -> (Stream, fld.Span) {
+	levels := make([dynamic]Level, 0, len(c.frames), context.temp_allocator)
+	defer delete(levels)
+	inner: Where // the root's values are in the file
+	for f in c.frames[1:] {
+		if f.item.index >= 0 do inner = visit(m, &levels, inner, f.item)
+	}
+	own := item
+	if own.index < 0 {
+		if len(own.values) == 0 do return inner.stream, inner.source
+		own.index = 0
+	}
+	at := inner
+	if own.node != nil && own.node.io != nil do at = resolve_io(m, levels[:], own.node.io)
+	return at.stream, at.source
+}
+
+// Where the values read in item are, which holds them in inner: in the
+// stream of its io, if it has one, then in the bytes its process
+// decompressed, if it has one. A set instance is added to levels.
+@(private)
+visit :: proc(m: ^Model, levels: ^[dynamic]Level, inner: Where, item: Item) -> Where {
+	at := inner
+	if item.node != nil && item.node.io != nil do at = resolve_io(m, levels[:], item.node.io)
+	within := processed(m, at, item)
+	if _, is_set := item.values[item.index].(^fld.Instance); is_set do append(levels, Level{item, within})
+	return within
+}
+
+// Where the bytes of item are, once item's process, if it has one, has
+// decompressed them: item's own span is at at.
+@(private)
+processed :: proc(m: ^Model, at: Where, item: Item) -> Where {
+	if item.node == nil || item.node.process == .None do return at
+	switch at.stream {
+	case .File:
+		return {.Decompressed, value_span(m, item, item.index)}
+	case .Decompressed, .Unknown:
+	}
+	return at
+}
+
+// Where the stream of io, a parse instance's, evaluated in the innermost of
+// levels, is: that of an enclosing set instance, or of a set field of one,
+// read once; Unknown for any other.
+@(private)
+resolve_io :: proc(m: ^Model, levels: []Level, io: ^mdata.Expr) -> Where {
+	stream, is_io := io.variant.(mdata.Io)
+	if !is_io do return {stream = .Unknown}
+	// the level of an Instance expression, or -1
+	level_of :: proc(levels: []Level, e: ^mdata.Expr) -> int {
+		inst, ok := e.variant.(mdata.Instance)
+		if !ok || inst.imported_root do return -1
+		if inst.root do return len(levels) > 0 ? 0 : -1
+		n := len(levels) - 1 - inst.up
+		return n >= 0 ? n : -1
+	}
+	#partial switch v in stream.instance.variant {
+	case mdata.Instance:
+		if n := level_of(levels, stream.instance); n >= 0 do return levels[n].inner
+	case mdata.Field_Ref:
+		n := level_of(levels, v.base)
+		if n < 0 || v.node == nil || v.node.io != nil do break
+		holder := levels[n].item
+		owner := holder.values[holder.index].(^fld.Instance)
+		values := owner.slots[v.slot]
+		if len(values) != 1 do break
+		if _, is_set := values[0].(^fld.Instance); !is_set do break
+		field := Item{node = v.node, owner = owner, k = v.slot, values = values, index = 0, single = true}
+		return processed(m, levels[n].inner, field)
+	}
+	return {stream = .Unknown}
 }
 
 @(private)

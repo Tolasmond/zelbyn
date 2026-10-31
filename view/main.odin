@@ -92,7 +92,7 @@ show :: proc(file_path: string, model: ^rows.Model, data: []byte) -> hnoss.Error
 	digits := outline.offset_digits(len(data))
 	tree := outline.State{model = model, digits = digits}
 	bytes := hexdump.State{data = data, digits = digits, follow = 0}
-	shown: hexdump.Highlight
+	shown_row := -1
 	events: []hnoss.Event
 	loop: for {
 		f := hnoss.begin_frame(&term)
@@ -104,13 +104,16 @@ show :: proc(file_path: string, model: ^rows.Model, data: []byte) -> hnoss.Error
 		hex_width := hexdump.line_width(16, digits) + 3
 		right := area.width >= hex_width + 30 ? hnoss.cut_right(&area, hex_width) : hnoss.cut_right(&area, area.width / 2)
 
-		inner := hnoss.box(ui, area, title, {focused = hnoss.focused(ui, &tree)})
-		outline.draw(ui, inner, &tree)
+		// the panes first, whose clicks move the focus, then their borders
+		outline.draw(ui, hnoss.inset(area, 1), &tree)
 		h, status := highlight(model, &tree)
-		if h.value != shown.value || h.has_value != shown.has_value do bytes.follow = h.value.offset
-		shown = h
-		hex_inner := hnoss.box(ui, right, "bytes", {focused = hnoss.focused(ui, &bytes)})
-		hexdump.draw(ui, hex_inner, &bytes, h)
+		// a row newly selected brings its bytes on screen, even the same
+		// bytes as the row before, which they are for two decompressed values
+		if tree.selected != shown_row && h.has_value do bytes.follow = h.value.offset
+		shown_row = tree.selected
+		hexdump.draw(ui, hnoss.inset(right, 1), &bytes, h)
+		hnoss.box(ui, area, title, {focused = hnoss.focused(ui, &tree)})
+		hnoss.box(ui, right, "bytes", {focused = hnoss.focused(ui, &bytes)})
 
 		hnoss.label(ui, footer, fmt.tprintf("[dim]row %d of %d%s · ↑↓ jk PgUp PgDn Home End move · → l ← h Enter expand, collapse · Tab pane · q quit[/]", tree.selected + 1, rows.count(model), status))
 		for ev in hnoss.unhandled(ui) {
@@ -125,22 +128,28 @@ show :: proc(file_path: string, model: ^rows.Model, data: []byte) -> hnoss.Error
 }
 
 // What the hex pane highlights for the selected row of tree: its bytes,
-// shaded around them those of the row it is under, or for a value read
-// from decompressed bytes, those in the file it came from, with a note;
-// and for the status line, its offset and size, in temp memory.
+// shaded around them those of the row it is under; for a value read from
+// decompressed bytes, those in the file it came from, with a note; and for
+// one in a stream that cannot be placed, none, with a note. And for the
+// status line, its offset and size, in temp memory.
 highlight :: proc(model: ^rows.Model, tree: ^outline.State) -> (h: hexdump.Highlight, status: string) {
 	row, ok := outline.selected_row(tree)
 	if !ok || !row.has_span do return
-	if row.decompressed {
+	switch row.stream {
+	case .Decompressed:
 		h.value = {row.source.offset, row.source.size}
 		h.has_value = true
 		h.note = fmt.tprintf("at 0x%X in decompressed bytes, from those highlighted", row.span.offset)
 		return h, fmt.tprintf(" · 0x%X, %s, decompressed", row.span.offset, byte_count(row.span.size))
+	case .Unknown:
+		h.note = fmt.tprintf("at 0x%X in the stream of an io, which is not placed in the file", row.span.offset)
+		return h, fmt.tprintf(" · 0x%X, %s, in another stream", row.span.offset, byte_count(row.span.size))
+	case .File:
 	}
 	h.value = {row.span.offset, row.span.size}
 	h.has_value = true
 	if p := rows.parent(model, tree.selected); p >= 0 {
-		if found := rows.rows(model, p, 1, preview = 1); len(found) > 0 && found[0].has_span && !found[0].decompressed {
+		if found := rows.rows(model, p, 1, preview = 1); len(found) > 0 && found[0].has_span && found[0].stream == .File {
 			h.outer = {found[0].span.offset, found[0].span.size}
 			h.has_outer = true
 		}

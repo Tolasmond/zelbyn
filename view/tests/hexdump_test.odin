@@ -113,6 +113,26 @@ hexdump_mark :: proc(t: ^testing.T) {
 	defer buffer.destroy(&h.buf)
 	_ = hex_frame(&h, {value = {5, 0}, has_value = true})
 	testing.expect_value(t, styles(&h.buf, 0), strings.concatenate({strings.repeat(".", 21, context.temp_allocator), "MM", strings.repeat(".", 38, context.temp_allocator), "M"}, context.temp_allocator))
+
+	// at the end of the data, where the next byte would be: on a line of
+	// its own after a full one, and in data with no bytes
+	end: Hex_Harness
+	hex_harness(&end, seq(16), 72, 3)
+	defer buffer.destroy(&end.buf)
+	expect_text(t, hex_frame(&end, {value = {16, 0}, has_value = true}), `0000  00 01 02 03 04 05 06 07  08 09 0a 0b 0c 0d 0e 0f  ................
+0010
+
+`)
+	testing.expect_value(t, styles(&end.buf, 1), strings.concatenate({"......MM", strings.repeat(".", 48, context.temp_allocator), "M"}, context.temp_allocator))
+	_ = hex_frame(&end, {value = {12, 0}, has_value = true})
+	testing.expect_value(t, styles(&end.buf, 1), "") // no line for it when it is not at the end
+
+	empty: Hex_Harness
+	hex_harness(&empty, nil, 72, 2)
+	defer buffer.destroy(&empty.buf)
+	expect_text(t, hex_frame(&empty, {value = {0, 0}, has_value = true}), "0000\n\n")
+	testing.expect_value(t, styles(&empty.buf, 0), strings.concatenate({"......MM", strings.repeat(".", 48, context.temp_allocator), "M"}, context.temp_allocator))
+	expect_text(t, hex_frame(&empty, {}), "\n\n")
 }
 
 // Following an offset, scrolling with keys and the wheel while focused,

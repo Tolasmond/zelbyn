@@ -65,13 +65,17 @@ draw :: proc(ui: ^widgets.Ui, area: layout.Rect, s: ^State, h: Highlight) -> (ch
 		buffer.set_string(ui.buf, note.x, note.y, h.note, ui.theme.muted, note.width)
 	}
 
+	// a mark at the end of the data has a place of its own, past its last
+	// byte, maybe on a line of its own
+	positions := len(s.data)
+	if h.has_value && h.value.size == 0 && h.value.offset == len(s.data) do positions += 1
 	n := bytes_per_line(body.width, s.digits)
-	lines := (len(s.data) + n - 1) / n
+	lines := (positions + n - 1) / n
 	bar: layout.Rect
 	if lines > body.height {
 		bar = layout.cut_right(&body, 1)
 		n = bytes_per_line(body.width, s.digits)
-		lines = (len(s.data) + n - 1) / n
+		lines = (positions + n - 1) / n
 	}
 	last := max(lines - body.height, 0)
 
@@ -159,15 +163,24 @@ draw_line :: proc(ui: ^widgets.Ui, line: layout.Rect, s: ^State, start, n: int, 
 		return {}, false
 	}
 	right := line.x + line.width
+	mark := style.Style{fg = t.accent.fg, add = {.Underlined, .Bold}}
 	for i in 0 ..< n {
 		at := start + i
-		if at >= len(s.data) do break
+		if at >= len(s.data) {
+			// a value of no bytes at the end: a mark where the next byte would be
+			if h.has_value && h.value.size == 0 && at == h.value.offset {
+				x := line.x + hex_column(i, n, s.digits)
+				if x + 2 <= right do buffer.set_string(ui.buf, x, line.y, "  ", mark)
+				if tx := line.x + text_column(n, s.digits) + i; tx < right do buffer.set_string(ui.buf, tx, line.y, " ", mark)
+			}
+			break
+		}
 		b := s.data[at]
 		st, on := byte_style(t, h, at)
 		x := line.x + hex_column(i, n, s.digits)
 		if h.has_value && h.value.size == 0 && at == h.value.offset {
 			// a value of bits left over: a mark on the byte it starts in
-			st = {fg = t.accent.fg, add = {.Underlined, .Bold}}
+			st = mark
 		}
 		pair := [2]byte{lower[b >> 4], lower[b & 0xf]}
 		if x + 2 <= right do buffer.set_string(ui.buf, x, line.y, string(pair[:]), st)
