@@ -20,6 +20,10 @@ To generate a package that decodes PNG files, `build/zelbyn gen ../kaitai_struct
 
 To browse a decoded file in the terminal, the decoded tree beside the file's bytes, `zelbyn-view` takes the same command line, on Linux: `odin build view -out:build/zelbyn-view`, after `git submodule update --init`; [doc/usage.md](doc/usage.md#the-viewer) describes it.
 
+![zelbyn-view on atch-plain.png: the tree, with chunks[0].type_raw selected, beside the bytes, its four highlighted and those of chunks[0] shaded](doc/images/zelbyn-view.png)
+
+`build/zelbyn-view png.ksy atch-plain.png`, with `chunks[0].type_raw` selected: its 4 bytes highlighted in the hex pane, and those of the chunk around them shaded.
+
 On Windows the build is `build\zelbyn.exe`. It has no other dependencies. The repository holds no schemas or sample files of real formats, so the examples use those of the Kaitai Project's [kaitai_struct_formats](https://github.com/kaitai-io/kaitai_struct_formats) and [kaitai_struct_samples](https://github.com/kaitai-io/kaitai_struct_samples).
 
 ## What a schema can use
