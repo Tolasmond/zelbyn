@@ -1,6 +1,6 @@
 # Using zelbyn
 
-How to build and run zelbyn, what it writes, the Odin code it generates, and the subset of Kaitai Struct it supports. Commands are run from the repository root.
+How to build and run zelbyn, what it writes, the viewer, the Odin code it generates, and the subset of Kaitai Struct it supports. Commands are run from the repository root.
 
 ## Building
 
@@ -117,6 +117,29 @@ Decoding checks every value against its field's `contents` and `valid`. Set inst
 ```
 error: Not_Equal at 0x00000000 in png[0].magic[0]: read <8 bytes> 6e 6f 74 20 61 20 70 6e, expected <8 bytes> 89 50 4e 47 0d 0a 1a 0a
 ```
+
+## The viewer
+
+`zelbyn-view` shows a decoded file in the terminal: the decoded tree as an outline, beside the file's bytes, with those of the selected value highlighted. It runs on Linux only, as the terminal library it draws with, [hnoss](https://github.com/Huseynteymurzade28/hnoss), does, and is not part of the releases. hnoss is a git submodule, `view/hnoss`: clone with `git clone --recursive`, or in a clone run `git submodule update --init`. Then:
+
+```
+odin build view -out:build/zelbyn-view
+build/zelbyn-view ../kaitai_struct_formats/image/png.ksy ../kaitai_struct_samples/image/png/atch-plain.png
+```
+
+```
+zelbyn-view <schema.ksy> <file> [--import-path dirs] [--param name=value]... [--max-memory n] [--max-steps n]
+```
+
+The command line is zelbyn's ([Running](#running)) without `--dump` and `--offsets`: `--import-path`, `--param`, `--max-memory` and `--max-steps` are taken and checked as zelbyn takes them, with the same messages. A usage error exits 2, and a schema that cannot be loaded or a file that cannot be read exits 1, with zelbyn's message on stderr, before the terminal is taken. q, Esc or Ctrl+C quits, with exit code 0.
+
+**The screen.** On the left, the tree: a row for each value, set and array, indented by its depth, with ▸ for a set or array that can be expanded and ▾ for one that is, its name (`[i]` for a value of an array), ` = ` and its value as the text dump writes it, or an array's `(count)`, and its offset in hex at the right. On the right, the bytes: each line an offset, 16 bytes in hex (fewer when the pane is narrow) and the same bytes as text, `.` for those that are not printable ASCII. The selected value's bytes are highlighted, and shaded around them those of the set or array it is in; a value of no bytes, of bits left over, is a mark on the byte it starts in. Below, a status line gives the file's name and size, and the selected row's path, offset and size, and a line the keys.
+
+**Keys.** Tab moves the focus between the panes, as a click does. In the tree: ↑ ↓ (or k j) move, PgUp PgDn by a page, Home End to the first and last row; → (or l) expands the selected row, or moves into it when it is expanded; ← (or h) collapses it, or moves to the row it is under; Enter expands or collapses it. A click selects a row, and on its marker expands or collapses it; the wheel scrolls. In the bytes: ↑ ↓ (or k j) scroll by a line, PgUp PgDn by a page, Home End to the first and last; the wheel scrolls. Selecting a row brings its bytes on screen.
+
+**Values not in the file.** A value read from bytes that `process: zlib` decompressed has an offset in them, not in the file ([Running](#running)): the bytes highlighted are those of the field they were decompressed from, and a note gives the value's offset. A parse instance with an `io` is placed in the stream of an enclosing type (`_io`, `_parent._io`, `_root._io`) or of a field of one (`body._io`); for any other, nothing is highlighted, and a note says so.
+
+**A failed decode.** When the decode fails, the viewer still starts: a line at the top gives the error as zelbyn writes it, and for a limit reached, the option that sets it. The tree holds what was read before the error, with the rows along the error's path expanded and its last row selected and on screen. The error's byte is marked in red in the bytes, over the selection; for an error in decompressed bytes, the bytes of the field they came from are; an error in the bytes of a param, read before the root, is not marked. A path that two rows could match, as one whose `-orig-id` holds `[`, `]` or `.` can be, is followed only as far as it is clear.
 
 ## Generating code
 

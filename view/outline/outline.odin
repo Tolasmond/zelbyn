@@ -18,6 +18,9 @@ State :: struct {
 	selected: int, // the selected row
 	offset:   int, // the first row on screen
 	digits:   int, // the hex digits each offset is shown with (offset_digits); 0 shows none
+	// set to bring the selection on screen at the next draw, as a key that
+	// moves it does, when it is set from outside
+	show_selection: bool,
 }
 
 // The hex digits that show every offset of an input of size bytes, at
@@ -52,7 +55,8 @@ draw :: proc(ui: ^widgets.Ui, area: layout.Rect, s: ^State) -> (changed: bool) {
 	bar: layout.Rect
 	if n > area.height do bar = layout.cut_right(&body, 1)
 	s.selected = clamp(s.selected, 0, max(n - 1, 0))
-	if by_key {
+	if by_key || s.show_selection {
+		s.show_selection = false
 		if s.selected < s.offset do s.offset = s.selected
 		if s.selected >= s.offset + body.height do s.offset = s.selected - body.height + 1
 	}

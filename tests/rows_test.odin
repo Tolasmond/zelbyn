@@ -600,3 +600,108 @@ types:
 		testing.expectf(t, found, "no row %s", w.name)
 	}
 }
+
+// A row's path, as the dump writes it, and revealing the rows along a path,
+// as an error gives one, expanding them; as far as there are rows, also
+// through an array already expanded.
+@(test)
+rows_paths :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
+	if !load_sample(t, &ff) do return
+	data := sample_input(4)
+	defer delete(data)
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, data[:], &d, spans = true)
+
+	m: rows.Model
+	rows.init(&m, &ff, &d.tree)
+	defer rows.destroy(&m)
+	testing.expect_value(t, rows.path(&m, 0), "sample[0]")
+	testing.expect_value(t, rows.path(&m, 5), "sample[0].records")
+	testing.expect_value(t, rows.path(&m, 6), "sample[0].last[0]")
+	testing.expect_value(t, rows.path(&m, 99), "")
+
+	r, exact := rows.reveal(&m, "sample[0].records[1].body[0].hi[0]")
+	testing.expect(t, exact, "the whole path is there")
+	testing.expect_value(t, rows.path(&m, r), "sample[0].records[1].body[0].hi[0]")
+	testing.expect_value(t, rows.count(&m), 17) // records, records[1] and body expanded
+	// through records, expanded already, with records[1] expanded in it
+	r, _ = rows.reveal(&m, "sample[0].records[3].kind[0]")
+	testing.expect_value(t, rows.path(&m, r), "sample[0].records[3].kind[0]")
+	// as far as there are rows: no records[9], no field nope
+	r, exact = rows.reveal(&m, "sample[0].records[9].kind[0]")
+	testing.expect_value(t, rows.path(&m, r), "sample[0]")
+	testing.expect(t, !exact, "records[9] is not there")
+	r, _ = rows.reveal(&m, "sample[0].records[2].nope[0]")
+	testing.expect_value(t, rows.path(&m, r), "sample[0].records[2]")
+	r, _ = rows.reveal(&m, "other[0].a[0]")
+	testing.expect_value(t, r, -1)
+	r, _ = rows.reveal(&m, "")
+	testing.expect_value(t, r, -1)
+}
+
+// A name holding what paths are written with is followed, and a path that
+// two rows match, as a set a with a field b and a field named a[0].b both
+// do for a[0].b[0], stops before them.
+@(test)
+rows_reveal_names :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
+	err := ksy.compile("meta:\n  id: p\nseq:\n  - id: a\n    type: s\n  - id: odd\n    -orig-id: a[0].b\n    type: u1\n  - id: other\n    -orig-id: x.y[1]\n    type: u1\ntypes:\n  s:\n    seq:\n      - id: b\n        type: u1\n", &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "compile: %s", err.message) do return
+	d: Decoded
+	defer destroy_decoded(&d)
+	decode_bytes(&ff, {1, 2, 3}, &d, spans = true)
+	if !testing.expect_value(t, d.err.kind, nil) do return
+
+	m: rows.Model
+	rows.init(&m, &ff, &d.tree)
+	defer rows.destroy(&m)
+	r, exact := rows.reveal(&m, "p[0].a[0].b[0]")
+	testing.expect_value(t, r, 0)
+	testing.expect(t, !exact, "an ambiguous path is not followed")
+	r, exact = rows.reveal(&m, "p[0].x.y[1][0]")
+	testing.expect(t, exact, "x.y[1] is one name")
+	testing.expect_value(t, rows.path(&m, r), "p[0].x.y[1][0]")
+}
+
+// An element of an array already expanded, with elements expanded before
+// it, is found in steps of their logarithm, not of its index.
+@(test)
+rows_child_row :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	N :: 100_000
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
+	err := ksy.compile("meta:\n  id: m\nseq:\n  - id: pairs\n    type: pair\n    repeat: eos\ntypes:\n  pair:\n    seq:\n      - id: a\n        type: u1\n      - id: b\n        type: u1\n", &ff)
+	defer ksy.destroy_error(&err)
+	if !testing.expectf(t, err.kind == .None, "compile: %s", err.message) do return
+	data := make([]byte, 2 * N)
+	defer delete(data)
+	d: Decoded
+	defer destroy_decoded(&d)
+	d.consumed, d.err = rdr.read_from_bytes(data, &ff, &d.tree)
+
+	m: rows.Model
+	rows.init(&m, &ff, &d.tree)
+	defer rows.destroy(&m)
+	rows.expand(&m, 1)
+	// every tenth pair expanded, from the last
+	for i := N - 10; i >= 0; i -= 10 do rows.expand(&m, 2 + i)
+	m.steps = 0
+	row := rows.child_row(&m, 1, N - 1)
+	testing.expectf(t, m.steps < 2000, "%v steps", m.steps)
+	testing.expect_value(t, rows.path(&m, row), fmt.tprintf("m[0].pairs[%d]", N - 1))
+	m.steps = 0
+	r, exact := rows.reveal(&m, fmt.tprintf("m[0].pairs[%d].b[0]", N - 1))
+	testing.expectf(t, m.steps < 20_000, "revealing: %v steps", m.steps)
+	testing.expect(t, exact, "the path is there")
+	testing.expect_value(t, rows.path(&m, r), fmt.tprintf("m[0].pairs[%d].b[0]", N - 1))
+	testing.expect_value(t, rows.child_row(&m, 1, N), -1)
+	testing.expect_value(t, rows.child_row(&m, 0, 5), -1)
+}

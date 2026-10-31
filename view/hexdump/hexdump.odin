@@ -24,15 +24,23 @@ Range :: struct {
 
 // What the pane highlights: the bytes of value, the selected one's, and
 // shaded around them those of outer, the set it is in. A value of size 0,
-// of bits left over, is a mark at its offset. note, when it is not "", is
-// a line at the bottom of the pane.
+// of bits left over, is a mark at its offset. error is where a failed
+// decode stopped, marked over both: a byte, or the bytes a value in
+// decompressed bytes came from, or past the last byte, a mark where the
+// next would be. note, when it is not "", is a line at the bottom of the
+// pane.
 Highlight :: struct {
 	value:     Range,
 	has_value: bool,
 	outer:     Range,
 	has_outer: bool,
+	error:     Range,
+	has_error: bool,
 	note:      string,
 }
+
+// The style of the byte where a failed decode stopped.
+ERROR_STYLE :: style.Style{fg = .Black, bg = .Red, add = {.Bold}}
 
 // The bytes each line shows in a pane width columns wide, with offsets of
 // digits hex digits: 16, or fewer when they do not fit, 1 at least.
@@ -68,7 +76,7 @@ draw :: proc(ui: ^widgets.Ui, area: layout.Rect, s: ^State, h: Highlight) -> (ch
 	// a mark at the end of the data has a place of its own, past its last
 	// byte, maybe on a line of its own
 	positions := len(s.data)
-	if h.has_value && h.value.size == 0 && h.value.offset == len(s.data) do positions += 1
+	if end_mark(s, h) do positions += 1
 	n := bytes_per_line(body.width, s.digits)
 	lines := (positions + n - 1) / n
 	bar: layout.Rect
@@ -136,6 +144,13 @@ draw :: proc(ui: ^widgets.Ui, area: layout.Rect, s: ^State, h: Highlight) -> (ch
 	return s.line != old_line
 }
 
+// Whether h has a mark past the last byte of s.data: a value of no bytes
+// at the end, or an error there or past it.
+@(private)
+end_mark :: proc(s: ^State, h: Highlight) -> bool {
+	return (h.has_value && h.value.size == 0 && h.value.offset == len(s.data)) || (h.has_error && h.error.offset >= len(s.data))
+}
+
 // The column of byte i's hex in a line of n bytes.
 @(private)
 hex_column :: proc(i, n, digits: int) -> int {
@@ -158,6 +173,8 @@ draw_line :: proc(ui: ^widgets.Ui, line: layout.Rect, s: ^State, start, n: int, 
 
 	// the style of the byte at offset, and whether it is highlighted
 	byte_style :: proc(t: widgets.Theme, h: Highlight, offset: int) -> (st: style.Style, on: bool) {
+		// the error first: the value selected at first is often the one that failed
+		if h.has_error && offset >= h.error.offset && offset < h.error.offset + max(h.error.size, 1) do return ERROR_STYLE, true
 		if h.has_value && h.value.size > 0 && offset >= h.value.offset && offset < h.value.offset + h.value.size do return t.selected, true
 		if h.has_outer && offset >= h.outer.offset && offset < h.outer.offset + h.outer.size do return t.selected_unfocused, true
 		return {}, false
@@ -167,18 +184,20 @@ draw_line :: proc(ui: ^widgets.Ui, line: layout.Rect, s: ^State, start, n: int, 
 	for i in 0 ..< n {
 		at := start + i
 		if at >= len(s.data) {
-			// a value of no bytes at the end: a mark where the next byte would be
-			if h.has_value && h.value.size == 0 && at == h.value.offset {
+			// a value of no bytes, or an error, at the end: a mark where the
+			// next byte would be
+			if at == len(s.data) && end_mark(s, h) {
+				st := h.has_error && h.error.offset >= at ? style.patch(ERROR_STYLE, {add = {.Underlined}}) : mark
 				x := line.x + hex_column(i, n, s.digits)
-				if x + 2 <= right do buffer.set_string(ui.buf, x, line.y, "  ", mark)
-				if tx := line.x + text_column(n, s.digits) + i; tx < right do buffer.set_string(ui.buf, tx, line.y, " ", mark)
+				if x + 2 <= right do buffer.set_string(ui.buf, x, line.y, "  ", st)
+				if tx := line.x + text_column(n, s.digits) + i; tx < right do buffer.set_string(ui.buf, tx, line.y, " ", st)
 			}
 			break
 		}
 		b := s.data[at]
 		st, on := byte_style(t, h, at)
 		x := line.x + hex_column(i, n, s.digits)
-		if h.has_value && h.value.size == 0 && at == h.value.offset {
+		if h.has_value && h.value.size == 0 && at == h.value.offset && st != ERROR_STYLE {
 			// a value of bits left over: a mark on the byte it starts in
 			st = mark
 		}

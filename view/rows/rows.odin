@@ -10,6 +10,7 @@ package rows
 import fld "../../zelbyn/field"
 import mdata "../../zelbyn/metadata"
 import "core:mem"
+import "core:strconv"
 import "core:strings"
 
 Kind :: enum u8 {
@@ -205,6 +206,128 @@ prev_sibling :: proc(m: ^Model, r: int) -> int {
 	below := 0
 	if o := find(m, c.frames[len(c.frames) - 1].open, c.pos - 1); o != nil do below = o.below
 	return r - 1 - below
+}
+
+// The path of row r as the dump and errors write one, Name[i].Name[i],
+// from the root (reader.Parse_Error.path), in allocator: an Array's ends in
+// its name, without an index. "" when there is no row r.
+path :: proc(m: ^Model, r: int, allocator := context.temp_allocator) -> string {
+	if r < 0 || r >= count(m) do return ""
+	c := locate(m, r, context.temp_allocator)
+	defer delete(c.frames)
+	b := strings.builder_make(allocator)
+	add :: proc(b: ^strings.Builder, item: Item) {
+		if strings.builder_len(b^) > 0 do strings.write_byte(b, '.')
+		strings.write_string(b, item.name)
+		if item.index < 0 do return
+		strings.write_byte(b, '[')
+		strings.write_int(b, item.index)
+		strings.write_byte(b, ']')
+	}
+	// an Array's own row adds nothing: its values are name[i]
+	for f in c.frames[1:] do if f.item.index >= 0 do add(&b, f.item)
+	add(&b, child(m, c.frames[len(c.frames) - 1].item, c.pos))
+	return strings.to_string(b)
+}
+
+// Expands the rows along path, written as the dump and errors write one
+// (reader.Parse_Error.path), and returns the deepest row of it there is,
+// or -1 when there is none, not even the root, and whether that row is the
+// path's last. Each row's name is matched against what is left of the
+// path, so that a name holding "[", "]" or "." is followed; where two rows
+// match, as a and a[0].b both would for a[0].b[0], the path is ambiguous,
+// and it stops at the row before.
+reveal :: proc(m: ^Model, path: string) -> (row: int, exact: bool) {
+	found := -1
+	rest := path
+	for len(rest) > 0 {
+		if found >= 0 && !expand(m, found) && !is_expanded(m, found) do return found, false
+		// the rows directly under found, or at the top
+		match, index, after := -1, 0, ""
+		for c := found + 1; c >= 0 && c < count(m); c = next_sibling(m, c) {
+			r := rows(m, c, 1, preview = 1, allocator = context.temp_allocator)
+			if len(r) == 0 do break
+			i, tail, matches := segment_of(rest, r[0].name)
+			if !matches do continue
+			if match >= 0 do return found, false
+			match, index, after = c, i, tail
+		}
+		if match < 0 do return found, false
+		r := rows(m, match, 1, preview = 1, allocator = context.temp_allocator)
+		next := match
+		if r[0].kind == .Array {
+			if index >= r[0].count do return found, false
+			expand(m, match)
+			next = child_row(m, match, index)
+		} else if index != 0 {
+			return found, false
+		}
+		found = next
+		rest = after
+	}
+	return found, found >= 0
+}
+
+// When rest starts with the segment name[i], followed by its end or by a
+// "." and more: i, and what follows the ".".
+@(private)
+segment_of :: proc(rest, name: string) -> (index: int, tail: string, ok: bool) {
+	if !strings.has_prefix(rest, name) do return
+	t := rest[len(name):]
+	if len(t) < 3 || t[0] != '[' do return
+	close := strings.index_byte(t, ']')
+	if close < 2 do return
+	for c in t[1:close] do if c < '0' || c > '9' do return
+	index = strconv.parse_int(t[1:close], 10) or_return
+	t = t[close + 1:]
+	if len(t) > 0 {
+		if t[0] != '.' || len(t) == 1 do return
+		t = t[1:]
+	}
+	return index, t, true
+}
+
+// Row p of those directly under row r, which is expanded: past the rows
+// under the expanded ones before it, counted in steps of the logarithm of
+// how many are. -1 when r is not expanded or has no row p.
+child_row :: proc(m: ^Model, r, p: int) -> int {
+	if r < 0 || r >= count(m) do return -1
+	c := locate(m, r, context.temp_allocator)
+	defer delete(c.frames)
+	o := current_open(m, &c)
+	if o == nil do return -1
+	if p < 0 || p >= child_count(m, child(m, c.frames[len(c.frames) - 1].item, c.pos)) do return -1
+	before := 0
+	for x := o.children; x != nil; {
+		m.steps += 1
+		if x.pos < p {
+			before += sum_of(x.left) + x.below
+			x = x.right
+		} else {
+			x = x.left
+		}
+	}
+	return r + 1 + p + before
+}
+
+// The stream that the values under row r are read from, and for
+// Decompressed, the span in the file of the field they came from: that of
+// r's own span, or past the bytes r's process decompressed, if it has one.
+stream_within :: proc(m: ^Model, r: int) -> (Stream, fld.Span) {
+	if r < 0 || r >= count(m) || !m.tree.spans do return .Unknown, {}
+	c := locate(m, r, context.temp_allocator)
+	defer delete(c.frames)
+	item := child(m, c.frames[len(c.frames) - 1].item, c.pos)
+	stream, source := stream_of(m, &c, item)
+	if item.index < 0 do return stream, source // an array's values: as its own span
+	within := processed(m, {stream, source}, item)
+	return within.stream, within.source
+}
+
+@(private)
+is_expanded :: proc(m: ^Model, r: int) -> bool {
+	found := rows(m, r, 1, preview = 1, allocator = context.temp_allocator)
+	return len(found) > 0 && found[0].expanded
 }
 
 // A row's place: the rows it is under, outermost first, each with the
