@@ -127,6 +127,8 @@ odin build view -out:build/zelbyn-view
 build/zelbyn-view ../kaitai_struct_formats/image/png.ksy ../kaitai_struct_samples/image/png/atch-plain.png
 ```
 
+![zelbyn-view on atch-plain.png: the tree, with chunks[0].type_raw selected, beside the bytes, its four highlighted and those of chunks[0] shaded](images/zelbyn-view.png)
+
 ```
 zelbyn-view <schema.ksy> <file> [--import-path dirs] [--param name=value]... [--max-memory n] [--max-steps n]
 ```
