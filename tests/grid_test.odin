@@ -1,6 +1,7 @@
 package tests
 
 import "../view/grid"
+import "core:mem"
 import "core:strings"
 import "core:testing"
 
@@ -189,9 +190,46 @@ grid_graphemes_shown :: proc(t: ^testing.T) {
 	testing.expect_value(t, grid.put(&g, 0, 0, long, {}, 10), 1)
 	testing.expect_value(t, grid.line(&g, 0), "\uFFFD         ")
 
+	// a control character or a byte that is not UTF-8 inside a grapheme,
+	// after a character that joins the next (U+0600), makes it U+FFFD
+	grid.clear(&g)
+	testing.expect_value(t, grid.put(&g, 0, 0, "\u0600\xffX", {}, 10), 2)
+	testing.expect_value(t, grid.line(&g, 0), "\uFFFDX        ")
+	grid.clear(&g)
+	testing.expect_value(t, grid.put(&g, 0, 0, "\u0600\x9bX\u0600\u009BY", {}, 10), 5)
+	testing.expect_value(t, grid.line(&g, 0), "\uFFFDX\u0600\uFFFDY     ")
+
+	// a wide grapheme too long for a cell: U+FFFD, in the one column it takes
+	grid.clear(&g)
+	wide_long := strings.concatenate({"日", strings.repeat("\u0301", 20, context.temp_allocator), "X"}, context.temp_allocator)
+	testing.expect_value(t, grid.put(&g, 0, 0, wide_long, {}, 10), 2)
+	testing.expect_value(t, grid.line(&g, 0), "\uFFFDX        ")
+	testing.expect_value(t, grid.cell(&g, 0, 0).width, 1)
+
+	// the selector of emoji presentation is dropped: a character is shown in
+	// its own columns, in which every terminal shows it
+	grid.clear(&g)
+	testing.expect_value(t, grid.put(&g, 0, 0, "\u2764\uFE0FX", {}, 10), 2)
+	testing.expect_value(t, grid.line(&g, 0), "\u2764X        ")
+	grid.clear(&g)
+	testing.expect_value(t, grid.put(&g, 0, 0, "\uFE0F", {}, 10), 1)
+	testing.expect_value(t, grid.line(&g, 0), "\u25CC         ")
+
 	// a long text, cut at the limit
 	grid.clear(&g)
 	testing.expect_value(t, grid.put(&g, 0, 0, strings.repeat("x", 1 << 20, context.temp_allocator), {}, 4), 4)
+	testing.expect_value(t, grid.line(&g, 0), "xxx…      ")
+
+	// graphemes of no columns: looked at only up to 2 × limit + 64, and cut
+	// there, however many follow
+	grid.clear(&g)
+	testing.expect_value(t, grid.put(&g, 0, 0, strings.concatenate({"xx", strings.repeat("\u200B", 10, context.temp_allocator), "y"}, context.temp_allocator), {}, 4), 3)
+	testing.expect_value(t, grid.line(&g, 0), "xxy       ")
+	grid.clear(&g)
+	testing.expect_value(t, grid.put(&g, 0, 0, strings.concatenate({"xx", strings.repeat("\u200B", 100, context.temp_allocator), "y"}, context.temp_allocator), {}, 4), 4)
+	testing.expect_value(t, grid.line(&g, 0), "xx…       ")
+	grid.clear(&g)
+	testing.expect_value(t, grid.put(&g, 0, 0, strings.concatenate({"xxx", strings.repeat("\u200B", 1 << 20, context.temp_allocator), "y"}, context.temp_allocator), {}, 4), 4)
 	testing.expect_value(t, grid.line(&g, 0), "xxx…      ")
 }
 
@@ -394,4 +432,44 @@ grid_resize :: proc(t: ^testing.T) {
 	grid.resize(&g, 0, -1)
 	testing.expect_value(t, len(g.cells), 0)
 	testing.expect_value(t, grid.line(&g, 0), "")
+}
+
+// An allocator of no memory.
+@(private = "file")
+failing_allocator :: proc() -> mem.Allocator {
+	return {procedure = proc(data: rawptr, mode: mem.Allocator_Mode, size, alignment: int, old_memory: rawptr, old_size: int, location := #caller_location) -> ([]byte, mem.Allocator_Error) {
+		#partial switch mode {
+		case .Free, .Free_All:
+			return nil, nil
+		}
+		return nil, .Out_Of_Memory
+	}}
+}
+
+// A grid whose cells cannot be allocated is as it was, also when it is
+// tried again, so that its size is always that of its cells.
+@(test)
+grid_out_of_memory :: proc(t: ^testing.T) {
+	g: grid.Grid
+	testing.expect_value(t, grid.init(&g, 3, 1, failing_allocator()), mem.Allocator_Error.Out_Of_Memory)
+	testing.expect_value(t, g.width, 0)
+	testing.expect_value(t, len(g.cells), 0)
+
+	testing.expect_value(t, grid.init(&g, 2, 1), nil)
+	grid.put(&g, 0, 0, "ab", {}, 2)
+	allocator := g.allocator
+	g.allocator = failing_allocator()
+	for _ in 0 ..< 2 {
+		testing.expect_value(t, grid.resize(&g, 3, 1), mem.Allocator_Error.Out_Of_Memory)
+		testing.expect_value(t, g.width, 2)
+		testing.expect_value(t, len(g.cells), 2)
+		testing.expect_value(t, grid.line(&g, 0), "ab")
+	}
+	other: grid.Grid
+	grid.init(&other, 4, 1)
+	defer grid.destroy(&other)
+	testing.expect_value(t, grid.copy_from(&g, &other), mem.Allocator_Error.Out_Of_Memory)
+	testing.expect_value(t, g.width, 2)
+	g.allocator = allocator
+	grid.destroy(&g)
 }

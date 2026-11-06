@@ -78,11 +78,12 @@ Part :: struct {
 	style: Style,
 }
 
-// Makes g width × height cells, all BLANK, in allocator.
+// Makes g width × height cells, all BLANK, in allocator. When they cannot
+// be allocated, g is as it was.
 init :: proc(g: ^Grid, width, height: int, allocator := context.allocator) -> mem.Allocator_Error {
 	w, h := max(width, 0), max(height, 0)
-	g^ = {width = w, height = h, allocator = allocator}
-	g.cells = make([]Cell, w * h, allocator) or_return
+	cells := make([]Cell, w * h, allocator) or_return
+	g^ = {width = w, height = h, cells = cells, allocator = allocator}
 	clear(g)
 	return nil
 }
@@ -93,7 +94,8 @@ destroy :: proc(g: ^Grid) {
 }
 
 // Makes g width × height cells, all BLANK, keeping its cells when it is
-// that size already.
+// that size already. When the new cells cannot be allocated, g is as it
+// was.
 resize :: proc(g: ^Grid, width, height: int) -> mem.Allocator_Error {
 	if g.width == max(width, 0) && g.height == max(height, 0) {
 		clear(g)
@@ -101,8 +103,11 @@ resize :: proc(g: ^Grid, width, height: int) -> mem.Allocator_Error {
 	}
 	allocator := g.allocator
 	if allocator.procedure == nil do allocator = context.allocator
+	next: Grid
+	init(&next, width, height, allocator) or_return
 	destroy(g)
-	return init(g, width, height, allocator)
+	g^ = next
+	return nil
 }
 
 // Makes dst a copy of src, of its size and cells: the grid on screen, which
@@ -139,33 +144,37 @@ line :: proc(g: ^Grid, y: int, allocator := context.temp_allocator) -> string {
 }
 
 // Puts text in style at x, y, in at most limit columns, and returns the
-// columns it took. Text that does not fit is cut with "…" in its last
-// column (put_parts).
+// columns it took. Text that does not fit is cut, with "…" after the last
+// grapheme that fits (put_parts).
 put :: proc(g: ^Grid, x, y: int, text: string, style: Style, limit: int) -> (columns: int) {
 	return put_parts(g, x, y, {{text, style}}, limit)
 }
 
 // Puts parts one after the other at x, y, in at most limit columns and in
 // the grid, and returns the columns they took. When they do not fit, they
-// are cut where they reach the last column, which shows "…" in the style
-// of the part cut; a grapheme two columns wide that does not fit before it
-// leaves a space. Each grapheme takes the columns a terminal gives it
-// (shown), so that the cells after it are where the terminal shows them.
-// Only the graphemes in limit + 1 columns are looked at, so long text costs
-// no more than short.
+// are cut: "…", in the style of the part cut, follows the last grapheme
+// that fits before the last column, and a space fills the column after it
+// that a grapheme two columns wide left. Each grapheme takes the columns
+// it is shown in (shown), so that the cells after it are where the
+// terminal shows them. Each pass over the parts looks at most at
+// 2 × limit + 64 graphemes, so long text costs no more than short, also
+// text of graphemes of no columns, which is cut there.
 put_parts :: proc(g: ^Grid, x, y: int, parts: []Part, limit: int) -> (columns: int) {
 	if y < 0 || y >= g.height || x < 0 || x >= g.width do return 0
 	most := min(limit, g.width - x)
 	if most <= 0 do return 0
+	budget := 2 * most + 64
+	buf: [CELL_BYTES]u8
 
 	fits := true
-	total := 0
+	total, looked := 0, 0
 	measure: for p in parts {
 		it := utf8.decode_grapheme_iterator_make(p.text)
 		for text, _ in utf8.decode_grapheme_iterate(&it) {
-			_, _, w := shown(text)
+			_, w := shown(text, &buf)
 			total += w
-			if total > most {
+			looked += 1
+			if total > most || looked > budget {
 				fits = false
 				break measure
 			}
@@ -174,22 +183,25 @@ put_parts :: proc(g: ^Grid, x, y: int, parts: []Part, limit: int) -> (columns: i
 
 	room := fits ? most : most - 1
 	cut_style := len(parts) > 0 ? parts[0].style : Style{}
+	looked = 0
 	write: for p in parts {
 		cut_style = p.style
 		it := utf8.decode_grapheme_iterator_make(p.text)
 		for text, _ in utf8.decode_grapheme_iterate(&it) {
-			prefix, s, w := shown(text)
+			looked += 1
+			if looked > budget do break write
+			s, w := shown(text, &buf)
 			if w == 0 do continue
 			if columns + w > room do break write
-			set(g, x + columns, y, prefix, s, w, p.style)
+			set(g, x + columns, y, s, w, p.style)
 			columns += w
 		}
 	}
 	if !fits {
-		set(g, x + columns, y, "", "…", 1, cut_style)
+		set(g, x + columns, y, "…", 1, cut_style)
 		columns += 1
 		if columns < most {
-			set(g, x + columns, y, "", " ", 1, cut_style)
+			set(g, x + columns, y, " ", 1, cut_style)
 			columns += 1
 		}
 	}
@@ -218,17 +230,17 @@ frame :: proc(g: ^Grid, r: Rect, title: string, style, title_style: Style) {
 	if r.width < 2 || r.height < 2 do return
 	right, bottom := r.x + r.width - 1, r.y + r.height - 1
 	for x in r.x + 1 ..< right {
-		set(g, x, r.y, "", "─", 1, style)
-		set(g, x, bottom, "", "─", 1, style)
+		set(g, x, r.y, "─", 1, style)
+		set(g, x, bottom, "─", 1, style)
 	}
 	for y in r.y + 1 ..< bottom {
-		set(g, r.x, y, "", "│", 1, style)
-		set(g, right, y, "", "│", 1, style)
+		set(g, r.x, y, "│", 1, style)
+		set(g, right, y, "│", 1, style)
 	}
-	set(g, r.x, r.y, "", "┌", 1, style)
-	set(g, right, r.y, "", "┐", 1, style)
-	set(g, r.x, bottom, "", "└", 1, style)
-	set(g, right, bottom, "", "┘", 1, style)
+	set(g, r.x, r.y, "┌", 1, style)
+	set(g, right, r.y, "┐", 1, style)
+	set(g, r.x, bottom, "└", 1, style)
+	set(g, right, bottom, "┘", 1, style)
 	if title != "" && r.width >= 5 do put_parts(g, r.x + 1, r.y, {{" ", style}, {title, title_style}, {" ", style}}, r.width - 2)
 }
 
@@ -256,9 +268,9 @@ scrollbar :: proc(g: ^Grid, r: Rect, total, visible, first: int, style: Style) {
 	track.attrs += {.Dim}
 	for i in 0 ..< r.height {
 		if i >= start && i < start + size {
-			set(g, r.x, r.y + i, "", "█", 1, style)
+			set(g, r.x, r.y + i, "█", 1, style)
 		} else {
-			set(g, r.x, r.y + i, "", "│", 1, track)
+			set(g, r.x, r.y + i, "│", 1, track)
 		}
 	}
 }
@@ -372,36 +384,47 @@ color_code :: proc(c: Color, base: int) -> int {
 	return i < 8 ? base + i : base + 60 + i - 8
 }
 
-// How a grapheme is shown, and the columns it takes: a control character
-// as U+FFFD, so that nothing put can move the cursor or change the
-// terminal; one that starts with a combining mark, after U+25CC, so that it
-// does not join the cell before; one too long for a cell as U+FFFD; and any
-// other as it is, in two columns, one, or none, as U+200B, which put_parts
-// skips.
+// How a grapheme is shown, in buf, and the columns it takes, at most 2:
+// one with a control character, C0 or C1, or a byte that is not UTF-8, as
+// U+FFFD, so that nothing put can move the cursor or change the terminal,
+// or reach it as anything but UTF-8; one that starts with a combining
+// mark, after U+25CC, so that it does not join the cell before; one too
+// long for a cell as U+FFFD; and any other without U+FE0F, the selector of
+// emoji presentation, which some terminals show a column wider than
+// others, so that each shows it in the columns of the character it
+// follows. One of no columns, as U+200B, put_parts skips.
 @(private)
-shown :: proc(text: string) -> (prefix, s: string, width: int) {
-	r, _ := utf8.decode_rune(text)
-	if unicode.is_control(r) || r == utf8.RUNE_ERROR do return "", "\uFFFD", 1
+shown :: proc(text: string, buf: ^[CELL_BYTES]u8) -> (s: string, width: int) {
+	REPLACEMENT :: "\uFFFD"
 	_, _, width = utf8.grapheme_count(text)
-	prefix = unicode.is_gcb_extend_class(r) || unicode.is_spacing_mark(r) ? "\u25CC" : ""
-	if prefix != "" do width = max(width, 1)
-	if len(prefix) + len(text) > CELL_BYTES do return "", "\uFFFD", min(width, 2)
-	return prefix, text, min(width, 2)
+	n := 0
+	for i := 0; i < len(text); {
+		r, size := utf8.decode_rune(text[i:])
+		if unicode.is_control(r) || (r == utf8.RUNE_ERROR && size == 1) do return REPLACEMENT, 1
+		if i == 0 && (unicode.is_gcb_extend_class(r) || unicode.is_spacing_mark(r)) {
+			n = copy(buf[:], "\u25CC")
+			width = max(width, 1)
+		}
+		if r != 0xFE0F {
+			if n + size > CELL_BYTES do return REPLACEMENT, 1
+			n += copy(buf[n:], text[i:][:size])
+		}
+		i += size
+	}
+	return string(buf[:n]), min(width, 2)
 }
 
-// Sets the cell at x, y to prefix and s, width columns wide, in style, and
-// the cell after it, for a wide one, to its second column. The other half
-// of a wide grapheme it covers half of becomes a space.
+// Sets the cell at x, y to s, width columns wide, in style, and the cell
+// after it, for a wide one, to its second column. The other half of a wide
+// grapheme it covers half of becomes a space.
 @(private)
-set :: proc(g: ^Grid, x, y: int, prefix, s: string, width: int, style: Style) {
+set :: proc(g: ^Grid, x, y: int, s: string, width: int, style: Style) {
 	if y < 0 || y >= g.height || x < 0 || x + width > g.width do return
 	i := y * g.width + x
 	if g.cells[i].width == 0 && x > 0 do g.cells[i - 1] = blank_in(g.cells[i - 1].style)
 	if end := x + width; end < g.width && g.cells[y * g.width + end].width == 0 do g.cells[y * g.width + end] = blank_in(g.cells[y * g.width + end].style)
 	c := Cell{width = u8(width), style = style}
-	n := copy(c.text[:], prefix)
-	n += copy(c.text[n:], s)
-	c.len = u8(n)
+	c.len = u8(copy(c.text[:], s))
 	g.cells[i] = c
 	if width == 2 do g.cells[i + 1] = {style = style}
 }
