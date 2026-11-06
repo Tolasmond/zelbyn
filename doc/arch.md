@@ -60,6 +60,7 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `tools/yaml_corpus/` | A comparison of the YAML parser with libyaml |
 | `tools/check.py` | The checks a change must pass, in one command, and the optional corpus checks |
 | `view/` | The viewer (`zelbyn-view`), a program of its own that shows a decoded file in the terminal, on Linux only; nothing of zelbyn's imports it |
+| `view/grid/` | The viewer's screen as a grid of cells, each a grapheme and its style: text put in it and cut to fit, a frame, a scrollbar, and the escapes that turn the terminal from one grid to the next (§15); it imports no terminal, and is tested with zelbyn, on every platform; nothing uses it yet |
 | `view/rows/` | The viewer's rows: a decoded tree as an outline of values, sets and arrays, expanded and collapsed, whose window is found without stepping through the rows before it, the expanded rows under each kept in a treap that counts the rows under them; it imports no terminal library, and is tested with zelbyn |
 | `view/outline/` | The viewer's tree pane: the rows of `view/rows` drawn with hnoss as an outline, with a marker, name, value and offset on each, and its keys and mouse |
 | `view/hexdump/` | The viewer's hex pane: the file's bytes, a line of offset, hex and text each, fewer bytes a line when narrow, with the selected value's bytes highlighted, the set's around them shaded, a mark for a value of no bytes, also at the end of the data, and a note; it follows the selection, and scrolls with its keys and mouse |
@@ -90,6 +91,7 @@ All packages also import from Odin's `core` library. The internal imports are:
 | `codegen` | `data`, `expression`, `metadata` |
 | `cli` | `codegen`, `dump`, `field`, `ksy`, `metadata`, `reader` |
 | `main` | `cli` |
+| `view/grid` | none |
 | `view/rows` | `field`, `metadata` |
 | `view/outline` | `view/rows`, and hnoss |
 | `view/hexdump` | hnoss |
@@ -111,7 +113,7 @@ Each package is imported under one name in every file, of the packages, `main.od
 | `metadata` | `mdata` |
 | `reader` | `rdr` |
 | `yaml` | `yml` |
-| `cli`, `codegen`, `file`, `ksy`, and the viewer's `rows`, `outline`, `hexdump`, `session` and `screen` | their own names |
+| `cli`, `codegen`, `file`, `ksy`, and the viewer's `grid`, `rows`, `outline`, `hexdump`, `session` and `screen` | their own names |
 
 `tests/imports_test.odin` checks every import against this table.
 
@@ -786,6 +788,7 @@ In debug builds (`ODIN_DEBUG`), `main` runs `cli.execute` under a `mem.Tracking_
 | `decode_malformed_test.odin` | Empty, malformed and truncated inputs and a missing file, their error kinds, offsets and paths; counts larger than the input; negative counts, which read nothing, and lengths |
 | `partial_tree_test.odin` | What the tree holds after a failed decode (§7.10), with and without spans: arrays, instances and parse instances cut short, a value that fails its check, with and without `-bits`, a substream, a `switch-on`, `process: zlib`, and an error before the root |
 | `rows_test.odin` | The viewer's rows (`view/rows`): those of `SAMPLE_KSY` as they are expanded and collapsed, their spans and text, and moving to a parent and siblings; random expands, collapses and moves against an outline that makes every row; an array of a million values and of sets, whose windows, expanding and collapsing take steps that do not grow with it and format only the window's values, also with half a million of its rows expanded, whose steps grow with their logarithm; a preview that cuts strings and blobs; values read from bytes that `process: zlib` decompressed, marked with the span in the file of the field they came from, and the stream of a parse instance with an `io`, of an enclosing set or of a set field of one, or else unknown; a row's path, and revealing the rows along an error's path, through names that hold `[`, `]` or `.` and stopping where it is ambiguous, and through an array already expanded in logarithmic steps (`child_row`); no allocation through `context.allocator` once a model is made, and none kept of a window's rows once freed |
+| `grid_test.odin` | The viewer's grid (`view/grid`, §15): text put and cut with "…", in parts of their own styles, by its limit and by the grid's edge; graphemes two columns wide, cut, at the edge, and half covered by another or by a fill; combining marks, also at the start, flags and joined emoji; control characters, C0 and C1, and bytes that are not UTF-8, as U+FFFD; graphemes of no columns, and too long for a cell; fills, frames and their titles, rectangles, scrollbars and the line a click on one shows; and the bytes `render` writes for nothing changed, a cell, a run, a style, a wide grapheme, every color and attribute, and another size |
 | `memory_test.odin` | That decoding, with and without spans and with `process: zlib`, `read` and `ksy.compile` make no heap allocations; that errors allocate only their message or path, and a failed check's value and expected; tree lifetime and reuse after destroy |
 | `checks_test.odin` | Byte order, `valid` checks and bit fields, on hand-built plans, with the value and the expected value each failed check reports, shortened when long |
 | `expression_parse_test.odin` | Parsing, precedence and syntax errors, and type errors, also of floats |
@@ -823,3 +826,28 @@ These are not part of the program's build.
 - **`tools/codegen_tests/`** checks generated code against the decoder on every input the tests decode. `check.py` runs the tests with `-define:ZELBYN_CODEGEN_RECORD=<dir>`, which makes `decode_bytes` and `decode_file` record each decode: the package generated from its plan, once, named by the hash of its code, the input, the arguments as the literal of its `Args`, and the decoder's result, the text dump or the error as the command line writes it. Decodes that reach a limit of §7.11 are not recorded. It then builds one program, with `-vet -strict-style`, that imports every package and decodes each case with its plan's, and compares each result with the decoder's. `tools/check.py` runs it with the other checks.
 - **`tools/codegen_corpus/`** checks generated code on the corpus. `check.py` generates the package of every `.ksy` file of a clone of `kaitai_struct_formats` that zelbyn compiles, builds each, with `-vet -strict-style`, with a program that decodes a file and writes its dump or error as the command line does, and with `--samples`, decodes the samples that `tools/ksy_corpus` decodes with both, comparing exit code, output and error.
 - **`tools/yaml_corpus/`** checks the YAML parser. `main.odin` prints the YAML parser's node tree for each file. `compare.py` compares it with libyaml's, through PyYAML, over every `.ksy` file in a clone of `kaitai_struct_formats` kept outside the repository.
+
+## 15. The viewer's terminal library
+
+The viewer draws with a terminal library of its own, made of three packages, which replaces hnoss (issue #86). `view/grid` is written; `view/vt` (#88) and `view/term` (#89) are to come, and until the viewer is moved onto them, it draws with hnoss. The library is written from the references below and from the viewer's own code, not from hnoss's.
+
+An event takes one path: the bytes waiting on stdin are read (`term`), decoded into events (`vt`), handled one after the other, each against the state the one before left, the whole screen drawn from that state into a grid (`grid`), and the cells that changed written to the terminal (`grid.render`, written by `term`). Only reading and writing touch the terminal; the rest is plain procedures on plain data, tested on every platform.
+
+*Reason.* Handling each event against the state as the event before left it makes many events in one read give what they give one a frame. hnoss handles the events of a frame together, against the state of the frame before, and its row selection is clamped once a frame, so the viewer's panes clamp after each event (Huseynteymurzade28/hnoss#29).
+
+| Package | What it is | Imports | Platform |
+|---|---|---|---|
+| `view/grid` | The screen as a grid of cells; text put in it; a frame and a scrollbar; `render` | `core` only | any |
+| `view/vt` | A decoder of the terminal's input: bytes in, keys, mouse events and resizes out | `core` only | any |
+| `view/term` | The terminal: raw mode, the alternate screen, mouse reporting, its size, waiting for input or a resize, and restoring it | `view/grid`, `view/vt`, `core:sys/posix` | POSIX |
+
+The references: xterm's Control Sequences (invisible-island.net/xterm/ctlseqs), for the escapes, SGR mouse reporting and the alternate screen; ECMA-48, for the syntax of control sequences; POSIX termios, poll and sigaction; and Unicode's UAX #11 and UAX #29, as `core:unicode/utf8`'s grapheme iterator implements them, for the columns text takes.
+
+### 15.1 `view/grid`
+
+A `Grid` is width × height `Cell`s, by line from the top left, in the allocator it was made with (`init`, `resize`, `destroy`). A cell holds a grapheme, in up to `CELL_BYTES` bytes of its own, the columns it takes, 1 or 2, and its `Style`: a foreground and a background, each the terminal's default or one of its 16 named colors, and attributes, bold, dim, underlined and reversed. The cell after a grapheme two columns wide has width 0: it is that grapheme's second column. A grid holds no pointers into the text put in it, so the grid on screen outlives the frame it was drawn in, and the next is rendered against it (`copy_from`).
+
+- **Text.** `put_parts` puts parts of text, each in its style, one after the other on a line, in at most a limit of columns and in the grid, and returns the columns they took; `put` puts one. Text has no markup. When the parts do not fit, they are cut where they reach the last column, which shows "…" in the style of the part cut, so a part that fits exactly before another is cut too, to show that more follows. Only the graphemes in the limit's columns and one more are looked at, so a long value costs no more than a short one.
+- **Columns.** Each grapheme takes the columns that `core:unicode/utf8`'s grapheme iterator gives it, at most 2, as a terminal shows it, so that the cells after it are where the terminal shows them. A control character, C0 or C1, and a byte that is not UTF-8 are shown as U+FFFD, so that nothing decoded from a file can reach the terminal as an escape; a grapheme that starts with a combining mark follows U+25CC, so that it does not join the cell before; one too long for a cell is shown as U+FFFD; and one of no columns, as U+200B, is not put. A grapheme two columns wide that does not fit before the "…" leaves a space; one that half covers another, or a fill that does, leaves a space in the other half.
+- **Shapes.** `fill` sets a `Rect` to spaces in a style. `frame` draws a border of box-drawing characters around one, with a title in its top line, cut to fit, and `inner` is the rectangle inside it. `scrollbar` draws a thumb on a track in a column, where `thumb` places it: its size in proportion to the lines shown, at the top only when the first line is shown and at the bottom only when the last is; `scrollbar_line` is the first line that a click on the bar shows, the one that puts the thumb's middle at the click. `split_top`, `split_bottom`, `split_right` and `contains` are the rectangles the viewer's screen needs.
+- **`render`** writes to a builder the escapes and text that turn a terminal showing one grid into one showing the next: the cells that differ, each run of them after a cursor move (CUP), the style set where it changes (SGR, always from the default, `0;…`), a wide grapheme's second column never written, and the default style at the end. With no grid before, or one of another size, every cell is written. The terminal is taken to be in the default style at the start, as `render` leaves it, and no write relies on the cursor wrapping to the next line.
