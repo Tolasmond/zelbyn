@@ -253,17 +253,20 @@ grid_fill_and_frame :: proc(t: ^testing.T) {
 
 	grid.clear(&g)
 	grid.frame(&g, {0, 0, 8, 4}, "ab", RED, BOLD_ON_BLUE)
-	testing.expect_value(t, grid_text(&g), "┌ ab ──┐\n│      │\n│      │\n└──────┘")
+	testing.expect_value(t, grid_text(&g), "╭ ab ──╮\n│      │\n│      │\n╰──────╯")
 	testing.expect_value(t, grid.cell(&g, 0, 0).style, RED)
+	testing.expect_value(t, grid.cell(&g, 1, 0).style, BOLD_ON_BLUE)
 	testing.expect_value(t, grid.cell(&g, 2, 0).style, BOLD_ON_BLUE)
+	testing.expect_value(t, grid.cell(&g, 4, 0).style, BOLD_ON_BLUE)
+	testing.expect_value(t, grid.cell(&g, 5, 0).style, RED)
 
 	// a title cut to fit, and none where it does not
 	grid.clear(&g)
 	grid.frame(&g, {0, 0, 8, 2}, "abcdefgh", {}, {})
-	testing.expect_value(t, grid_text(&g), "┌ abcd…┐\n└──────┘\n        \n        ")
+	testing.expect_value(t, grid_text(&g), "╭ abcd…╮\n╰──────╯\n        \n        ")
 	grid.clear(&g)
 	grid.frame(&g, {0, 0, 4, 2}, "ab", {}, {})
-	testing.expect_value(t, grid_text(&g), "┌──┐    \n└──┘    \n        \n        ")
+	testing.expect_value(t, grid_text(&g), "╭──╮    \n╰──╯    \n        \n        ")
 	grid.clear(&g)
 	grid.frame(&g, {0, 0, 1, 4}, "ab", {}, {})
 	testing.expect_value(t, grid_text(&g), "        \n        \n        \n        ")
@@ -330,10 +333,10 @@ grid_scrollbar :: proc(t: ^testing.T) {
 	g: grid.Grid
 	grid.init(&g, 2, 4)
 	defer grid.destroy(&g)
-	grid.scrollbar(&g, {1, 0, 1, 4}, 8, 4, 4, RED)
-	testing.expect_value(t, grid_text(&g), " │\n │\n █\n █")
+	grid.scrollbar(&g, {1, 0, 1, 4}, 8, 4, 4, RED, grid.Style{fg = .Blue})
+	testing.expect_value(t, grid_text(&g), " │\n │\n ┃\n ┃")
 	testing.expect_value(t, grid.cell(&g, 1, 2).style, RED)
-	testing.expect_value(t, grid.cell(&g, 1, 0).style, grid.Style{fg = .Red, attrs = {.Dim}})
+	testing.expect_value(t, grid.cell(&g, 1, 0).style, grid.Style{fg = .Blue})
 
 	// a click puts the thumb's middle where it is
 	bar := grid.Rect{0, 2, 1, 10}

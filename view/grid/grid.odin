@@ -224,8 +224,8 @@ fill :: proc(g: ^Grid, r: Rect, style: Style) {
 }
 
 // Draws a border around r, of box-drawing characters, in style, with title
-// in the top line, in title_style, cut to fit. A rectangle less than 2
-// cells wide or high has none.
+// in the top line, between spaces, all in title_style, cut to fit. A
+// rectangle less than 2 cells wide or high has none.
 frame :: proc(g: ^Grid, r: Rect, title: string, style, title_style: Style) {
 	if r.width < 2 || r.height < 2 do return
 	right, bottom := r.x + r.width - 1, r.y + r.height - 1
@@ -237,11 +237,11 @@ frame :: proc(g: ^Grid, r: Rect, title: string, style, title_style: Style) {
 		set(g, r.x, y, "│", 1, style)
 		set(g, right, y, "│", 1, style)
 	}
-	set(g, r.x, r.y, "┌", 1, style)
-	set(g, right, r.y, "┐", 1, style)
-	set(g, r.x, bottom, "└", 1, style)
-	set(g, right, bottom, "┘", 1, style)
-	if title != "" && r.width >= 5 do put_parts(g, r.x + 1, r.y, {{" ", style}, {title, title_style}, {" ", style}}, r.width - 2)
+	set(g, r.x, r.y, "╭", 1, style)
+	set(g, right, r.y, "╮", 1, style)
+	set(g, r.x, bottom, "╰", 1, style)
+	set(g, right, bottom, "╯", 1, style)
+	if title != "" && r.width >= 5 do put_parts(g, r.x + 1, r.y, {{" ", title_style}, {title, title_style}, {" ", title_style}}, r.width - 2)
 }
 
 // Where a scrollbar of a column of height lines shows lines first to first
@@ -260,17 +260,16 @@ thumb :: proc(height, total, visible, first: int) -> (start, size: int) {
 }
 
 // Draws, in the first column of r, a scrollbar for lines first to first +
-// visible of total: a thumb in style, on a track of the same style, dim.
-scrollbar :: proc(g: ^Grid, r: Rect, total, visible, first: int, style: Style) {
+// visible of total: a thumb, a heavy line in thumb_style, on a track, a
+// light one in track_style.
+scrollbar :: proc(g: ^Grid, r: Rect, total, visible, first: int, thumb_style, track_style: Style) {
 	if r.width <= 0 do return
 	start, size := thumb(r.height, total, visible, first)
-	track := style
-	track.attrs += {.Dim}
 	for i in 0 ..< r.height {
 		if i >= start && i < start + size {
-			set(g, r.x, r.y + i, "█", 1, style)
+			set(g, r.x, r.y + i, "┃", 1, thumb_style)
 		} else {
-			set(g, r.x, r.y + i, "│", 1, track)
+			set(g, r.x, r.y + i, "│", 1, track_style)
 		}
 	}
 }

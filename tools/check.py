@@ -12,10 +12,9 @@ names (another is warned of, not refused). Always run, in order:
     uses the most stack, with ODIN_TEST_FAIL_ON_BAD_MEMORY
   - odin check -vet -strict-style of tools/bench, tools/ksy_corpus and
     tools/yaml_corpus
-  - on Linux, odin check view -vet -strict-style, and the viewer's tests,
-    view/tests, checked and run as the tests are: the viewer, with hnoss,
-    the submodule view/hnoss, which runs on Linux only. Without the
-    submodule, these checks fail.
+  - but on Windows, odin check view -vet -strict-style: the viewer, whose
+    terminal, view/term, is POSIX's. Its other packages are tested with
+    the tests, on every platform.
   - tools/codegen_tests/check.py: every decode of the tests again, with
     the code generated from its schema
 
@@ -69,20 +68,13 @@ def run(name, cmd, results):
     results.append((name, ok))
 
 
-def check_view(results, tmp):
-    """Checks the viewer, view/, and runs its tests, view/tests, on Linux,
-    the one platform hnoss runs on."""
-    names = ['odin check view', 'odin check view/tests', 'view tests']
-    if not sys.platform.startswith('linux'):
-        print('== %s\n   skipped: the viewer runs on Linux only\n' % ', '.join(names), flush=True)
+def check_view(results):
+    """Checks the viewer, view/, but on Windows: its terminal, view/term, is
+    POSIX's. The tests test its other packages, on every platform."""
+    if os.name == 'nt':
+        print('== odin check view\n   skipped: the viewer runs on POSIX only\n', flush=True)
         return
-    if not os.path.isfile('view/hnoss/hnoss.odin'):
-        print('== %s\n   view/hnoss is not checked out: git submodule update --init\n   FAILED\n' % ', '.join(names), flush=True)
-        results.extend((name, False) for name in names)
-        return
-    run(names[0], ['odin', 'check', 'view', '-vet', '-strict-style'], results)
-    run(names[1], ['odin', 'check', 'view/tests', '-vet', '-strict-style', '-no-entry-point'], results)
-    run(names[2], ['odin', 'test', 'view/tests', '-out:' + os.path.join(tmp, 'view_tests')] + TEST_DEFINES, results)
+    run('odin check view', ['odin', 'check', 'view', '-vet', '-strict-style'], results)
 
 
 def main():
@@ -118,7 +110,7 @@ def main():
         for tool in ('tools/bench', 'tools/ksy_corpus', 'tools/yaml_corpus'):
             run('odin check ' + tool, ['odin', 'check', tool, '-vet', '-strict-style'], results)
         run('codegen tests', [sys.executable, 'tools/codegen_tests/check.py'], results)
-        check_view(results, tmp)
+        check_view(results)
 
     if args.formats:
         cmd = [sys.executable, 'tools/ksy_corpus/check.py']

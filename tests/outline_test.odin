@@ -1,21 +1,23 @@
 package tests
 
-import fld "../../zelbyn/field"
-import ksy "../../zelbyn/ksy"
-import mdata "../../zelbyn/metadata"
-import rdr "../../zelbyn/reader"
-import "../hnoss/buffer"
-import "../hnoss/input"
-import "../hnoss/widgets"
-import "../outline"
-import "../rows"
+import "../view/grid"
+import "../view/outline"
+import "../view/rows"
+import "../view/vt"
+import fld "../zelbyn/field"
+import ksy "../zelbyn/ksy"
+import mdata "../zelbyn/metadata"
+import rdr "../zelbyn/reader"
 import "core:fmt"
 import "core:mem"
 import "core:strings"
 import "core:testing"
 
+// The viewer's tree pane (view/outline), fed events and drawn into a grid.
+
 // A schema with what the outline shows: values, a set, an array of sets, a
 // blob and a parse instance.
+@(private = "file")
 SCHEMA :: `meta:
   id: demo
   endian: le
@@ -47,21 +49,20 @@ types:
         size: 2
 `
 
+@(private = "file")
 INPUT :: "DEMO\x01\x03\x01\x00ab\x02\x00cd\x03\x00ef"
 
-// A decoded tree, its rows, and a buffer to draw the pane in, with the
-// widget memory that lasts across frames, as hnoss's own tests make them.
+// A decoded tree, its rows, the pane's state, and a grid to draw it in.
+@(private = "file")
 Harness :: struct {
-	ff:     mdata.File_Format,
-	tree:   fld.Value_Tree,
-	model:  rows.Model,
-	pane:   outline.State,
-	buf:     buffer.Buffer,
-	mem:     widgets.Memory,
-	cursor:  widgets.Cursor,
-	changed: bool, // what the last frame's draw returned
+	ff:    mdata.File_Format,
+	tree:  fld.Value_Tree,
+	model: rows.Model,
+	pane:  outline.State,
+	g:     grid.Grid,
 }
 
+@(private = "file")
 harness :: proc(t: ^testing.T, h: ^Harness, width, height: int, schema := SCHEMA, input := INPUT) -> bool {
 	err := ksy.compile(schema, &h.ff)
 	defer ksy.destroy_error(&err)
@@ -71,68 +72,48 @@ harness :: proc(t: ^testing.T, h: ^Harness, width, height: int, schema := SCHEMA
 	if !testing.expectf(t, derr.kind == .None, "decode: %v in %s", derr.kind, derr.path) do return false
 	rows.init(&h.model, &h.ff, &h.tree)
 	h.pane = {model = &h.model, digits = outline.offset_digits(len(input))}
-	buffer.init(&h.buf, {0, 0, width, height})
-	h.mem.focus = &h.pane
+	grid.init(&h.g, width, height)
 	return true
 }
 
+@(private = "file")
 destroy :: proc(h: ^Harness) {
-	buffer.destroy(&h.buf)
+	grid.destroy(&h.g)
 	rows.destroy(&h.model)
 	fld.destroy_value_tree(&h.tree)
 	mdata.destroy_file_format(&h.ff)
 }
 
-// Draws one frame of the pane over the whole buffer, with events, and
-// returns its text, a line per row, trailing spaces trimmed.
-frame :: proc(h: ^Harness, events: ..input.Event) -> string {
-	buffer.reset(&h.buf)
-	h.cursor = {}
-	evs := make([]input.Event, len(events), context.temp_allocator)
-	copy(evs, events)
-	ui := widgets.begin(&h.buf, evs, &h.mem, &h.cursor)
-	h.changed = outline.draw(ui, h.buf.area, &h.pane)
-	b := strings.builder_make(context.temp_allocator)
-	for y in 0 ..< h.buf.area.height {
-		line := strings.builder_make(context.temp_allocator)
-		for x := 0; x < h.buf.area.width; {
-			c := buffer.get(&h.buf, x, y)
-			strings.write_string(&line, buffer.cell_symbol(c))
-			x += max(int(c.width), 1)
+// Hands the pane events, each in turn, then draws it over the whole grid,
+// and returns its text.
+@(private = "file")
+frame :: proc(h: ^Harness, events: ..vt.Event) -> string {
+	area := grid.Rect{0, 0, h.g.width, h.g.height}
+	for e in events {
+		#partial switch ev in e {
+		case vt.Key:   outline.handle_key(&h.pane, ev, area)
+		case vt.Mouse: outline.handle_mouse(&h.pane, ev, area)
 		}
-		strings.write_string(&b, strings.trim_right(strings.to_string(line), " "))
-		strings.write_byte(&b, '\n')
 	}
-	return strings.to_string(b)
+	grid.clear(&h.g)
+	outline.draw(&h.g, area, &h.pane, true)
+	return view_text(&h.g)
 }
 
-key :: proc(code: input.Key_Code) -> input.Event {
-	return input.Key{code = code}
-}
-
-ch :: proc(r: rune) -> input.Event {
-	return input.Key{code = .Char, char = r}
-}
-
-click :: proc(x, y: int) -> input.Event {
-	return input.Mouse{kind = .Press, button = .Left, x = x, y = y}
-}
-
-wheel :: proc(x, y: int, down: bool) -> input.Event {
-	return input.Mouse{kind = .Scroll, button = down ? .Wheel_Down : .Wheel_Up, x = x, y = y}
-}
-
+@(private = "file")
 expect_screen :: proc(t: ^testing.T, got, want: string, what: string, loc := #caller_location) {
 	testing.expectf(t, got == want, "%s: the pane shows\n%s\nwant\n%s", what, got, want, loc = loc)
 }
 
+@(private = "file")
 Step :: struct {
-	events:   []input.Event,
+	events:   []vt.Event,
 	selected: int,
 	offset:   int,
 	want:     string,
 }
 
+@(private = "file")
 run_steps :: proc(t: ^testing.T, h: ^Harness, steps: []Step, loc := #caller_location) {
 	for st, i in steps {
 		got := frame(h, ..st.events)
@@ -180,21 +161,21 @@ outline_keys :: proc(t: ^testing.T) {
 `
 	run_steps(t, &h, {
 		{nil, 0, 0, top},
-		{{key(.Down), key(.Down), key(.Down)}, 3, 0, top},
-		{{ch('l')}, 3, 0, items},             // expands items
-		{{ch('l')}, 4, 0, items},             // into its first value
-		{{key(.Enter)}, 4, 0, first},         // expands it
-		{{key(.Down), key(.Down)}, 6, 0, first},
-		{{ch('h')}, 4, 0, first},             // from a value to its set
-		{{ch('h')}, 4, 0, items},             // collapses it
-		{{key(.End)}, 7, 0, items},
-		{{key(.Up), key(.Left)}, 3, 0, items}, // from a collapsed set to its array
-		{{key(.Home), key(.Right)}, 1, 0, items},
+		{{view_key(.Down), view_key(.Down), view_key(.Down)}, 3, 0, top},
+		{{view_char('l')}, 3, 0, items},             // expands items
+		{{view_char('l')}, 4, 0, items},             // into its first value
+		{{view_key(.Enter)}, 4, 0, first},         // expands it
+		{{view_key(.Down), view_key(.Down)}, 6, 0, first},
+		{{view_char('h')}, 4, 0, first},             // from a value to its set
+		{{view_char('h')}, 4, 0, items},             // collapses it
+		{{view_key(.End)}, 7, 0, items},
+		{{view_key(.Up), view_key(.Left)}, 3, 0, items}, // from a collapsed set to its array
+		{{view_key(.Home), view_key(.Right)}, 1, 0, items},
 	})
 }
 
 // A click selects a row, and on its marker expands it; the wheel scrolls;
-// keys keep the selection on screen; and without focus, keys do nothing.
+// and keys keep the selection on screen.
 @(test)
 outline_mouse_scroll_focus :: proc(t: ^testing.T) {
 	h: Harness
@@ -218,22 +199,21 @@ outline_mouse_scroll_focus :: proc(t: ^testing.T) {
 `
 	run_steps(t, &h, {
 		{nil, 0, 0, top},
-		{{click(10, 3)}, 3, 0, top},
-		{{click(2, 3)}, 3, 0, expanded}, // on its marker
-		{{wheel(5, 1, true)}, 3, 3, `  ▾ items (3)                              0006│
-    ▸ [0]                                  0006│
+		{{view_click(10, 3)}, 3, 0, top},
+		{{view_click(2, 3)}, 3, 0, expanded}, // on its marker
+		// rows 3 to 6 of 8: the thumb is at the bottom only when the last is shown
+		{{view_wheel(5, 1, true)}, 3, 3, `  ▾ items (3)                              0006│
+    ▸ [0]                                  0006┃
     ▸ [1]                                  000A┃
-    ▸ [2]                                  000E┃
+    ▸ [2]                                  000E│
 `},
-		{{wheel(5, 1, false)}, 3, 0, expanded},
-		{{key(.End)}, 7, 4, end},
-		{{key(.Page_Up)}, 4, 4, end},
+		{{view_wheel(5, 1, false)}, 3, 0, expanded},
+		{{view_key(.End)}, 7, 4, end},
+		{{view_key(.Page_Up)}, 4, 4, end},
 	})
-	h.mem.focus = nil
-	run_steps(t, &h, {{{key(.Home)}, 4, 4, end}})
 }
 
-// Several events in one frame, each from where the one before left the
+// Several events before a draw, each from where the one before left the
 // pane: keys and the wheel past the first and last rows, then a move or a
 // click, which lands where it would in a frame of its own.
 @(test)
@@ -241,28 +221,26 @@ outline_events_in_one_frame :: proc(t: ^testing.T) {
 	h: Harness
 	defer destroy(&h)
 	if !harness(t, &h, 48, 4) do return
-	_ = frame(&h, key(.Up), key(.Down))
+	_ = frame(&h, view_key(.Up), view_key(.Down))
 	testing.expect_value(t, h.pane.selected, 1)
-	_ = frame(&h, key(.End), key(.Down), key(.Up))
+	_ = frame(&h, view_key(.End), view_key(.Down), view_key(.Up))
 	testing.expect_value(t, h.pane.selected, 3)
-	_ = frame(&h, key(.Home), key(.Page_Up), key(.Down))
+	_ = frame(&h, view_key(.Home), view_key(.Page_Up), view_key(.Down))
 	testing.expect_value(t, h.pane.selected, 1)
 
-	_ = frame(&h, key(.Home), key(.Right)) // root already expanded: into it
-	_ = frame(&h, wheel(5, 1, false), click(10, 3))
+	_ = frame(&h, view_key(.Home), view_key(.Right)) // root already expanded: into it
+	_ = frame(&h, view_wheel(5, 1, false), view_click(10, 3))
 	testing.expect_value(t, h.pane.offset, 0)
 	testing.expect_value(t, h.pane.selected, 3)
-	testing.expect(t, h.changed, "a click that moves the selection is a change")
 
-	_ = frame(&h, click(2, 3)) // expands items: 8 rows, 4 on screen
-	_ = frame(&h, wheel(5, 1, true), wheel(5, 1, true), click(10, 0))
+	_ = frame(&h, view_click(2, 3)) // expands items: 8 rows, 4 on screen
+	_ = frame(&h, view_wheel(5, 1, true), view_wheel(5, 1, true), view_click(10, 0))
 	testing.expect_value(t, h.pane.offset, 4)
 	testing.expect_value(t, h.pane.selected, 4)
-	_ = frame(&h, wheel(5, 1, false))
+	_ = frame(&h, view_wheel(5, 1, false))
 	testing.expect_value(t, h.pane.offset, 1)
-	testing.expect(t, h.changed, "scrolling is a change")
 	_ = frame(&h)
-	testing.expect(t, !h.changed, "a frame with no events changes nothing")
+	testing.expect_value(t, h.pane.offset, 1)
 }
 
 // A marker cut off by the offset column is not there to click.
@@ -272,12 +250,12 @@ outline_hidden_marker :: proc(t: ^testing.T) {
 	defer destroy(&h)
 	// 10 columns: 5 of text, then the offset's space and 4 digits
 	if !harness(t, &h, 10, 9) do return
-	_ = frame(&h, click(2, 3)) // items, at depth 1, whose marker shows
+	_ = frame(&h, view_click(2, 3)) // items, at depth 1, whose marker shows
 	testing.expect_value(t, rows.count(&h.model), 8)
 	before := frame(&h)
 	// [0], at depth 2: its marker would be at columns 4 and 5, under the
 	// offset column's space
-	_ = frame(&h, click(5, 4))
+	_ = frame(&h, view_click(5, 4))
 	testing.expect_value(t, h.pane.selected, 4)
 	testing.expect_value(t, rows.count(&h.model), 8)
 	expect_screen(t, frame(&h), before, "after a click on the offset column")
@@ -294,8 +272,8 @@ outline_long_value :: proc(t: ^testing.T) {
 	schema := "meta:\n  id: long\nseq:\n  - id: n\n    type: u1\n  - id: s\n    type: str\n    size-eos: true\n    encoding: ASCII\n"
 	for c in ([?]struct {
 			width, height: int,
-			events:        []input.Event,
-		}{{48, 4, {click(10, 2)}}, {48, 4, {key(.Down), key(.Down), key(.Right), key(.Enter)}}, {1, 1, {key(.End)}}}) {
+			events:        []vt.Event,
+		}{{48, 4, {view_click(10, 2)}}, {48, 4, {view_key(.Down), view_key(.Down), view_key(.Right), view_key(.Enter)}}, {1, 1, {view_key(.End)}}}) {
 		h: Harness
 		defer destroy(&h)
 		if !harness(t, &h, c.width, c.height, schema, long) do return
@@ -308,4 +286,26 @@ outline_long_value :: proc(t: ^testing.T) {
 		}
 		testing.expectf(t, track.total_memory_allocated < N / 16, "%vx%v, %v events: %v bytes allocated", c.width, c.height, len(c.events), track.total_memory_allocated)
 	}
+}
+
+// A click on the scrollbar, and a drag of it, also past the pane, scroll to
+// where it is; the release ends the drag.
+@(test)
+outline_scrollbar :: proc(t: ^testing.T) {
+	h: Harness
+	defer destroy(&h)
+	if !harness(t, &h, 48, 4) do return
+	_ = frame(&h, view_click(2, 3)) // expands items: 8 rows, 4 on screen
+	bar := grid.Rect{47, 0, 1, 4}
+	_ = frame(&h, view_click(47, 3))
+	testing.expect_value(t, h.pane.offset, grid.scrollbar_line(bar, 8, 4, 3))
+	testing.expect(t, h.pane.offset > 0, "a click at the bar's bottom scrolls")
+	_ = frame(&h, view_drag(20, 0))
+	testing.expect_value(t, h.pane.offset, 0)
+	_ = frame(&h, view_drag(20, 9), view_release(20, 9))
+	testing.expect_value(t, h.pane.offset, 4)
+	// released: a drag no longer scrolls, nor is the pane's out of it
+	testing.expect(t, !outline.handle_mouse(&h.pane, vt.Mouse{kind = .Drag, button = .Left, x = 60, y = 0}, {0, 0, 48, 4}), "a drag outside, after the release, is the pane's")
+	testing.expect_value(t, h.pane.offset, 4)
+	testing.expect_value(t, h.pane.selected, 3)
 }

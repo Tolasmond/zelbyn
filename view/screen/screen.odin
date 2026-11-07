@@ -1,29 +1,37 @@
-// Package screen draws the viewer's whole screen for a session (view/
-// session): a line with the decode's error, when it failed, the tree
-// (view/outline) beside the file's bytes (view/hexdump), the selected row's
-// highlighted, a status line, and the keys. Tab moves the focus between the
-// panes. It draws into a hnoss buffer, so it is tested without a terminal.
+// Package screen is the viewer's whole screen for a session (view/session):
+// a line with the decode's error, when it failed, the tree (view/outline)
+// beside the file's bytes (view/hexdump), the selected row's highlighted, a
+// status line, and the keys. It handles an event at a time (view/vt), each
+// against the state the one before left: a key goes to the pane with
+// focus, which Tab moves, and a mouse event to the pane it is in, which a
+// click gives focus. It draws into a grid (view/grid), so it is tested
+// without a terminal, on every platform.
 package screen
 
 import "core:fmt"
 import "core:path/filepath"
 import "core:strings"
 import fld "../../zelbyn/field"
+import "../grid"
 import "../hexdump"
-import "../hnoss/layout"
-import "../hnoss/pen"
-import "../hnoss/widgets"
 import "../outline"
 import "../rows"
 import "../session"
+import "../vt"
 
-// The screen's state, which lasts across frames.
+Focus :: enum {
+	Tree,
+	Bytes,
+}
+
+// The screen's state.
 App :: struct {
 	session:   ^session.Session,
 	tree:      outline.State,
 	bytes:     hexdump.State,
-	shown_row: int,    // the row selected in the frame before, -1 at first
-	title:     string, // the file's name, as markup
+	focus:     Focus,
+	shown_row: int,    // the row whose bytes were last brought on screen, -1 at first
+	title:     string, // the file's name
 	error:     string, // the decode's error, "" when it succeeded
 	// where in the file the error is: its byte, or the bytes of the field
 	// it was decompressed from; none when it cannot be placed
@@ -42,9 +50,7 @@ init :: proc(app: ^App, s: ^session.Session) {
 		bytes     = {data = s.data, digits = digits, follow = 0},
 		shown_row = -1,
 	}
-	// the title is markup, in which [[ is a literal [; owned either way
-	title, allocated := strings.replace_all(filepath.base(s.file_path), "[", "[[")
-	app.title = allocated ? title : strings.clone(title)
+	app.title = strings.clone(filepath.base(s.file_path))
 	app.error = session.error_text(s, context.allocator)
 	if s.err.kind != .None {
 		r, exact := rows.reveal(&s.model, s.err.path)
@@ -82,46 +88,122 @@ destroy :: proc(app: ^App) {
 	app^ = {}
 }
 
-// Draws the screen in area, the whole frame, and handles the panes' input,
-// with the tree focused at first.
-draw :: proc(ui: ^widgets.Ui, area: layout.Rect, app: ^App) {
-	widgets.focus_order(ui, {&app.tree, &app.bytes})
-	s := app.session
-	t := ui.theme
-	area := area
-	if app.error != "" {
-		banner := layout.cut_top(&area, 1)
-		p := pen.begin(ui.buf, banner, .Ellipsis, base = hexdump.ERROR_STYLE)
-		pen.write(&p, "decoding stopped: ")
-		pen.write(&p, app.error)
-		pen.finish(&p)
-	}
-	keys := layout.cut_bottom(&area, 1)
-	status := layout.cut_bottom(&area, 1)
+// Where each part of the screen is, in a grid of width × height: the
+// error's line, when the decode failed; the tree's frame and the bytes'
+// frame, and the panes inside them; the status line; and the keys.
+Layout :: struct {
+	banner:            grid.Rect,
+	tree_frame, tree:  grid.Rect,
+	bytes_frame, bytes: grid.Rect,
+	status, keys:      grid.Rect,
+}
 
+layout :: proc(app: ^App, width, height: int) -> (l: Layout) {
+	area := grid.Rect{0, 0, max(width, 0), max(height, 0)}
+	if app.error != "" do l.banner, area = grid.split_top(area, 1)
+	l.keys, area = grid.split_bottom(area, 1)
+	l.status, area = grid.split_bottom(area, 1)
 	// the bytes at 16 a line when they fit beside 30 columns of tree
 	hex_width := hexdump.line_width(16, app.bytes.digits) + 3
-	right := area.width >= hex_width + 30 ? layout.cut_right(&area, hex_width) : layout.cut_right(&area, area.width / 2)
+	l.bytes_frame, l.tree_frame = grid.split_right(area, area.width >= hex_width + 30 ? hex_width : area.width / 2)
+	l.tree, l.bytes = grid.inner(l.tree_frame), grid.inner(l.bytes_frame)
+	return
+}
 
-	// the panes first, whose clicks move the focus, then their borders
-	outline.draw(ui, layout.inset(area, 1), &app.tree)
-	h, place := highlight(app)
-	// a row newly selected brings its bytes on screen, even the same bytes
-	// as the row before, which they are for two decompressed values
+// What handle tells the viewer to do.
+Action :: enum {
+	None,
+	Quit,
+}
+
+// Handles event e on a screen of width × height: a key goes to the pane
+// with focus, and Tab moves the focus; a mouse event goes to the pane it is
+// in, and a click gives that pane focus; q, Esc and Ctrl+C, when the pane
+// does not take them, quit. Each event is handled against the state the one
+// before left, as it would be with a draw between them.
+handle :: proc(app: ^App, e: vt.Event, width, height: int) -> Action {
+	l := layout(app, width, height)
+	// the state as a draw of the last event would have left it, on this
+	// screen, which a resize may have changed
+	settle(app, l)
+	switch ev in e {
+	case vt.Key:
+		if ev.code == .Tab && (ev.mods == {} || ev.mods == {.Shift}) {
+			app.focus = app.focus == .Tree ? .Bytes : .Tree
+			break
+		}
+		used: bool
+		switch app.focus {
+		case .Tree:  used = outline.handle_key(&app.tree, ev, l.tree)
+		case .Bytes: used = hexdump.handle_key(&app.bytes, ev, l.bytes, highlight_only(app))
+		}
+		if used do break
+		if ev.code == .Esc && ev.mods == {} do return .Quit
+		if ev.code == .Char && (ev.char == 'q' && ev.mods == {} || ev.char == 'c' && ev.mods == {.Ctrl}) do return .Quit
+	case vt.Mouse:
+		if ev.kind == .Press {
+			if grid.contains(l.tree_frame, ev.x, ev.y) do app.focus = .Tree
+			if grid.contains(l.bytes_frame, ev.x, ev.y) do app.focus = .Bytes
+		}
+		// a held thumb is its pane's wherever the pointer goes
+		switch {
+		case app.tree.dragging || !app.bytes.dragging && grid.contains(l.tree, ev.x, ev.y):
+			outline.handle_mouse(&app.tree, ev, l.tree)
+		case app.bytes.dragging || grid.contains(l.bytes, ev.x, ev.y):
+			hexdump.handle_mouse(&app.bytes, ev, l.bytes, highlight_only(app))
+		}
+	case vt.Resize:
+	}
+	return .None
+}
+
+// Keeps the screen whole after an event, as a draw would: the panes on a
+// row and a line, and a row newly selected brings its bytes on screen, even
+// the same bytes as the row before, which they are for two decompressed
+// values.
+@(private)
+settle :: proc(app: ^App, l: Layout) {
+	outline.settle(&app.tree, l.tree)
+	h := highlight_only(app)
 	if app.tree.selected != app.shown_row && h.has_value do app.bytes.follow = h.value.offset
 	app.shown_row = app.tree.selected
-	hexdump.draw(ui, layout.inset(right, 1), &app.bytes, h)
-	widgets.box(ui, area, app.title, {focused = widgets.focused(ui, &app.tree)})
-	widgets.box(ui, right, "bytes", {focused = widgets.focused(ui, &app.bytes)})
+	hexdump.settle(&app.bytes, l.bytes, h)
+}
+
+// Draws the screen into g, the whole of it.
+draw :: proc(g: ^grid.Grid, app: ^App) {
+	grid.clear(g)
+	s := app.session
+	l := layout(app, g.width, g.height)
+	settle(app, l)
+	if app.error != "" do grid.put_parts(g, l.banner.x, l.banner.y, {{"decoding stopped: ", hexdump.ERROR_STYLE}, {app.error, hexdump.ERROR_STYLE}}, l.banner.width)
+
+	h, place := highlight(app)
+	outline.draw(g, l.tree, &app.tree, app.focus == .Tree)
+	hexdump.draw(g, l.bytes, &app.bytes, h)
+	frame(g, l.tree_frame, app.title, app.focus == .Tree)
+	frame(g, l.bytes_frame, "bytes", app.focus == .Bytes)
 
 	path := rows.path(&s.model, app.tree.selected)
 	line := fmt.tprintf("%s, %s · %s%s", filepath.base(s.file_path), byte_count(len(s.data)), path == "" ? "no rows" : path, place)
-	p := pen.begin(ui.buf, status, .Ellipsis, base = t.text)
-	pen.write(&p, line)
-	pen.finish(&p)
-	k := pen.begin(ui.buf, keys, .Ellipsis, base = t.muted)
-	pen.write(&k, "↑↓ jk PgUp PgDn Home End move · → l ← h Enter expand, collapse · Tab pane · q quit")
-	pen.finish(&k)
+	grid.put(g, l.status.x, l.status.y, line, outline.TEXT, l.status.width)
+	grid.put(g, l.keys.x, l.keys.y, "↑↓ jk PgUp PgDn Home End move · → l ← h Enter expand, collapse · Tab pane · q quit", outline.MUTED, l.keys.width)
+}
+
+// A pane's frame, with its title, in the accent's style when it has focus.
+@(private)
+frame :: proc(g: ^grid.Grid, r: grid.Rect, title: string, focused: bool) {
+	st := focused ? outline.ACCENT : outline.MUTED
+	title_style := st
+	title_style.attrs += {.Bold}
+	grid.frame(g, r, title, st, title_style)
+}
+
+// The highlight of highlight, without the status line's place.
+@(private)
+highlight_only :: proc(app: ^App) -> hexdump.Highlight {
+	h, _ := highlight(app)
+	return h
 }
 
 // What the hex pane highlights for the selected row: its bytes, shaded
