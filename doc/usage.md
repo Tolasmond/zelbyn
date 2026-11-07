@@ -4,7 +4,7 @@ How to build and run zelbyn, what it writes, the viewer, the Odin code it genera
 
 ## Building
 
-Each [release](https://github.com/Tolasmond/zelbyn/releases) has binaries for Linux and Windows (x86-64), with no dependencies but the C library. Building it requires Odin `dev-2026-10` or newer. Build and run from the repository root:
+Each [release](https://github.com/Tolasmond/zelbyn/releases) has binaries for Linux and Windows (x86-64), with no dependencies but the C library; the Linux one has the viewer, `zelbyn-view`, too. Building it requires Odin `dev-2026-10` or newer. Build and run from the repository root:
 
 ```
 odin build . -out:build/zelbyn
@@ -120,7 +120,7 @@ error: Not_Equal at 0x00000000 in png[0].magic[0]: read <8 bytes> 6e 6f 74 20 61
 
 ## The viewer
 
-`zelbyn-view` shows a decoded file in the terminal: the decoded tree as an outline, beside the file's bytes, with those of the selected value highlighted. It draws with a terminal library of its own, on POSIX and on Windows: it is checked on Linux and Windows, builds for macOS and the BSDs, and on Windows needs a console with virtual terminal sequences, as Windows Terminal or the console of Windows 10 and later. On Windows, build it with `-out:build/zelbyn-view.exe`; it is also in the Windows release's zip. It is not in the Linux release. To build and run it:
+`zelbyn-view` shows a decoded file in the terminal: the decoded tree as an outline, beside the file's bytes, with those of the selected value highlighted. It draws with a terminal library of its own, on POSIX and on Windows: it is checked on Linux and Windows, builds for macOS and the BSDs, and on Windows needs a console with virtual terminal sequences, as Windows Terminal or the console of Windows 10 and later (not Git Bash's own window, mintty). On Windows, build it with `-out:build/zelbyn-view.exe`. Both releases have it. To build and run it:
 
 ```
 odin build view -out:build/zelbyn-view

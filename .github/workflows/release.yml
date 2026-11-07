@@ -1,11 +1,10 @@
 # Publishes a GitHub release when a version tag (v*) is pushed: zelbyn
 # built with -o:speed on Linux and Windows x86-64, the platforms check.yml
-# tests, once tools/check.py passes on the tagged commit. Each archive holds
-# the binary, LICENSE, THIRD_PARTY.md and README.md, and Windows' the
-# viewer's too, zelbyn-view.exe; SHA256SUMS lists the
-# archives' checksums. A pull request that changes this file or
-# actions/install-odin builds and packages without publishing
-# (doc/development.md, "Releases").
+# tests, and the viewer, zelbyn-view, on both, once tools/check.py passes
+# on the tagged commit. Each archive holds the binaries, LICENSE,
+# THIRD_PARTY.md and README.md; SHA256SUMS lists the archives' checksums.
+# A pull request that changes this file or actions/install-odin builds and
+# packages without publishing (doc/development.md, "Releases").
 name: release
 
 on:
@@ -51,6 +50,7 @@ jobs:
         run: |
           mkdir -p "dist/$PACKAGE"
           odin build . -o:speed -out:"dist/$PACKAGE/zelbyn"
+          odin build view -o:speed -out:"dist/$PACKAGE/zelbyn-view"
           cp LICENSE THIRD_PARTY.md README.md "dist/$PACKAGE/"
           tar -czf "dist/$PACKAGE.tar.gz" -C dist "$PACKAGE"
 
