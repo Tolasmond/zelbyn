@@ -22,7 +22,7 @@ odin check view -vet -strict-style
 
 `tools/codegen_tests/check.py` decodes every input the tests decode again, with the code generated from its schema ([Generated code](#generated-code)).
 
-The last checks the viewer, `view/`, on every platform but Windows: its terminal, `view/term`, is POSIX's, and `tools/check.py` skips it on Windows. Its other packages import no terminal, and are tested with zelbyn's tests, on every platform. The viewer is built with `odin build view -out:build/zelbyn-view`, and is not part of the releases.
+The last checks the viewer, `view/`, on every platform but Windows: its terminal, `view/term`, is POSIX's, and `tools/check.py` skips it on Windows. Its other packages import no terminal, and are tested with zelbyn's tests, on every platform. The viewer is built with `odin build view -out:build/zelbyn-view`, and the Linux release has it.
 
 `tools/check.py` runs them all, each whatever the ones before it give, and ends with a summary; it exits 1 if any failed. It builds the tests in a temporary directory. The checks are pinned to Odin `dev-2026-10` (commit `84bc3fc`), and the script warns when another is on the `PATH`.
 
@@ -49,7 +49,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-`.github/workflows/release.yml` runs `tools/check.py` on Linux (Ubuntu 22.04, for the oldest glibc of the supported runners) and on Windows, builds zelbyn with `-o:speed` on each, and packages the binary with `LICENSE`, `THIRD_PARTY.md` and `README.md`: `zelbyn-<tag>-linux-amd64.tar.gz` and `zelbyn-<tag>-windows-amd64.zip`. The release, named for the tag, has notes GitHub generates from the pull requests since the last release, the two archives, and `SHA256SUMS`. A tag with a hyphen (`v0.2.0-rc.1`) makes a pre-release. If a check fails, nothing is published; delete the tag (`git push --delete origin v0.1.0`), fix the commit, and tag again. A pull request that changes the workflow or `install-odin` builds and packages the archives without publishing them, and they can be downloaded from the run's artifacts.
+`.github/workflows/release.yml` runs `tools/check.py` on Linux (Ubuntu 22.04, for the oldest glibc of the supported runners) and on Windows, builds zelbyn with `-o:speed` on each, and the viewer on Linux, and packages the binaries with `LICENSE`, `THIRD_PARTY.md` and `README.md`: `zelbyn-<tag>-linux-amd64.tar.gz` and `zelbyn-<tag>-windows-amd64.zip`. The release, named for the tag, has notes GitHub generates from the pull requests since the last release, the two archives, and `SHA256SUMS`. A tag with a hyphen (`v0.2.0-rc.1`) makes a pre-release. If a check fails, nothing is published; delete the tag (`git push --delete origin v0.1.0`), fix the commit, and tag again. A pull request that changes the workflow or `install-odin` builds and packages the archives without publishing them, and they can be downloaded from the run's artifacts.
 
 ## Benchmark
 

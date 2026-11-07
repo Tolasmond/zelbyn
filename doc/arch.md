@@ -69,7 +69,7 @@ The plan and the YAML trees live in one arena, which is freed with the plan. The
 | `view/session/` | What the viewer shows, made from its command line, taken as zelbyn takes it: the schema loaded, the file read and decoded, and the rows of its tree, with the decode's error when it failed; it imports no terminal library, and is tested with zelbyn |
 | `view/screen/` | The viewer's whole screen: an error line after a failed decode, the tree and the bytes, a status line and the keys; each event sent to its pane, and the focus, which Tab and a click move (§15.4); it imports no terminal, and is tested with zelbyn, on every platform |
 | `.github/workflows/check.yml` | CI: `tools/check.py` on each push to `main` and each pull request |
-| `.github/workflows/release.yml` | A GitHub release of the binaries for Linux and Windows on each tag `v*` |
+| `.github/workflows/release.yml` | A GitHub release of the binaries for Linux and Windows on each tag `v*`, the viewer's on Linux |
 | `.github/actions/install-odin/` | Installs the pinned Odin release, for both workflows |
 
 `.gitattributes` normalizes text files to LF. The repository holds no schemas or sample files of real formats; the tools that need them use clones of `kaitai_struct_formats` and `kaitai_struct_samples` kept outside it (§14).
