@@ -114,6 +114,7 @@ Decoder :: struct {
 	char:     [4]u8,
 	char_len: int,
 	char_end: int, // the bytes of the character being read
+	intro:    u8,  // the byte after ESC that began a string, while nothing has followed it
 }
 
 // Decodes bytes, those of one read, and appends their events to events. A
@@ -127,8 +128,9 @@ decode :: proc(d: ^Decoder, bytes: []u8, events: ^[dynamic]Event) -> (pending: b
 }
 
 // Ends what d has pending, when no more bytes came for it: a lone ESC is
-// the Esc key, ESC [ and ESC O are Alt with [ and O, and the rest of an
-// unfinished sequence or character is dropped.
+// the Esc key; ESC [, ESC O, and ESC with a string's first byte, ] P X ^ or
+// _, are Alt with that byte (and ESC after one of those, Esc too); and the
+// rest of an unfinished sequence, string or character is dropped.
 flush :: proc(d: ^Decoder, events: ^[dynamic]Event) {
 	#partial switch d.state {
 	case .Escape:
@@ -141,6 +143,12 @@ flush :: proc(d: ^Decoder, events: ^[dynamic]Event) {
 	case .Ss3:
 		d.alt = true
 		key(d, events, {code = .Char, char = 'O'})
+	case .String, .String_Esc:
+		if d.intro != 0 {
+			d.alt = true
+			key(d, events, {code = .Char, char = rune(d.intro)})
+			if d.state == .String_Esc do key(d, events, {code = .Esc})
+		}
 	}
 	d^ = {}
 }
@@ -175,7 +183,7 @@ step :: proc(d: ^Decoder, b: u8, events: ^[dynamic]Event) {
 		case 'O':
 			d.state = .Ss3
 		case ']', 'P', 'X', '^', '_':
-			d.state = .String
+			d.state, d.intro = .String, b
 		case 0x1B:
 			// ESC ESC: Alt with Esc
 			d.state, d.alt = .Ground, true
@@ -222,8 +230,15 @@ step :: proc(d: ^Decoder, b: u8, events: ^[dynamic]Event) {
 		case 'R': code = .F3
 		case 'S': code = .F4
 		case 'M': code = .Enter // the keypad's
-		case:
+		case 0x20 ..= 0x7E:
+			// a final byte of no key: dropped
 			d.alt = false
+			return
+		case:
+			// a control or a byte past ASCII ends it, dropped, and is read
+			// anew, as in a control sequence
+			d.alt = false
+			ground(d, b, events)
 			return
 		}
 		key(d, events, {code = code})
@@ -233,12 +248,19 @@ step :: proc(d: ^Decoder, b: u8, events: ^[dynamic]Event) {
 			d.state, d.alt = .Ground, false
 		case 0x1B:
 			d.state = .String_Esc
+		case:
+			d.intro = 0
 		}
 	case .String_Esc:
 		d.state, d.alt = .Ground, false
 		// ST ends the string; ESC before anything else ends it too, and
-		// starts a sequence of its own
+		// starts a sequence of its own, and when nothing came between the
+		// string's first byte and that ESC, it was Alt with the byte
 		if b != '\\' {
+			if d.intro != 0 {
+				d.alt = true
+				key(d, events, {code = .Char, char = rune(d.intro)})
+			}
 			d.state = .Escape
 			step(d, b, events)
 		}
@@ -302,12 +324,16 @@ csi :: proc(d: ^Decoder, params: []u8, final: u8, events: ^[dynamic]Event) {
 		if final == 'M' || final == 'm' do mouse(params[1:], final == 'm', events)
 		return
 	}
-	n: [3]int
+	// a key is n, or n ; m with m its modifiers
+	n: [2]int
 	count, ok := numbers(params, n[:])
 	if !ok do return
-	// xterm's modifiers are 1 + their bits: Shift 1, Alt 2, Ctrl 4
+	// xterm's modifiers are 1 + their bits: Shift 1, Alt 2, Ctrl 4; one past
+	// those, as Meta, is no key of these, nor a report of the cursor's
+	// position that ends in R
 	mods: Modifiers
-	if count >= 2 {
+	if count == 2 {
+		if n[1] > 8 do return
 		bits := max(n[1] - 1, 0)
 		if bits & 1 != 0 do mods += {.Shift}
 		if bits & 2 != 0 do mods += {.Alt}

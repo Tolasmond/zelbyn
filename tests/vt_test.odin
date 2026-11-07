@@ -46,6 +46,17 @@ VT_CASES := []Vt_Case {
 	// ESC [ and ESC O that nothing follows: Alt with [ and O
 	{"\x1b[", {vt.Key{code = .Char, char = '[', mods = {.Alt}}}, true},
 	{"\x1bO", {vt.Key{code = .Char, char = 'O', mods = {.Alt}}}, true},
+	// ESC with a string's first byte that nothing follows: Alt with it, and
+	// with ESC after it, Esc too, or the sequence that ESC starts
+	{"\x1b]", {vt.Key{code = .Char, char = ']', mods = {.Alt}}}, true},
+	{"\x1bP", {vt.Key{code = .Char, char = 'P', mods = {.Alt}}}, true},
+	{"\x1bX", {vt.Key{code = .Char, char = 'X', mods = {.Alt}}}, true},
+	{"\x1b^", {vt.Key{code = .Char, char = '^', mods = {.Alt}}}, true},
+	{"\x1b_", {vt.Key{code = .Char, char = '_', mods = {.Alt}}}, true},
+	{"\x1b]\x1b", {vt.Key{code = .Char, char = ']', mods = {.Alt}}, vt.Key{code = .Esc}}, true},
+	{"\x1b_\x1b[A", {vt.Key{code = .Char, char = '_', mods = {.Alt}}, vt.Key{code = .Up}}, false},
+	// a string with nothing in it, ended by ST or BEL, dropped
+	{"\x1b]\x1b\\a\x1bP\x07b", {vt.Key{code = .Char, char = 'a'}, vt.Key{code = .Char, char = 'b'}}, false},
 
 	// the cursor keys, Home and End, in CSI and SS3
 	{"\x1b[A\x1b[B\x1b[C\x1b[D", {vt.Key{code = .Up}, vt.Key{code = .Down}, vt.Key{code = .Right}, vt.Key{code = .Left}}, false},
@@ -85,13 +96,21 @@ VT_CASES := []Vt_Case {
 	// sequences that are not keys, dropped whole, and the keys around them
 	{"\x1b[200~hi\x1b[201~", {vt.Key{code = .Char, char = 'h'}, vt.Key{code = .Char, char = 'i'}}, false},
 	{"\x1b[I\x1b[O\x1b[?1;2c\x1b[12;40R\x1b[97;5u\x1b[1:2A\x1b[2A\x1b[99~x", {vt.Key{code = .Char, char = 'x'}}, false},
-	{"\x1b[9999999~\x1b[0000005~\x1b[1;2;3;4A\x1b[;5Ay", {vt.Key{code = .Up, mods = {.Ctrl}}, vt.Key{code = .Char, char = 'y'}}, false},
+	{"\x1b[9999999~\x1b[0000005~\x1b[1;2;3;4A\x1b[1;2;3A\x1b[3;5;9~\x1b[;5Ay", {vt.Key{code = .Up, mods = {.Ctrl}}, vt.Key{code = .Char, char = 'y'}}, false},
+	// modifiers past Shift, Alt and Ctrl, and so a report of the cursor's
+	// position in a column past 8
+	{"\x1b[1;9A\x1b[3;17~\x1b[1;40R\x1b[1;0Bx", {vt.Key{code = .Down}, vt.Key{code = .Char, char = 'x'}}, false},
 	{"\x1b[11111111111111111111111111111111111111111Ax", {vt.Key{code = .Char, char = 'x'}}, false},
 	{"\x1b]0;title\x07a\x1b]0;title\x1b\\b\x1bP+q\x1b\\c\x1b_x\x07d\x1b^x\x07e\x1bXx\x07f", {vt.Key{code = .Char, char = 'a'}, vt.Key{code = .Char, char = 'b'}, vt.Key{code = .Char, char = 'c'}, vt.Key{code = .Char, char = 'd'}, vt.Key{code = .Char, char = 'e'}, vt.Key{code = .Char, char = 'f'}}, false},
 	// a string ended by ESC before anything but \: that ESC starts a sequence
 	{"\x1b]0;t\x1b[A", {vt.Key{code = .Up}}, false},
 	// an SS3 with a final byte of no key
 	{"\x1bOxa", {vt.Key{code = .Char, char = 'a'}}, false},
+	// an SS3 cut short by another sequence, by a control or by a character,
+	// which is read anew
+	{"\x1bO\x1b[A", {vt.Key{code = .Up}}, false},
+	{"\x1bO\x03a", {vt.Key{code = .Char, char = 'c', mods = {.Ctrl}}, vt.Key{code = .Char, char = 'a'}}, false},
+	{"\x1bO\xc3\xa9x", {vt.Key{code = .Char, char = 0xE9}, vt.Key{code = .Char, char = 'x'}}, false},
 	// a sequence cut short by another, and by a control, which is read anew
 	{"\x1b[1\x1b[A", {vt.Key{code = .Up}}, false},
 	{"\x1b[1\x03a", {vt.Key{code = .Char, char = 'c', mods = {.Ctrl}}, vt.Key{code = .Char, char = 'a'}}, false},
@@ -139,12 +158,14 @@ vt_decode_cases :: proc(t: ^testing.T) {
 		want := events_text(c.events)
 		testing.expectf(t, events_text(events[:]) == want, "%q: %v, not %v", c.bytes, events[:], want)
 		for i in 1 ..< len(c.bytes) {
-			split, _ := vt_decode(c.bytes[:i], c.bytes[i:])
+			split, split_pending := vt_decode(c.bytes[:i], c.bytes[i:])
+			testing.expectf(t, split_pending == c.pending, "%q split at %d: pending %v", c.bytes, i, split_pending)
 			testing.expectf(t, events_text(split[:]) == want, "%q split at %d: %v, not %v", c.bytes, i, split[:], want)
 		}
 		bytes := make([]string, len(c.bytes), context.temp_allocator)
 		for i in 0 ..< len(c.bytes) do bytes[i] = c.bytes[i:][:1]
-		one, _ := vt_decode(..bytes)
+		one, one_pending := vt_decode(..bytes)
+		testing.expectf(t, one_pending == c.pending, "%q a byte a read: pending %v", c.bytes, one_pending)
 		testing.expectf(t, events_text(one[:]) == want, "%q a byte a read: %v, not %v", c.bytes, one[:], want)
 	}
 }
@@ -169,6 +190,20 @@ vt_pending :: proc(t: ^testing.T) {
 	clear(&events)
 	testing.expect(t, !vt.decode(&d, transmute([]u8)string("b"), &events))
 	testing.expect_value(t, events_text(events[:]), events_text({char('b')}))
+
+	// after flush ends each case left pending, the decoder starts afresh
+	for c in VT_CASES {
+		if !c.pending do continue
+		clear(&events)
+		after: vt.Decoder
+		vt.decode(&after, transmute([]u8)c.bytes, &events)
+		vt.flush(&after, &events)
+		testing.expectf(t, !vt.decode(&after, transmute([]u8)string("x"), &events), "%q, flushed, then x: pending", c.bytes)
+		want := make([dynamic]vt.Event, context.temp_allocator)
+		append(&want, ..c.events)
+		append(&want, char('x'))
+		testing.expectf(t, events_text(events[:]) == events_text(want[:]), "%q, flushed, then x: %v", c.bytes, events[:])
+	}
 
 	// nothing decodes to a Resize, which the terminal's reader makes
 	for c in VT_CASES {
