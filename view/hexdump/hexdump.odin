@@ -39,8 +39,9 @@ Highlight :: struct {
 	note:      string,
 }
 
-// The style of the byte where a failed decode stopped.
-ERROR_STYLE :: grid.Style{fg = .Black, bg = .Red, attrs = {.Bold}}
+// The style of the byte where a failed decode stopped; not bold, as
+// outline.SELECTED is not.
+ERROR_STYLE :: grid.Style{fg = .Black, bg = .Red}
 
 // The style of a mark: a value of no bytes, or of bits left over.
 MARK_STYLE :: grid.Style{fg = outline.ACCENT.fg, attrs = {.Underlined, .Bold}}
