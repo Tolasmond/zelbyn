@@ -28,6 +28,7 @@ IMPORT_NAMES := [?][2]string {
 	{"session", "session"}, // the viewer's, view/session
 	{"screen", "screen"}, // the viewer's, view/screen
 	{"vt", "vt"}, // the viewer's, view/vt
+	{"term", "term"}, // the viewer's, view/term
 	{"yaml", "yml"},
 }
 
@@ -43,8 +44,7 @@ import_names :: proc(t: ^testing.T) {
 		for e in entries {
 			path, _ := filepath.join({dir, e.name}, context.temp_allocator)
 			if e.type == .Directory {
-				// view/hnoss is a submodule, whose ../ imports are its own
-				if e.name != "node_modules" && !strings.has_prefix(e.name, ".") && !(dir == "view" && e.name == "hnoss") do collect(path, files)
+				if e.name != "node_modules" && !strings.has_prefix(e.name, ".") do collect(path, files)
 			} else if strings.has_suffix(e.name, ".odin") {
 				append(files, path)
 			}
@@ -63,8 +63,6 @@ import_names :: proc(t: ^testing.T) {
 			target := strings.trim(line[quote:], "\"")
 			// zelbyn's own: ../x, ../../zelbyn/x, zelbyn/x; not core: or base:
 			if strings.contains(target, ":") || !(strings.has_prefix(target, "../") || strings.has_prefix(target, "zelbyn/")) do continue
-			// hnoss's packages, which the viewer imports, are not zelbyn's
-			if strings.contains(target, "hnoss/") do continue
 			pkg := target[strings.last_index_byte(target, '/') + 1:]
 			want, known := "", false
 			for n in IMPORT_NAMES do if n[0] == pkg do want, known = n[1], true

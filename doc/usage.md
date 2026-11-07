@@ -120,7 +120,7 @@ error: Not_Equal at 0x00000000 in png[0].magic[0]: read <8 bytes> 6e 6f 74 20 61
 
 ## The viewer
 
-`zelbyn-view` shows a decoded file in the terminal: the decoded tree as an outline, beside the file's bytes, with those of the selected value highlighted. It runs on Linux only, as the terminal library it draws with, [hnoss](https://github.com/Huseynteymurzade28/hnoss), does, and is not part of the releases. hnoss is a git submodule, `view/hnoss`: clone with `git clone --recursive`, or in a clone run `git submodule update --init`. Then:
+`zelbyn-view` shows a decoded file in the terminal: the decoded tree as an outline, beside the file's bytes, with those of the selected value highlighted. It draws with a terminal library of its own, on POSIX: it is checked on Linux, builds for macOS and the BSDs, and does not run on Windows. It is not part of the releases. To build and run it:
 
 ```
 odin build view -out:build/zelbyn-view
@@ -137,7 +137,7 @@ The command line is zelbyn's ([Running](#running)) without `--dump` and `--offse
 
 **The screen.** On the left, the tree: a row for each value, set and array, indented by its depth, with ▸ for a set or array that can be expanded and ▾ for one that is, its name (`[i]` for a value of an array), ` = ` and its value as the text dump writes it, or an array's `(count)`, and its offset in hex at the right. On the right, the bytes: each line an offset, 16 bytes in hex (fewer when the pane is narrow) and the same bytes as text, `.` for those that are not printable ASCII. The selected value's bytes are highlighted, and shaded around them those of the set or array it is in; a value of no bytes, of bits left over, is a mark on the byte it starts in. Below, a status line gives the file's name and size, and the selected row's path, offset and size, and a line the keys.
 
-**Keys.** Tab moves the focus between the panes, as a click does. In the tree: ↑ ↓ (or k j) move, PgUp PgDn by a page, Home End to the first and last row; → (or l) expands the selected row, or moves into it when it is expanded; ← (or h) collapses it, or moves to the row it is under; Enter expands or collapses it. A click selects a row, and on its marker expands or collapses it; the wheel scrolls. In the bytes: ↑ ↓ (or k j) scroll by a line, PgUp PgDn by a page, Home End to the first and last; the wheel scrolls. Selecting a row brings its bytes on screen.
+**Keys.** Tab (or Shift+Tab) moves the focus between the panes, as a click does. In the tree: ↑ ↓ (or k j) move, PgUp PgDn by a page, Home End to the first and last row; → (or l) expands the selected row, or moves into it when it is expanded; ← (or h) collapses it, or moves to the row it is under; Enter expands or collapses it. A click selects a row, and on its marker expands or collapses it; the wheel scrolls. In the bytes: ↑ ↓ (or k j) scroll by a line, PgUp PgDn by a page, Home End to the first and last; the wheel scrolls. In either, a click on the scrollbar, or a drag of it, scrolls to where it is. Selecting a row brings its bytes on screen. The screen is drawn again when the terminal is resized.
 
 **Values not in the file.** A value read from bytes that `process: zlib` decompressed has an offset in them, not in the file ([Running](#running)): the bytes highlighted are those of the field they were decompressed from, and a note gives the value's offset. A parse instance with an `io` is placed in the stream of an enclosing type (`_io`, `_parent._io`, `_root._io`) or of a field of one (`body._io`); for any other, nothing is highlighted, and a note says so.
 

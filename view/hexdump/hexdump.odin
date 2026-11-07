@@ -1,21 +1,21 @@
-// Package hexdump draws a file's bytes as a pane of hnoss widgets: each
-// line an offset, the bytes in hex and the same bytes as text, with the
-// bytes of the selected value highlighted, and around them, shaded, those
-// of the set it is in. Only the lines on screen are formatted.
+// Package hexdump is the pane of a file's bytes: each line an offset, the
+// bytes in hex and the same bytes as text, with the bytes of the selected
+// value highlighted, and around them, shaded, those of the set it is in.
+// Only the lines on screen are formatted. It handles a key or a mouse event
+// at a time (view/vt), and draws into a grid (view/grid).
 package hexdump
 
-import "../hnoss/buffer"
-import "../hnoss/layout"
-import "../hnoss/style"
-import "../hnoss/widgets"
+import "../grid"
+import "../outline"
+import "../vt"
 
-// The pane's state, which the caller keeps across frames. Its address is
-// the pane's identity for focus.
+// The pane's state, which the caller keeps.
 State :: struct {
-	data:   []byte,
-	line:   int, // the first line on screen
-	follow: int, // an offset to bring on screen at the next draw, or -1
-	digits: int, // the hex digits each offset is shown with
+	data:     []byte,
+	line:     int, // the first line on screen
+	follow:   int, // an offset to bring on screen at the next settle, or -1
+	digits:   int, // the hex digits each offset is shown with
+	dragging: bool, // the scrollbar's thumb is held
 }
 
 Range :: struct {
@@ -40,7 +40,10 @@ Highlight :: struct {
 }
 
 // The style of the byte where a failed decode stopped.
-ERROR_STYLE :: style.Style{fg = .Black, bg = .Red, add = {.Bold}}
+ERROR_STYLE :: grid.Style{fg = .Black, bg = .Red, attrs = {.Bold}}
+
+// The style of a mark: a value of no bytes, or of bits left over.
+MARK_STYLE :: grid.Style{fg = outline.ACCENT.fg, attrs = {.Underlined, .Bold}}
 
 // The bytes each line shows in a pane width columns wide, with offsets of
 // digits hex digits: 16, or fewer when they do not fit, 1 at least.
@@ -58,90 +61,116 @@ line_width :: proc(n, digits: int) -> int {
 	return text_column(n, digits) + n
 }
 
-// Draws s.data in area, with a scrollbar when it does not fit, and the
-// bytes of h highlighted. When s.follow is an offset, the pane first
-// scrolls to show its line, a quarter down, unless it is on screen. While
-// the pane has focus, ↑ ↓ (or k j) scroll by a line, PgUp PgDn by a page,
-// and Home End to the first and last; the wheel scrolls; a click focuses
-// it. Returns true when the first line on screen changed.
-draw :: proc(ui: ^widgets.Ui, area: layout.Rect, s: ^State, h: Highlight) -> (changed: bool) {
-	if area.width <= 0 || area.height <= 0 do return false
-	old_line := s.line
-	body := area
-	if h.note != "" && body.height > 1 {
-		note := layout.cut_bottom(&body, 1)
-		buffer.set_string(ui.buf, note.x, note.y, h.note, ui.theme.muted, note.width)
-	}
+// The pane's parts, in area, for h: the lines of bytes, its scrollbar's
+// column, the last, while they do not fit, and the line of h's note at the
+// bottom; the bytes a line shows, the lines there are, and the last that
+// can be first on screen.
+@(private)
+Parts :: struct {
+	body, bar, note: grid.Rect,
+	per_line:        int,
+	lines, last:     int,
+}
 
+@(private)
+parts :: proc(s: ^State, area: grid.Rect, h: Highlight) -> (p: Parts) {
+	p.body = area
+	if h.note != "" && area.height > 1 do p.note, p.body = grid.split_bottom(area, 1)
 	// a mark at the end of the data has a place of its own, past its last
 	// byte, maybe on a line of its own
 	positions := len(s.data)
 	if end_mark(s, h) do positions += 1
-	n := bytes_per_line(body.width, s.digits)
-	lines := (positions + n - 1) / n
-	bar: layout.Rect
-	if lines > body.height {
-		bar = layout.cut_right(&body, 1)
-		n = bytes_per_line(body.width, s.digits)
-		lines = (positions + n - 1) / n
+	p.per_line = bytes_per_line(p.body.width, s.digits)
+	p.lines = (positions + p.per_line - 1) / p.per_line
+	if p.lines > p.body.height {
+		p.bar, p.body = grid.split_right(p.body, 1)
+		p.per_line = bytes_per_line(p.body.width, s.digits)
+		p.lines = (positions + p.per_line - 1) / p.per_line
 	}
-	last := max(lines - body.height, 0)
+	p.last = max(p.lines - p.body.height, 0)
+	return
+}
 
-	page := max(body.height - 1, 1)
-	it: widgets.Key_Iter
-	for k, i in widgets.next_key(ui, s, &it) {
-		used := true
-		code := k.code
-		if code == .Char && k.mods == {} {
-			switch k.char {
-			case 'k': code = .Up
-			case 'j': code = .Down
-			}
-		}
-		#partial switch code {
-		case .Up:        s.line -= 1
-		case .Down:      s.line += 1
-		case .Page_Up:   s.line -= page
-		case .Page_Down: s.line += page
-		case .Home:      s.line = 0
-		case .End:       s.line = last
-		case:
-			used = false
-		}
-		if used {
-			widgets.consume(ui, i)
-			s.line = clamp(s.line, 0, last)
+// Handles key k, while the pane, area, has focus: ↑ ↓ (or k j) scroll by a
+// line, PgUp PgDn by a page, and Home End to the first and last. Returns
+// whether the key was the pane's.
+handle_key :: proc(s: ^State, k: vt.Key, area: grid.Rect, h: Highlight) -> (used: bool) {
+	settle(s, area, h)
+	p := parts(s, area, h)
+	page := max(p.body.height - 1, 1)
+	code := k.code
+	if code == .Char && k.mods == {} {
+		switch k.char {
+		case 'k': code = .Up
+		case 'j': code = .Down
 		}
 	}
-	mit: widgets.Key_Iter
-	for e, i in widgets.next_mouse(ui, nil, body, &mit) {
-		#partial switch e.kind {
-		case .Press:
-			widgets.focus(ui, s)
-		case .Scroll:
-			#partial switch e.button {
-			case .Wheel_Up:   s.line -= 3
-			case .Wheel_Down: s.line += 3
-			}
-		case:
-			continue
-		}
-		s.line = clamp(s.line, 0, last)
-		widgets.consume(ui, i)
+	#partial switch code {
+	case .Up:        s.line -= 1
+	case .Down:      s.line += 1
+	case .Page_Up:   s.line -= page
+	case .Page_Down: s.line += page
+	case .Home:      s.line = 0
+	case .End:       s.line = p.last
+	case:
+		return false
 	}
+	s.line = clamp(s.line, 0, p.last)
+	return true
+}
 
-	if s.follow >= 0 {
-		target := s.follow / n
-		if target < s.line || target >= s.line + body.height do s.line = target - body.height / 4
+// Handles mouse event e, in the pane, area: the wheel scrolls, and a click
+// or a drag on the scrollbar scrolls to where it is, until the left button
+// is released. Returns whether the event was the pane's: in it, or of the
+// left button while it holds the thumb.
+handle_mouse :: proc(s: ^State, e: vt.Mouse, area: grid.Rect, h: Highlight) -> (used: bool) {
+	settle(s, area, h)
+	p := parts(s, area, h)
+	left := e.button == .Left
+	// a press of the left button starts afresh, also after a release lost
+	if e.kind == .Press && left do s.dragging = false
+	if e.kind == .Release && left && s.dragging {
+		s.dragging = false
+		return true
+	}
+	if s.dragging && e.kind == .Drag && left || grid.contains(p.bar, e.x, e.y) && e.kind == .Press && left {
+		s.dragging = true
+		s.line = grid.scrollbar_line(p.bar, p.lines, p.body.height, e.y)
+		return true
+	}
+	if !grid.contains(area, e.x, e.y) do return false
+	#partial switch e.kind {
+	case .Wheel_Up:   s.line -= 3
+	case .Wheel_Down: s.line += 3
+	}
+	s.line = clamp(s.line, 0, p.last)
+	return true
+}
+
+// Keeps s whole for the pane, area, highlighting h: when s.follow is an
+// offset, scrolls to show its line, a quarter down, unless it is on
+// screen; and the first line on screen where the lines fill it.
+settle :: proc(s: ^State, area: grid.Rect, h: Highlight) {
+	p := parts(s, area, h)
+	if s.follow >= 0 && p.per_line > 0 {
+		target := s.follow / p.per_line
+		if target < s.line || target >= s.line + p.body.height do s.line = target - p.body.height / 4
 		s.follow = -1
 	}
-	s.line = clamp(s.line, 0, last)
-	if bar.width > 0 do widgets.scrollbar(ui, bar, lines, body.height, &s.line)
+	s.line = clamp(s.line, 0, p.last)
+}
 
-	for y in 0 ..< min(body.height, lines - s.line) {
-		draw_line(ui, {body.x, body.y + y, body.width, 1}, s, (s.line + y) * n, n, h)
+// Draws s.data in area of g, with a scrollbar when it does not fit, and the
+// bytes of h highlighted.
+draw :: proc(g: ^grid.Grid, area: grid.Rect, s: ^State, h: Highlight) {
+	if area.width <= 0 || area.height <= 0 do return
+	settle(s, area, h)
+	p := parts(s, area, h)
+	if p.note.height > 0 do grid.put(g, p.note.x, p.note.y, h.note, outline.MUTED, p.note.width)
+	if p.bar.width > 0 do grid.scrollbar(g, p.bar, p.lines, p.body.height, s.line, outline.ACCENT, outline.MUTED)
+	for y in 0 ..< min(p.body.height, p.lines - s.line) {
+		draw_line(g, {p.body.x, p.body.y + y, p.body.width, 1}, s, (s.line + y) * p.per_line, p.per_line, h)
 	}
-	return s.line != old_line
 }
 
 // Whether h has a mark past the last byte of s.data: a value of no bytes
@@ -162,61 +191,65 @@ text_column :: proc(n, digits: int) -> int {
 	return hex_column(n - 1, n, digits) + 4
 }
 
-// Draws the line of n bytes from start in line.
+// Draws the line of n bytes from start in line of g.
 @(private)
-draw_line :: proc(ui: ^widgets.Ui, line: layout.Rect, s: ^State, start, n: int, h: Highlight) {
-	t := ui.theme
+draw_line :: proc(g: ^grid.Grid, line: grid.Rect, s: ^State, start, n: int, h: Highlight) {
 	lower := "0123456789abcdef"
 	buf: [32]byte
 	offset := hex_text(buf[:], start, s.digits)
-	buffer.set_string(ui.buf, line.x, line.y, offset, t.muted, line.width)
+	grid.put(g, line.x, line.y, offset, outline.MUTED, line.width)
 
 	// the style of the byte at offset, and whether it is highlighted
-	byte_style :: proc(t: widgets.Theme, h: Highlight, offset: int) -> (st: style.Style, on: bool) {
+	byte_style :: proc(h: Highlight, offset: int) -> (st: grid.Style, on: bool) {
 		// the error first: the value selected at first is often the one that failed
 		if h.has_error && offset >= h.error.offset && offset < h.error.offset + max(h.error.size, 1) do return ERROR_STYLE, true
-		if h.has_value && h.value.size > 0 && offset >= h.value.offset && offset < h.value.offset + h.value.size do return t.selected, true
-		if h.has_outer && offset >= h.outer.offset && offset < h.outer.offset + h.outer.size do return t.selected_unfocused, true
+		if h.has_value && h.value.size > 0 && offset >= h.value.offset && offset < h.value.offset + h.value.size do return outline.SELECTED, true
+		if h.has_outer && offset >= h.outer.offset && offset < h.outer.offset + h.outer.size do return outline.SELECTED_UNFOCUSED, true
 		return {}, false
 	}
 	right := line.x + line.width
-	mark := style.Style{fg = t.accent.fg, add = {.Underlined, .Bold}}
+	// text in a style at x, when it fits before the line's right
+	put :: proc(g: ^grid.Grid, x, y, right: int, text: string, st: grid.Style) {
+		if x + len(text) <= right do grid.put(g, x, y, text, st, len(text))
+	}
 	for i in 0 ..< n {
 		at := start + i
 		if at >= len(s.data) {
 			// a value of no bytes, or an error, at the end: a mark where the
 			// next byte would be
 			if at == len(s.data) && end_mark(s, h) {
-				st := h.has_error && h.error.offset >= at ? style.patch(ERROR_STYLE, {add = {.Underlined}}) : mark
-				x := line.x + hex_column(i, n, s.digits)
-				if x + 2 <= right do buffer.set_string(ui.buf, x, line.y, "  ", st)
-				if tx := line.x + text_column(n, s.digits) + i; tx < right do buffer.set_string(ui.buf, tx, line.y, " ", st)
+				st := MARK_STYLE
+				if h.has_error && h.error.offset >= at {
+					st = ERROR_STYLE
+					st.attrs += {.Underlined}
+				}
+				put(g, line.x + hex_column(i, n, s.digits), line.y, right, "  ", st)
+				put(g, line.x + text_column(n, s.digits) + i, line.y, right, " ", st)
 			}
 			break
 		}
 		b := s.data[at]
-		st, on := byte_style(t, h, at)
+		st, on := byte_style(h, at)
 		x := line.x + hex_column(i, n, s.digits)
 		if h.has_value && h.value.size == 0 && at == h.value.offset && st != ERROR_STYLE {
 			// a value of bits left over: a mark on the byte it starts in
-			st = mark
+			st = MARK_STYLE
 		}
 		pair := [2]byte{lower[b >> 4], lower[b & 0xf]}
-		if x + 2 <= right do buffer.set_string(ui.buf, x, line.y, string(pair[:]), st)
+		put(g, x, line.y, right, string(pair[:]), st)
 		// the spaces after it, between two highlighted bytes, join them: in
 		// their style, or between the value and the set around it, the set's
 		if i + 1 < n && at + 1 < len(s.data) && on {
-			next, next_on := byte_style(t, h, at + 1)
+			next, next_on := byte_style(h, at + 1)
 			if next_on {
-				gap_style := next == st ? st : t.selected_unfocused
+				gap_style := next == st ? st : outline.SELECTED_UNFOCUSED
 				for gap := x + 2; gap < line.x + hex_column(i + 1, n, s.digits) && gap < right; gap += 1 {
-					buffer.set_string(ui.buf, gap, line.y, " ", gap_style)
+					put(g, gap, line.y, right, " ", gap_style)
 				}
 			}
 		}
-		tx := line.x + text_column(n, s.digits) + i
 		ch := [1]byte{b >= 0x20 && b < 0x7f ? b : '.'}
-		if tx < right do buffer.set_string(ui.buf, tx, line.y, string(ch[:]), st)
+		put(g, line.x + text_column(n, s.digits) + i, line.y, right, string(ch[:]), st)
 	}
 }
 

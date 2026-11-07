@@ -476,7 +476,11 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 		return .None
 	}
 
-	value := read_scalar(d, node, index) or_return
+	when INLINE_READS {
+		value := read_scalar(d, node, index) or_return
+	} else {
+		value := read_scalar_apart(d, node, index) or_return
+	}
 	push(s, 0, value)
 	when SPANS do set_span(d, s, 0, start)
 	if node.valid != nil {
@@ -553,7 +557,11 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPA
 	}
 
 	start := d.r.pos
-	bytes := element_bytes(d, node, index) or_return
+	when INLINE_READS {
+		bytes := element_bytes(d, node, index) or_return
+	} else {
+		bytes := element_bytes_apart(d, node, index) or_return
+	}
 	args: []fld.Value
 	if len(set.args) > 0 do args = eval_args(d, set, index) or_return
 
@@ -872,8 +880,9 @@ no_room :: #force_no_inline proc(d: ^Decoder) -> dat.Read_Error {
 }
 
 // Reads element index of node, a field that is not a set.
-// Inlined into each read_element, with and without spans: a call for every
-// value costs 8% more decode instructions.
+// Inlined into each read_element, with and without spans, in an optimized
+// build (INLINE_READS): a call for every value costs 8% more decode
+// instructions.
 @(private = "file", require_results)
 read_scalar :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.Value, err: dat.Read_Error) {
 	start := d.r.pos
@@ -916,6 +925,34 @@ read_scalar :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) ->
 
 	if err != .None do return nil, fail(d, err, start)
 	return value, .None
+}
+
+// Whether read_element and read_instance inline read_scalar and
+// element_bytes, as an optimized build does. A build with -o:none or
+// -o:minimal, which compiles a package's files as separate modules, only
+// inlines a #force_inline procedure into a caller in the same module, and
+// which module each procedure is put in changes with the rest of the
+// program: a few more tests were enough to put read_scalar beside
+// read_element, which then took 1.3 KB more stack for every set instance
+// that decoding nests, more than SET_STACK counts for it, so that the
+// tests' plain build on Windows ended them as Too_Deep at less than
+// MAX_DEPTH. Such a build calls them through read_scalar_apart and
+// element_bytes_apart instead, so that the frames that decoding nests are
+// the same whichever modules they are in.
+INLINE_READS :: ODIN_OPTIMIZATION_MODE > .Minimal
+
+// read_scalar, not inlined, for a build that does not inline reads
+// (INLINE_READS).
+@(private = "file", require_results)
+read_scalar_apart :: #force_no_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.Value, err: dat.Read_Error) {
+	return read_scalar(d, node, index)
+}
+
+// element_bytes, not inlined, for a build that does not inline reads
+// (INLINE_READS).
+@(private = "file", require_results)
+element_bytes_apart :: #force_no_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (bytes: []byte, err: dat.Read_Error) {
+	return element_bytes(d, node, index)
 }
 
 // Reads the bytes of element index of node, a String or Blob, or of the

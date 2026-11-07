@@ -253,17 +253,20 @@ grid_fill_and_frame :: proc(t: ^testing.T) {
 
 	grid.clear(&g)
 	grid.frame(&g, {0, 0, 8, 4}, "ab", RED, BOLD_ON_BLUE)
-	testing.expect_value(t, grid_text(&g), "┌ ab ──┐\n│      │\n│      │\n└──────┘")
+	testing.expect_value(t, grid_text(&g), "╭ ab ──╮\n│      │\n│      │\n╰──────╯")
 	testing.expect_value(t, grid.cell(&g, 0, 0).style, RED)
+	testing.expect_value(t, grid.cell(&g, 1, 0).style, BOLD_ON_BLUE)
 	testing.expect_value(t, grid.cell(&g, 2, 0).style, BOLD_ON_BLUE)
+	testing.expect_value(t, grid.cell(&g, 4, 0).style, BOLD_ON_BLUE)
+	testing.expect_value(t, grid.cell(&g, 5, 0).style, RED)
 
 	// a title cut to fit, and none where it does not
 	grid.clear(&g)
 	grid.frame(&g, {0, 0, 8, 2}, "abcdefgh", {}, {})
-	testing.expect_value(t, grid_text(&g), "┌ abcd…┐\n└──────┘\n        \n        ")
+	testing.expect_value(t, grid_text(&g), "╭ abcd…╮\n╰──────╯\n        \n        ")
 	grid.clear(&g)
 	grid.frame(&g, {0, 0, 4, 2}, "ab", {}, {})
-	testing.expect_value(t, grid_text(&g), "┌──┐    \n└──┘    \n        \n        ")
+	testing.expect_value(t, grid_text(&g), "╭──╮    \n╰──╯    \n        \n        ")
 	grid.clear(&g)
 	grid.frame(&g, {0, 0, 1, 4}, "ab", {}, {})
 	testing.expect_value(t, grid_text(&g), "        \n        \n        \n        ")
@@ -330,10 +333,10 @@ grid_scrollbar :: proc(t: ^testing.T) {
 	g: grid.Grid
 	grid.init(&g, 2, 4)
 	defer grid.destroy(&g)
-	grid.scrollbar(&g, {1, 0, 1, 4}, 8, 4, 4, RED)
-	testing.expect_value(t, grid_text(&g), " │\n │\n █\n █")
+	grid.scrollbar(&g, {1, 0, 1, 4}, 8, 4, 4, RED, grid.Style{fg = .Blue})
+	testing.expect_value(t, grid_text(&g), " │\n │\n ┃\n ┃")
 	testing.expect_value(t, grid.cell(&g, 1, 2).style, RED)
-	testing.expect_value(t, grid.cell(&g, 1, 0).style, grid.Style{fg = .Red, attrs = {.Dim}})
+	testing.expect_value(t, grid.cell(&g, 1, 0).style, grid.Style{fg = .Blue})
 
 	// a click puts the thumb's middle where it is
 	bar := grid.Rect{0, 2, 1, 10}
@@ -472,4 +475,15 @@ grid_out_of_memory :: proc(t: ^testing.T) {
 	testing.expect_value(t, g.width, 2)
 	g.allocator = allocator
 	grid.destroy(&g)
+
+	// a builder that cannot grow: render says so
+	src: grid.Grid
+	grid.init(&src, 2, 1)
+	defer grid.destroy(&src)
+	grid.put(&src, 0, 0, "AB", {}, 2)
+	b := strings.builder_make(failing_allocator())
+	testing.expect_value(t, grid.render(nil, &src, &b), mem.Allocator_Error.Out_Of_Memory)
+	ok := strings.builder_make(context.temp_allocator)
+	testing.expect_value(t, grid.render(nil, &src, &ok), nil)
+	testing.expect_value(t, strings.to_string(ok), "\e[1;1HAB")
 }

@@ -224,8 +224,8 @@ fill :: proc(g: ^Grid, r: Rect, style: Style) {
 }
 
 // Draws a border around r, of box-drawing characters, in style, with title
-// in the top line, in title_style, cut to fit. A rectangle less than 2
-// cells wide or high has none.
+// in the top line, between spaces, all in title_style, cut to fit. A
+// rectangle less than 2 cells wide or high has none.
 frame :: proc(g: ^Grid, r: Rect, title: string, style, title_style: Style) {
 	if r.width < 2 || r.height < 2 do return
 	right, bottom := r.x + r.width - 1, r.y + r.height - 1
@@ -237,11 +237,11 @@ frame :: proc(g: ^Grid, r: Rect, title: string, style, title_style: Style) {
 		set(g, r.x, y, "│", 1, style)
 		set(g, right, y, "│", 1, style)
 	}
-	set(g, r.x, r.y, "┌", 1, style)
-	set(g, right, r.y, "┐", 1, style)
-	set(g, r.x, bottom, "└", 1, style)
-	set(g, right, bottom, "┘", 1, style)
-	if title != "" && r.width >= 5 do put_parts(g, r.x + 1, r.y, {{" ", style}, {title, title_style}, {" ", style}}, r.width - 2)
+	set(g, r.x, r.y, "╭", 1, style)
+	set(g, right, r.y, "╮", 1, style)
+	set(g, r.x, bottom, "╰", 1, style)
+	set(g, right, bottom, "╯", 1, style)
+	if title != "" && r.width >= 5 do put_parts(g, r.x + 1, r.y, {{" ", title_style}, {title, title_style}, {" ", title_style}}, r.width - 2)
 }
 
 // Where a scrollbar of a column of height lines shows lines first to first
@@ -260,17 +260,16 @@ thumb :: proc(height, total, visible, first: int) -> (start, size: int) {
 }
 
 // Draws, in the first column of r, a scrollbar for lines first to first +
-// visible of total: a thumb in style, on a track of the same style, dim.
-scrollbar :: proc(g: ^Grid, r: Rect, total, visible, first: int, style: Style) {
+// visible of total: a thumb, a heavy line in thumb_style, on a track, a
+// light one in track_style.
+scrollbar :: proc(g: ^Grid, r: Rect, total, visible, first: int, thumb_style, track_style: Style) {
 	if r.width <= 0 do return
 	start, size := thumb(r.height, total, visible, first)
-	track := style
-	track.attrs += {.Dim}
 	for i in 0 ..< r.height {
 		if i >= start && i < start + size {
-			set(g, r.x, r.y + i, "█", 1, style)
+			set(g, r.x, r.y + i, "┃", 1, thumb_style)
 		} else {
-			set(g, r.x, r.y + i, "│", 1, track)
+			set(g, r.x, r.y + i, "│", 1, track_style)
 		}
 	}
 }
@@ -317,8 +316,11 @@ contains :: proc(r: Rect, x, y: int) -> bool {
 // differ, with the cursor moved to the first of each run of them and the
 // style set where it changes, and at the end the default style. With old
 // nil, or of another size, every cell is written. The terminal is taken to
-// be in the default style at the start, as render leaves it.
-render :: proc(old, new: ^Grid, b: ^strings.Builder) {
+// be in the default style at the start, as render leaves it. When b cannot
+// grow, it does not hold all of it, and the error says so.
+render :: proc(old, new: ^Grid, b: ^strings.Builder) -> mem.Allocator_Error {
+	start := len(b.buf)
+	wanted := 0 // the bytes written to b, which it holds when none failed
 	full := old == nil || old.width != new.width || old.height != new.height
 	current: Style
 	for y in 0 ..< new.height {
@@ -333,47 +335,55 @@ render :: proc(old, new: ^Grid, b: ^strings.Builder) {
 			}
 			if cursor != x {
 				buf: [24]byte
-				strings.write_string(b, "\e[")
-				strings.write_string(b, strconv.write_int(buf[:], i64(y + 1), 10))
-				strings.write_byte(b, ';')
-				strings.write_string(b, strconv.write_int(buf[:], i64(x + 1), 10))
-				strings.write_byte(b, 'H')
+				emit(b, "\e[", &wanted)
+				emit(b, strconv.write_int(buf[:], i64(y + 1), 10), &wanted)
+				emit(b, ";", &wanted)
+				emit(b, strconv.write_int(buf[:], i64(x + 1), 10), &wanted)
+				emit(b, "H", &wanted)
 			}
 			if c.style != current {
-				write_style(b, c.style)
+				write_style(b, c.style, &wanted)
 				current = c.style
 			}
-			strings.write_string(b, cell_text(c))
+			emit(b, cell_text(c), &wanted)
 			cursor = x + int(c.width)
 			if c.width == 2 do x += 1
 		}
 	}
-	if current != {} do strings.write_string(b, "\e[0m")
+	if current != {} do emit(b, "\e[0m", &wanted)
+	return len(b.buf) - start == wanted ? nil : .Out_Of_Memory
+}
+
+// Writes s to b, and counts its bytes in wanted, whether b took them or not.
+@(private)
+emit :: proc(b: ^strings.Builder, s: string, wanted: ^int) {
+	strings.write_string(b, s)
+	wanted^ += len(s)
 }
 
 // Writes the SGR sequence that sets style, from the default.
 @(private)
-write_style :: proc(b: ^strings.Builder, style: Style) {
+write_style :: proc(b: ^strings.Builder, style: Style, wanted: ^int) {
 	buf: [8]byte
-	strings.write_string(b, "\e[0")
+	emit(b, "\e[0", wanted)
 	for a in Attribute {
 		if a not_in style.attrs do continue
 		switch a {
-		case .Bold:       strings.write_string(b, ";1")
-		case .Dim:        strings.write_string(b, ";2")
-		case .Underlined: strings.write_string(b, ";4")
-		case .Reversed:   strings.write_string(b, ";7")
+		case .Bold:       emit(b, ";1", wanted)
+		case .Dim:        emit(b, ";2", wanted)
+		case .Underlined: emit(b, ";4", wanted)
+		case .Reversed:   emit(b, ";7", wanted)
 		}
 	}
 	if style.fg != .Default {
-		strings.write_byte(b, ';')
-		strings.write_string(b, strconv.write_int(buf[:], i64(color_code(style.fg, 30)), 10))
+		emit(b, ";", wanted)
+		emit(b, strconv.write_int(buf[:], i64(color_code(style.fg, 30)), 10), wanted)
 	}
 	if style.bg != .Default {
-		strings.write_byte(b, ';')
-		strings.write_string(b, strconv.write_int(buf[:], i64(color_code(style.bg, 40)), 10))
+		emit(b, ";", wanted)
+		emit(b, strconv.write_int(buf[:], i64(color_code(style.bg, 40)), 10), wanted)
 	}
-	strings.write_byte(b, 'm')
+	emit(b, "m", wanted)
 }
 
 // The SGR code of c, a foreground's from base 30 or a background's from 40:
