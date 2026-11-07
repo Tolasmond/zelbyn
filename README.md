@@ -6,7 +6,7 @@ The official Kaitai Struct compiler generates a parser for each format, in many 
 
 ## Quick start
 
-Binaries for Linux and Windows (x86-64) are on the [releases page](https://github.com/Tolasmond/zelbyn/releases). To build it, with Odin `dev-2026-10` or newer:
+Binaries for Linux and Windows (x86-64) are on the [releases page](https://github.com/Tolasmond/zelbyn/releases), the viewer's too on Linux. To build it, with Odin `dev-2026-10` or newer:
 
 ```
 odin build . -out:build/zelbyn
