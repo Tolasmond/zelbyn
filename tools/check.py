@@ -12,9 +12,9 @@ names (another is warned of, not refused). Always run, in order:
     uses the most stack, with ODIN_TEST_FAIL_ON_BAD_MEMORY
   - odin check -vet -strict-style of tools/bench, tools/ksy_corpus and
     tools/yaml_corpus
-  - but on Windows, odin check view -vet -strict-style: the viewer, whose
-    terminal, view/term, is POSIX's. Its other packages are tested with
-    the tests, on every platform.
+  - odin check view -vet -strict-style: the viewer, whose terminal,
+    view/term, is POSIX's or Windows' console. Its other packages are
+    tested with the tests, on every platform.
   - tools/codegen_tests/check.py: every decode of the tests again, with
     the code generated from its schema
 
@@ -68,15 +68,6 @@ def run(name, cmd, results):
     results.append((name, ok))
 
 
-def check_view(results):
-    """Checks the viewer, view/, but on Windows: its terminal, view/term, is
-    POSIX's. The tests test its other packages, on every platform."""
-    if os.name == 'nt':
-        print('== odin check view\n   skipped: the viewer runs on POSIX only\n', flush=True)
-        return
-    run('odin check view', ['odin', 'check', 'view', '-vet', '-strict-style'], results)
-
-
 def main():
     p = argparse.ArgumentParser(usage=__doc__)
     p.add_argument('--formats')
@@ -110,7 +101,7 @@ def main():
         for tool in ('tools/bench', 'tools/ksy_corpus', 'tools/yaml_corpus'):
             run('odin check ' + tool, ['odin', 'check', tool, '-vet', '-strict-style'], results)
         run('codegen tests', [sys.executable, 'tools/codegen_tests/check.py'], results)
-        check_view(results)
+        run('odin check view', ['odin', 'check', 'view', '-vet', '-strict-style'], results)
 
     if args.formats:
         cmd = [sys.executable, 'tools/ksy_corpus/check.py']

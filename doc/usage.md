@@ -120,7 +120,7 @@ error: Not_Equal at 0x00000000 in png[0].magic[0]: read <8 bytes> 6e 6f 74 20 61
 
 ## The viewer
 
-`zelbyn-view` shows a decoded file in the terminal: the decoded tree as an outline, beside the file's bytes, with those of the selected value highlighted. It draws with a terminal library of its own, on POSIX: it is checked on Linux, builds for macOS and the BSDs, and does not run on Windows. It is not part of the releases. To build and run it:
+`zelbyn-view` shows a decoded file in the terminal: the decoded tree as an outline, beside the file's bytes, with those of the selected value highlighted. It draws with a terminal library of its own, on POSIX and on Windows: it is checked on Linux and Windows, builds for macOS and the BSDs, and on Windows needs a console with virtual terminal sequences, as Windows Terminal or the console of Windows 10 and later. On Windows, build it with `-out:build/zelbyn-view.exe`; it is also in the Windows release's zip. It is not in the Linux release. To build and run it:
 
 ```
 odin build view -out:build/zelbyn-view

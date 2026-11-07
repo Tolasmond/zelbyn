@@ -2,7 +2,7 @@
 // It takes its command line as zelbyn does (view/session), and shows the
 // decoded tree as an outline beside the file's bytes (view/screen), also
 // after a failed decode, with its error. It draws with a terminal library
-// of its own (view/grid, view/vt, view/term), on POSIX.
+// of its own (view/grid, view/vt, view/term), on POSIX and on Windows.
 package main
 
 import "core:fmt"
