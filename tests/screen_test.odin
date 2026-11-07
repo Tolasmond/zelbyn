@@ -303,12 +303,22 @@ screen_drag_across_panes :: proc(t: ^testing.T) {
 	if !ok do return
 	l := screen.layout(&app, 110, 10)
 	bar_x := l.bytes.x + l.bytes.width - 1
-	_ = frame_screen(&g, &app, view_click(bar_x, l.bytes.y), view_drag(l.tree.x + 5, l.bytes.y + l.bytes.height - 1))
+	right := vt.Mouse{kind = .Press, button = .Right, x = l.tree.x + 5, y = l.tree.y}
+	right_up := vt.Mouse{kind = .Release, button = .Right, x = l.tree.x + 5, y = l.tree.y}
+	// the right button pressed and released while the left holds the thumb
+	_ = frame_screen(&g, &app, view_click(bar_x, l.bytes.y), right, right_up, view_drag(l.tree.x + 5, l.bytes.y + l.bytes.height - 1))
 	testing.expect(t, app.bytes.line > 0, "the drag over the tree does not scroll the bytes")
 	testing.expect_value(t, app.tree.selected, 0)
 	testing.expect_value(t, app.tree.offset, 0)
 	_ = frame_screen(&g, &app, view_release(l.tree.x + 5, 0), view_click(l.tree.x + 5, l.tree.y + 1))
 	testing.expect_value(t, app.tree.selected, 1)
+
+	// a release lost: the next press of the left button lets go of the thumb
+	_ = frame_screen(&g, &app, view_click(bar_x, l.bytes.y + l.bytes.height - 1))
+	testing.expect(t, app.bytes.dragging, "a press on the thumb does not hold it")
+	_ = frame_screen(&g, &app, view_click(l.tree.x + 5, l.tree.y + 2))
+	testing.expect(t, !app.bytes.dragging, "a press after a release lost still holds the thumb")
+	testing.expect_value(t, app.tree.selected, 2)
 }
 
 // Many keys, clicks and wheel events in one read give the screen they give
@@ -402,4 +412,57 @@ screen_bytes_follow_selection :: proc(t: ^testing.T) {
 	testing.expect_value(t, selected_style(&g, l, &app), outline.SELECTED)
 	_ = frame_screen(&g, &app, view_key(.Tab))
 	testing.expect_value(t, selected_style(&g, l, &app), outline.SELECTED_UNFOCUSED)
+}
+
+// Events in one read with resizes between them, each handled on the
+// screen of its size, give the screen they give one a frame, each frame of
+// the size the event was handled at: a row selected before a resize has
+// its bytes followed at the size it was selected at.
+@(test)
+screen_events_with_resizes :: proc(t: ^testing.T) {
+	schema := temp_file(t, ".ksy", CHECKED)
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_byte(&b, 40)
+	for _ in 0 ..< 40 do strings.write_string(&b, "\x01\x05")
+	strings.write_string(&b, strings.repeat("\x00", 400, context.temp_allocator))
+	data := temp_file(t, ".bin", strings.to_string(b))
+	defer for p in ([]string{schema, data}) do if p != "" do os.remove(p)
+	if schema == "" || data == "" do return
+
+	Sized :: struct {
+		event:         vt.Event,
+		width, height: int,
+	}
+	// reads, each ending in a resize, or in the events after one
+	reads := [][]Sized {
+		{{view_key(.Down), 60, 10}, {view_key(.Down), 60, 10}, {view_key(.Right), 60, 10}, {view_key(.End), 60, 10}, {vt.Resize{}, 110, 10}},
+		{{view_wheel(80, 4, true), 110, 10}, {view_key(.Up), 110, 10}, {vt.Resize{}, 60, 14}},
+		{{view_key(.Page_Up), 60, 14}, {vt.Resize{}, 30, 6}, {view_key(.Down), 30, 6}},
+	}
+	ss: [2]session.Session
+	defer for &x in ss do session.destroy(&x)
+	apps: [2]screen.App
+	defer for &x in apps do screen.destroy(&x)
+	grids: [2]grid.Grid
+	defer for &x in grids do grid.destroy(&x)
+	_, ok0 := draw_screen(t, &ss[0], &apps[0], &grids[0], {schema, data}, 60, 10)
+	_, ok1 := draw_screen(t, &ss[1], &apps[1], &grids[1], {schema, data}, 60, 10)
+	if !ok0 || !ok1 do return
+	for read, i in reads {
+		// a read drawn once, at its last size
+		for e in read do screen.handle(&apps[0], e.event, e.width, e.height)
+		last := read[len(read) - 1]
+		grid.resize(&grids[0], last.width, last.height)
+		screen.draw(&grids[0], &apps[0])
+		// one a frame
+		for e in read {
+			grid.resize(&grids[1], e.width, e.height)
+			_ = frame_screen(&grids[1], &apps[1], e.event)
+		}
+		testing.expectf(t, view_text(&grids[0]) == view_text(&grids[1]), "read %v: drawn once\n%s\none a frame\n%s", i, view_text(&grids[0]), view_text(&grids[1]))
+		testing.expectf(t, apps[0].tree.selected == apps[1].tree.selected, "read %v: row %v selected, not %v", i, apps[0].tree.selected, apps[1].tree.selected)
+		testing.expectf(t, apps[0].tree.offset == apps[1].tree.offset, "read %v: row %v first, not %v", i, apps[0].tree.offset, apps[1].tree.offset)
+		testing.expectf(t, apps[0].bytes.line == apps[1].bytes.line, "read %v: line %v first, not %v", i, apps[0].bytes.line, apps[1].bytes.line)
+	}
+	testing.expect(t, apps[1].bytes.line > 0, "the bytes did not follow the selection")
 }

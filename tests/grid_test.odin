@@ -475,4 +475,15 @@ grid_out_of_memory :: proc(t: ^testing.T) {
 	testing.expect_value(t, g.width, 2)
 	g.allocator = allocator
 	grid.destroy(&g)
+
+	// a builder that cannot grow: render says so
+	src: grid.Grid
+	grid.init(&src, 2, 1)
+	defer grid.destroy(&src)
+	grid.put(&src, 0, 0, "AB", {}, 2)
+	b := strings.builder_make(failing_allocator())
+	testing.expect_value(t, grid.render(nil, &src, &b), mem.Allocator_Error.Out_Of_Memory)
+	ok := strings.builder_make(context.temp_allocator)
+	testing.expect_value(t, grid.render(nil, &src, &ok), nil)
+	testing.expect_value(t, strings.to_string(ok), "\e[1;1HAB")
 }

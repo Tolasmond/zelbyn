@@ -12,6 +12,7 @@ import "base:runtime"
 import "core:c"
 import "core:strings"
 import "core:sys/posix"
+import "core:time"
 import "../grid"
 import "../vt"
 
@@ -57,12 +58,14 @@ Error :: enum {
 	Read,
 	Write,
 	Closed,         // stdin ended
+	Out_Of_Memory,  // what a draw writes could not be made
 }
 
 // A terminal taken by open. A process takes one at a time.
 Terminal :: struct {
 	decoder: vt.Decoder,
 	pending: bool,      // the last read ended in ESC, or in a sequence not finished
+	read_at: time.Tick, // when that read was, which ESCAPE_WAIT counts from
 	shown:   grid.Grid, // what the terminal shows, after draw
 	drawn:   bool,      // shown is on screen; until then, draw writes every cell
 	out:     strings.Builder,
@@ -80,6 +83,10 @@ GIVE_BACK :: "\x1b[0m\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l"
 // before their default action: those sent to end it, and those of a fault.
 @(private)
 ENDING := [?]posix.Signal{.SIGTERM, .SIGHUP, .SIGINT, .SIGQUIT, .SIGSEGV, .SIGBUS, .SIGFPE, .SIGILL, .SIGABRT, .SIGTRAP}
+// Those sent, which are blocked while the terminal is being taken or given
+// back, so that none comes between its change and taken's
+@(private)
+SENT := [?]posix.Signal{.SIGTERM, .SIGHUP, .SIGINT, .SIGQUIT}
 
 // What a signal's handler needs, which it gets from nowhere else.
 @(private)
@@ -120,12 +127,17 @@ open :: proc(t: ^Terminal) -> Error {
 	raw.c_cflag += {.CS8}
 	raw.c_cc[.VMIN] = 1
 	raw.c_cc[.VTIME] = 0
+	// a signal sent now waits until the terminal is raw and taken is set,
+	// and its handler gives it back
+	mask := block_sent()
 	if posix.tcsetattr(0, .TCSAFLUSH, &raw) != .OK {
+		unblock(&mask)
 		unset_handlers()
 		close_pipe()
 		return .Attributes
 	}
 	intrinsics.atomic_store(&taken, true)
+	unblock(&mask)
 	t^ = {}
 	if !write_all(1, TAKE) {
 		close(t)
@@ -136,8 +148,12 @@ open :: proc(t: ^Terminal) -> Error {
 
 // Gives the terminal back as it was before open, and frees t.
 close :: proc(t: ^Terminal) {
+	// a signal sent now waits until the terminal is given back and the
+	// handlers before open are set again
+	mask := block_sent()
 	give_back()
 	unset_handlers()
+	unblock(&mask)
 	close_pipe()
 	grid.destroy(&t.shown)
 	strings.builder_destroy(&t.out)
@@ -154,12 +170,18 @@ size :: proc() -> (width, height: int) {
 // Waits for input, or a resize, and appends their events to events: those
 // of a read, and a Resize when the terminal was resized; at least one. A
 // read that ends in ESC, or in a sequence not finished, waits ESCAPE_WAIT
-// for the rest, then takes it as it is.
+// from that read for the rest, also across calls that a resize ends, then
+// takes it as it is.
 wait :: proc(t: ^Terminal, events: ^[dynamic]vt.Event) -> Error {
 	buf: [4096]u8
 	for start := len(events); len(events) == start; {
+		timeout := c.int(-1)
+		if t.pending {
+			left := ESCAPE_WAIT * time.Millisecond - time.tick_since(t.read_at)
+			timeout = left <= 0 ? 0 : c.int((left + time.Millisecond - 1) / time.Millisecond)
+		}
 		fds := [2]posix.pollfd{{fd = 0, events = {.IN}}, {fd = wake[0], events = {.IN}}}
-		n := posix.poll(&fds[0], len(fds), t.pending ? ESCAPE_WAIT : -1)
+		n := posix.poll(&fds[0], len(fds), timeout)
 		if n < 0 {
 			if posix.errno() == .EINTR do continue
 			return .Read
@@ -182,16 +204,21 @@ wait :: proc(t: ^Terminal, events: ^[dynamic]vt.Event) -> Error {
 			}
 			if got == 0 do return .Closed
 			t.pending = vt.decode(&t.decoder, buf[:got], events)
+			t.read_at = time.tick_now()
 		}
 	}
 	return .None
 }
 
 // Writes g to the terminal, in one write: the cells that differ from those
-// it shows, or every cell at first and after a resize (grid.render).
+// it shows, or every cell at first and after a resize (grid.render). When
+// it cannot, the next draw writes every cell.
 draw :: proc(t: ^Terminal, g: ^grid.Grid) -> Error {
 	strings.builder_reset(&t.out)
-	grid.render(t.drawn ? &t.shown : nil, g, &t.out)
+	if grid.render(t.drawn ? &t.shown : nil, g, &t.out) != nil {
+		t.drawn = false
+		return .Out_Of_Memory
+	}
 	if !write_all(1, strings.to_string(t.out)) {
 		t.drawn = false
 		return .Write
@@ -204,6 +231,8 @@ draw :: proc(t: ^Terminal, g: ^grid.Grid) -> Error {
 // For context.assertion_failure_proc while the terminal is taken: gives it
 // back, so that the message is seen, then fails as Odin does.
 assertion_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
+	// a signal sent now waits until the terminal is given back, for good
+	block_sent()
 	give_back()
 	runtime.default_assertion_failure_proc(prefix, message, loc)
 }
@@ -234,13 +263,30 @@ on_resize :: proc "c" (sig: posix.Signal) {
 	posix.errno(e)
 }
 
+// Blocks the signals of SENT; returns the mask before, for unblock.
+@(private)
+block_sent :: proc() -> (before: posix.sigset_t) {
+	set: posix.sigset_t
+	posix.sigemptyset(&set)
+	for sig in SENT do posix.sigaddset(&set, sig)
+	posix.sigprocmask(.BLOCK, &set, &before)
+	return
+}
+
+@(private)
+unblock :: proc(before: ^posix.sigset_t) {
+	posix.sigprocmask(.SETMASK, before, nil)
+}
+
 @(private)
 set_handlers :: proc() -> bool {
 	act := posix.sigaction_t {
 		sa_handler = on_ending,
 		sa_flags   = {.RESETHAND},
 	}
+	// another ending signal waits until the handler has given the terminal back
 	posix.sigemptyset(&act.sa_mask)
+	for sig in ENDING do posix.sigaddset(&act.sa_mask, sig)
 	for sig, i in ENDING {
 		if posix.sigaction(sig, &act, &before[i]) != .OK {
 			for j in 0 ..< i do posix.sigaction(ENDING[j], &before[j], nil)

@@ -308,4 +308,14 @@ outline_scrollbar :: proc(t: ^testing.T) {
 	testing.expect(t, !outline.handle_mouse(&h.pane, vt.Mouse{kind = .Drag, button = .Left, x = 60, y = 0}, {0, 0, 48, 4}), "a drag outside, after the release, is the pane's")
 	testing.expect_value(t, h.pane.offset, 4)
 	testing.expect_value(t, h.pane.selected, 3)
+
+	// another button pressed and released while the left holds the thumb
+	_ = frame(&h, view_click(47, 0))
+	testing.expect_value(t, h.pane.offset, 0)
+	_ = frame(&h, vt.Mouse{kind = .Press, button = .Right, x = 20, y = 1}, vt.Mouse{kind = .Release, button = .Right, x = 20, y = 1}, view_drag(20, 9))
+	testing.expect_value(t, h.pane.offset, 4)
+	// a release lost: the next press of the left button lets go of the thumb
+	_ = frame(&h, view_click(10, 1), view_drag(20, 0))
+	testing.expect_value(t, h.pane.offset, 4)
+	testing.expect_value(t, h.pane.selected, 5)
 }

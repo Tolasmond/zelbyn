@@ -161,6 +161,10 @@ hexdump_scrolling :: proc(t: ^testing.T) {
 	testing.expect_value(t, first(hex_frame(&h, {}, view_click(72, 7))), "0F80")
 	testing.expect_value(t, first(hex_frame(&h, {}, view_drag(10, 0), view_release(10, 0))), "0000")
 	testing.expect_value(t, first(hex_frame(&h, {}, view_drag(72, 7))), "0000") // released
+	// a release lost: the next press of the left button lets go of the thumb
+	testing.expect_value(t, first(hex_frame(&h, {}, view_click(72, 7))), "0F80")
+	testing.expect_value(t, first(hex_frame(&h, {}, view_click(10, 2), view_drag(10, 0))), "0F80")
+	testing.expect_value(t, first(hex_frame(&h, {}, view_key(.Home))), "0000")
 
 	noted: Hex_Harness
 	hex_harness(&noted, seq(64), 73, 3)

@@ -120,16 +120,20 @@ handle_key :: proc(s: ^State, k: vt.Key, area: grid.Rect, h: Highlight) -> (used
 }
 
 // Handles mouse event e, in the pane, area: the wheel scrolls, and a click
-// or a drag on the scrollbar scrolls to where it is. Returns whether the
-// event was the pane's: in it, or a drag of its thumb.
+// or a drag on the scrollbar scrolls to where it is, until the left button
+// is released. Returns whether the event was the pane's: in it, or of the
+// left button while it holds the thumb.
 handle_mouse :: proc(s: ^State, e: vt.Mouse, area: grid.Rect, h: Highlight) -> (used: bool) {
 	settle(s, area, h)
 	p := parts(s, area, h)
-	if e.kind == .Release && s.dragging {
+	left := e.button == .Left
+	// a press of the left button starts afresh, also after a release lost
+	if e.kind == .Press && left do s.dragging = false
+	if e.kind == .Release && left && s.dragging {
 		s.dragging = false
 		return true
 	}
-	if s.dragging && e.kind == .Drag || grid.contains(p.bar, e.x, e.y) && e.kind == .Press && e.button == .Left {
+	if s.dragging && e.kind == .Drag && left || grid.contains(p.bar, e.x, e.y) && e.kind == .Press && left {
 		s.dragging = true
 		s.line = grid.scrollbar_line(p.bar, p.lines, p.body.height, e.y)
 		return true

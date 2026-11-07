@@ -120,7 +120,8 @@ Action :: enum {
 // with focus, and Tab moves the focus; a mouse event goes to the pane it is
 // in, and a click gives that pane focus; q, Esc and Ctrl+C, when the pane
 // does not take them, quit. Each event is handled against the state the one
-// before left, as it would be with a draw between them.
+// before left, as it would be with a draw between them: the screen is
+// settled before and after it, on the screen of width × height.
 handle :: proc(app: ^App, e: vt.Event, width, height: int) -> Action {
 	l := layout(app, width, height)
 	// the state as a draw of the last event would have left it, on this
@@ -144,6 +145,8 @@ handle :: proc(app: ^App, e: vt.Event, width, height: int) -> Action {
 		if ev.kind == .Press {
 			if grid.contains(l.tree_frame, ev.x, ev.y) do app.focus = .Tree
 			if grid.contains(l.bytes_frame, ev.x, ev.y) do app.focus = .Bytes
+			// a press of the left button lets go of a thumb whose release was lost
+			if ev.button == .Left do app.tree.dragging, app.bytes.dragging = false, false
 		}
 		// a held thumb is its pane's wherever the pointer goes
 		switch {
@@ -154,6 +157,9 @@ handle :: proc(app: ^App, e: vt.Event, width, height: int) -> Action {
 		}
 	case vt.Resize:
 	}
+	// and as a draw of this event would leave it, on this screen, before
+	// the next event, which may be on another
+	settle(app, l)
 	return .None
 }
 
