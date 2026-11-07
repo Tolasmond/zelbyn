@@ -22,7 +22,7 @@ odin check view -vet -strict-style
 
 `tools/codegen_tests/check.py` decodes every input the tests decode again, with the code generated from its schema ([Generated code](#generated-code)).
 
-The last checks the viewer, `view/`, on every platform but Windows: its terminal, `view/term`, is POSIX's, and `tools/check.py` skips it on Windows. Its other packages import no terminal, and are tested with zelbyn's tests, on every platform. The viewer is built with `odin build view -out:build/zelbyn-view`, and is not part of the releases.
+The last checks the viewer, `view/`, on every platform: its terminal, `view/term`, is POSIX's in `term_posix.odin` and Windows' console in `term_windows.odin`, with the same declarations. Its other packages import no terminal, and are tested with zelbyn's tests, on every platform. The viewer is built with `odin build view -out:build/zelbyn-view`, and is not part of the releases.
 
 `tools/check.py` runs them all, each whatever the ones before it give, and ends with a summary; it exits 1 if any failed. It builds the tests in a temporary directory. The checks are pinned to Odin `dev-2026-10` (commit `84bc3fc`), and the script warns when another is on the `PATH`.
 
