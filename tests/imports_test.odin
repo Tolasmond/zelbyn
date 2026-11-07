@@ -6,7 +6,7 @@ import "core:strings"
 import "core:testing"
 
 // The name each of zelbyn's packages is imported under, everywhere: in
-// zelbyn/, main.odin, tests/ and tools/ (doc/arch.md, "Package
+// zelbyn/, main.odin, tests/, tools/ and view/ (doc/arch.md, "Package
 // dependencies").
 @(private = "file")
 IMPORT_NAMES := [?][2]string {
@@ -21,6 +21,14 @@ IMPORT_NAMES := [?][2]string {
 	{"ksy", "ksy"},
 	{"metadata", "mdata"},
 	{"reader", "rdr"},
+	{"grid", "grid"}, // the viewer's, view/grid
+	{"rows", "rows"}, // the viewer's, view/rows
+	{"outline", "outline"}, // the viewer's, view/outline
+	{"hexdump", "hexdump"}, // the viewer's, view/hexdump
+	{"session", "session"}, // the viewer's, view/session
+	{"screen", "screen"}, // the viewer's, view/screen
+	{"vt", "vt"}, // the viewer's, view/vt
+	{"term", "term"}, // the viewer's, view/term
 	{"yaml", "yml"},
 }
 
@@ -42,7 +50,7 @@ import_names :: proc(t: ^testing.T) {
 			}
 		}
 	}
-	for dir in ([]string{"zelbyn", "tests", "tools"}) do collect(dir, &files)
+	for dir in ([]string{"zelbyn", "tests", "tools", "view"}) do collect(dir, &files)
 
 	imports := 0
 	for path in files {

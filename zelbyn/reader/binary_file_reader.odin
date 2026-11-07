@@ -45,7 +45,9 @@ DEFAULT_LIMITS :: Limits {
 // param's type: an i64 for an integer type, a bool, []byte for bytes or a
 // string for str, which the tree copies, or for a user type, []byte, read
 // as an instance of it in a stream of their own; else Invalid_Arguments.
-// limits bound the decode (Limits).
+// limits bound the decode (Limits). After an error, the tree holds what was
+// read before it, and can be walked as a complete tree can (doc/arch.md,
+// "Errors"); it is destroyed either way.
 @(require_results)
 read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false, args: []fld.Value = nil, limits := DEFAULT_LIMITS) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read: tree must be zero or destroyed")
@@ -68,7 +70,8 @@ read :: proc(name: string, format: ^mdata.File_Format, tree: ^fld.Value_Tree, sp
 // blobs are views of data, which the tree borrows, but for strings in an
 // encoding that is decoded, which are in the tree's arena: keep data alive and
 // unchanged for as long as the tree is used. The tree references nothing
-// in the schema. spans and args are as for read.
+// in the schema. spans, args, limits and the tree after an error are as
+// for read.
 @(require_results)
 read_from_bytes :: proc(data: []byte, format: ^mdata.File_Format, tree: ^fld.Value_Tree, spans := false, args: []fld.Value = nil, limits := DEFAULT_LIMITS) -> (consumed: int, err: Parse_Error) {
 	assert(tree.arena.block == nil && tree.root == nil, "read_from_bytes: tree must be zero or destroyed")
@@ -284,6 +287,32 @@ set_span :: proc(d: ^Decoder, s: ^Sink, k: int, start: int) {
 	fld.cell_spans(instance)[(uintptr(raw_data(slot)) - uintptr(raw_data(cells))) / size_of(fld.Value)] = span
 }
 
+// Records the span of the last value of slot 0 of s, a set instance whose
+// read failed, as set_span does: from start to the stream's position when
+// it failed, which for an instance of a substream is past the substream.
+// The frames of the instances being read are left pushed on error, so the
+// instance whose cell holds it, when one does, is found among them. Not
+// inlined: only a failed read calls it.
+@(private = "file")
+set_failed_span :: #force_no_inline proc(d: ^Decoder, s: ^Sink, start: int) {
+	slot := s.slots[0]
+	span := fld.Span{d.base + start, max(d.r.pos - start, 0)}
+	if s.cells == nil || raw_data(slot) != &s.cells[0] {
+		fld.array_span(slot, len(slot) - 1)^ = span
+		return
+	}
+	at := uintptr(raw_data(slot))
+	#reverse for frame in d.frames {
+		cells := fld.instance_cells(frame.instance)
+		first := uintptr(raw_data(cells))
+		if at >= first && at < first + uintptr(len(cells) * size_of(fld.Value)) {
+			fld.cell_spans(frame.instance)[(at - first) / size_of(fld.Value)] = span
+			return
+		}
+	}
+	panic("set_failed_span: no frame's instance holds the cell")
+}
+
 // Reads every value of node into s: the instances of a set, or the elements
 // of any other field, with their bit fields. A parse instance is read at
 // its pos, which moves the stream: read_parse_instance puts it back.
@@ -431,7 +460,11 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 
 	if node.type == .Set {
 		n := len(s.slots[0])
-		read_instance(d, s, node, index, SPANS) or_return
+		if err := read_instance(d, s, node, index, SPANS); err != .None {
+			// an instance whose read failed is kept, with what it read
+			when SPANS do if len(s.slots[0]) > n do set_failed_span(d, s, start)
+			return err
+		}
 		// a switch-on that chooses no case adds no value, so in a repeat the
 		// elements before may have added fewer values than index
 		read := len(s.slots[0]) > n
@@ -443,7 +476,11 @@ read_element :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPAN
 		return .None
 	}
 
-	value := read_scalar(d, node, index) or_return
+	when INLINE_READS {
+		value := read_scalar(d, node, index) or_return
+	} else {
+		value := read_scalar_apart(d, node, index) or_return
+	}
 	push(s, 0, value)
 	when SPANS do set_span(d, s, 0, start)
 	if node.valid != nil {
@@ -520,7 +557,11 @@ read_instance :: proc(d: ^Decoder, s: ^Sink, node: ^mdata.Node, index: int, $SPA
 	}
 
 	start := d.r.pos
-	bytes := element_bytes(d, node, index) or_return
+	when INLINE_READS {
+		bytes := element_bytes(d, node, index) or_return
+	} else {
+		bytes := element_bytes_apart(d, node, index) or_return
+	}
 	args: []fld.Value
 	if len(set.args) > 0 do args = eval_args(d, set, index) or_return
 
@@ -839,8 +880,9 @@ no_room :: #force_no_inline proc(d: ^Decoder) -> dat.Read_Error {
 }
 
 // Reads element index of node, a field that is not a set.
-// Inlined into each read_element, with and without spans: a call for every
-// value costs 8% more decode instructions.
+// Inlined into each read_element, with and without spans, in an optimized
+// build (INLINE_READS): a call for every value costs 8% more decode
+// instructions.
 @(private = "file", require_results)
 read_scalar :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.Value, err: dat.Read_Error) {
 	start := d.r.pos
@@ -883,6 +925,34 @@ read_scalar :: #force_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) ->
 
 	if err != .None do return nil, fail(d, err, start)
 	return value, .None
+}
+
+// Whether read_element and read_instance inline read_scalar and
+// element_bytes, as an optimized build does. A build with -o:none or
+// -o:minimal, which compiles a package's files as separate modules, only
+// inlines a #force_inline procedure into a caller in the same module, and
+// which module each procedure is put in changes with the rest of the
+// program: a few more tests were enough to put read_scalar beside
+// read_element, which then took 1.3 KB more stack for every set instance
+// that decoding nests, more than SET_STACK counts for it, so that the
+// tests' plain build on Windows ended them as Too_Deep at less than
+// MAX_DEPTH. Such a build calls them through read_scalar_apart and
+// element_bytes_apart instead, so that the frames that decoding nests are
+// the same whichever modules they are in.
+INLINE_READS :: ODIN_OPTIMIZATION_MODE > .Minimal
+
+// read_scalar, not inlined, for a build that does not inline reads
+// (INLINE_READS).
+@(private = "file", require_results)
+read_scalar_apart :: #force_no_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (value: fld.Value, err: dat.Read_Error) {
+	return read_scalar(d, node, index)
+}
+
+// element_bytes, not inlined, for a build that does not inline reads
+// (INLINE_READS).
+@(private = "file", require_results)
+element_bytes_apart :: #force_no_inline proc(d: ^Decoder, node: ^mdata.Node, index: int) -> (bytes: []byte, err: dat.Read_Error) {
+	return element_bytes(d, node, index)
 }
 
 // Reads the bytes of element index of node, a String or Blob, or of the

@@ -1,5 +1,6 @@
 package tests
 
+import "../view/session"
 import "../zelbyn/cli"
 import "core:fmt"
 import "core:io"
@@ -116,6 +117,43 @@ Cli_Case :: struct {
 	failing_stdout: bool,
 }
 
+// The command line's cases, which cli_command_line runs, and
+// cli_view_options runs with the viewer too.
+@(private = "file")
+CLI_CASES := []Cli_Case {
+	{"help", {"--help"}, 0, "--param <string>, multiple", "", false},
+	{"help names gen", {"--help"}, 0, "Or: zelbyn gen <schema> --out <dir>", "", false},
+	{"no arguments", {}, 2, "", "Usage:", false},
+	{"an unknown flag", {"SCHEMA", "INPUT", "--bogus"}, 2, "", "Usage:", false},
+	{"a bad --dump", {"SCHEMA", "INPUT", "--dump", "xml"}, 2, "", `error: --dump must be tree or json, not "xml"`, false},
+	{"--offsets with --dump json", {"SCHEMA", "INPUT", "--offsets", "--dump", "json"}, 2, "", "error: --offsets applies only to --dump tree", false},
+	{"--param without a value", {"SCHEMA", "INPUT", "--param"}, 2, "", "error: --param needs name=value", false},
+	{"params, as a tree", {"SCHEMA", "INPUT", "--param", "count=2", "--param=wide=true", "--param", "label=hi", "--param", "magic=CAfe", "--param", "hdr=07"}, 0, "p[0].values[0] = 1\np[0].values[1] = 2\np[0].extra[0] = 3\np[0].tag[0] = <2 bytes> ca fe\np[0].name[0] = \"hi\"\np[0].b[0] = 7\n", "", false},
+	{"params, with offsets", {"SCHEMA", "INPUT", "--offsets", "--param", "count=0x2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 0, "p[0].name[0] = \"hi\" @0x5\np[0].b[0] = 7 @0x7\n", "", false},
+	{"params, as JSON", {"SCHEMA", "INPUT", "--dump", "json", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 0, `{"p":[{"values":[1,2],"extra":[3],"tag":["cafe"],"name":["hi"],"b":[7]}]}`, "", false},
+	{"a param missing", {"SCHEMA", "INPUT", "--param", "count=2", "--param", "wide=true", "--param", "magic=cafe", "--param", "hdr=07"}, 2, "", "error: the schema's top-level type needs --param label=value", false},
+	{"an unknown param", {"SCHEMA", "INPUT", "--param", "nope=1"}, 2, "", "error: --param nope=1: the schema's top-level type has no param nope", false},
+	{"a param twice", {"SCHEMA", "INPUT", "--param", "count=2", "--param", "count=3"}, 2, "", "error: --param count=3: param count is given twice", false},
+	{"not name=value", {"SCHEMA", "INPUT", "--param", "count"}, 2, "", "error: --param count is not name=value", false},
+	{"not an integer", {"SCHEMA", "INPUT", "--param", "count=two"}, 2, "", `count is an integer, not "two"`, false},
+	{"not a boolean", {"SCHEMA", "INPUT", "--param=wide=yes"}, 2, "", `wide is true or false, not "yes"`, false},
+	{"bytes not in hex", {"SCHEMA", "INPUT", "--param", "magic=caf"}, 2, "", `magic is bytes, in hex (0a1b), not "caf"`, false},
+	{"a user type not in hex", {"SCHEMA", "INPUT", "--param", "hdr=zz"}, 2, "", `hdr is bytes, in hex (0a1b), not "zz"`, false},
+	{"an argument the input fails", {"SCHEMA", "INPUT", "--param", "count=2", "--param", "wide=true", "--param", "label=ho", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: Expr_False at 0x00000005 in p[0].name[0]", false},
+	// the argument of hdr, a user type, is read first: its instance and
+	// its field, two steps; then the root, values, extra, tag, name and b
+	{"--max-steps reached", {"SCHEMA", "INPUT", "--max-steps=3", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: Step_Limit at 0x00000000 in p[0].values[0]", false},
+	{"--max-steps and --max-memory within", {"SCHEMA", "INPUT", "--max-steps", "9", "--max-memory=1M", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 0, "p[0].b[0] = 7\n", "", false},
+	{"no limits", {"SCHEMA", "INPUT", "--max-steps=0", "--max-memory=0", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 0, "p[0].b[0] = 7\n", "", false},
+	{"a bad --max-memory", {"SCHEMA", "INPUT", "--max-memory=1x"}, 2, "", `error: --max-memory must be bytes, or with K, M or G, not "1x"`, false},
+	{"a bad --max-steps", {"SCHEMA", "INPUT", "--max-steps=-1"}, 2, "", `error: --max-steps must be a count, not "-1"`, false},
+	{"a schema error", {"BAD", "INPUT"}, 1, "", ":5:11: Invalid: a: unknown type nope", false},
+	{"no schema", {"NONE", "INPUT"}, 1, "", "error: cannot read /nonexistent/zelbyn_cli_test", false},
+	{"no input", {"SCHEMA", "NONE", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: cannot read /nonexistent/zelbyn_cli_test", false},
+	{"output fails, as a tree", {"SCHEMA", "INPUT", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: writing output: Short_Write", true},
+	{"output fails, as JSON", {"SCHEMA", "INPUT", "--dump", "json", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: writing output: Short_Write", true},
+}
+
 // The command line: --help, the usage errors, among them --offsets with
 // --dump json, --param in both forms and each of its errors, and the
 // errors of loading, decoding and writing, each with its exit code, and
@@ -130,40 +168,7 @@ cli_command_line :: proc(t: ^testing.T) {
 	}
 	if schema == "" || input == "" || bad_schema == "" do return
 
-	cases := []Cli_Case {
-		{"help", {"--help"}, 0, "--param <string>, multiple", "", false},
-		{"help names gen", {"--help"}, 0, "Or: zelbyn gen <schema> --out <dir>", "", false},
-		{"no arguments", {}, 2, "", "Usage:", false},
-		{"an unknown flag", {"SCHEMA", "INPUT", "--bogus"}, 2, "", "Usage:", false},
-		{"a bad --dump", {"SCHEMA", "INPUT", "--dump", "xml"}, 2, "", `error: --dump must be tree or json, not "xml"`, false},
-		{"--offsets with --dump json", {"SCHEMA", "INPUT", "--offsets", "--dump", "json"}, 2, "", "error: --offsets applies only to --dump tree", false},
-		{"--param without a value", {"SCHEMA", "INPUT", "--param"}, 2, "", "error: --param needs name=value", false},
-		{"params, as a tree", {"SCHEMA", "INPUT", "--param", "count=2", "--param=wide=true", "--param", "label=hi", "--param", "magic=CAfe", "--param", "hdr=07"}, 0, "p[0].values[0] = 1\np[0].values[1] = 2\np[0].extra[0] = 3\np[0].tag[0] = <2 bytes> ca fe\np[0].name[0] = \"hi\"\np[0].b[0] = 7\n", "", false},
-		{"params, with offsets", {"SCHEMA", "INPUT", "--offsets", "--param", "count=0x2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 0, "p[0].name[0] = \"hi\" @0x5\np[0].b[0] = 7 @0x7\n", "", false},
-		{"params, as JSON", {"SCHEMA", "INPUT", "--dump", "json", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 0, `{"p":[{"values":[1,2],"extra":[3],"tag":["cafe"],"name":["hi"],"b":[7]}]}`, "", false},
-		{"a param missing", {"SCHEMA", "INPUT", "--param", "count=2", "--param", "wide=true", "--param", "magic=cafe", "--param", "hdr=07"}, 2, "", "error: the schema's top-level type needs --param label=value", false},
-		{"an unknown param", {"SCHEMA", "INPUT", "--param", "nope=1"}, 2, "", "error: --param nope=1: the schema's top-level type has no param nope", false},
-		{"a param twice", {"SCHEMA", "INPUT", "--param", "count=2", "--param", "count=3"}, 2, "", "error: --param count=3: param count is given twice", false},
-		{"not name=value", {"SCHEMA", "INPUT", "--param", "count"}, 2, "", "error: --param count is not name=value", false},
-		{"not an integer", {"SCHEMA", "INPUT", "--param", "count=two"}, 2, "", `count is an integer, not "two"`, false},
-		{"not a boolean", {"SCHEMA", "INPUT", "--param=wide=yes"}, 2, "", `wide is true or false, not "yes"`, false},
-		{"bytes not in hex", {"SCHEMA", "INPUT", "--param", "magic=caf"}, 2, "", `magic is bytes, in hex (0a1b), not "caf"`, false},
-		{"a user type not in hex", {"SCHEMA", "INPUT", "--param", "hdr=zz"}, 2, "", `hdr is bytes, in hex (0a1b), not "zz"`, false},
-		{"an argument the input fails", {"SCHEMA", "INPUT", "--param", "count=2", "--param", "wide=true", "--param", "label=ho", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: Expr_False at 0x00000005 in p[0].name[0]", false},
-		// the argument of hdr, a user type, is read first: its instance and
-		// its field, two steps; then the root, values, extra, tag, name and b
-		{"--max-steps reached", {"SCHEMA", "INPUT", "--max-steps=3", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: Step_Limit at 0x00000000 in p[0].values[0]", false},
-		{"--max-steps and --max-memory within", {"SCHEMA", "INPUT", "--max-steps", "9", "--max-memory=1M", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 0, "p[0].b[0] = 7\n", "", false},
-		{"no limits", {"SCHEMA", "INPUT", "--max-steps=0", "--max-memory=0", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 0, "p[0].b[0] = 7\n", "", false},
-		{"a bad --max-memory", {"SCHEMA", "INPUT", "--max-memory=1x"}, 2, "", `error: --max-memory must be bytes, or with K, M or G, not "1x"`, false},
-		{"a bad --max-steps", {"SCHEMA", "INPUT", "--max-steps=-1"}, 2, "", `error: --max-steps must be a count, not "-1"`, false},
-		{"a schema error", {"BAD", "INPUT"}, 1, "", ":5:11: Invalid: a: unknown type nope", false},
-		{"no schema", {"NONE", "INPUT"}, 1, "", "error: cannot read /nonexistent/zelbyn_cli_test", false},
-		{"no input", {"SCHEMA", "NONE", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: cannot read /nonexistent/zelbyn_cli_test", false},
-		{"output fails, as a tree", {"SCHEMA", "INPUT", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: writing output: Short_Write", true},
-		{"output fails, as JSON", {"SCHEMA", "INPUT", "--dump", "json", "--param", "count=2", "--param", "wide=true", "--param", "label=hi", "--param", "magic=cafe", "--param", "hdr=07"}, 1, "", "error: writing output: Short_Write", true},
-	}
-	for c in cases {
+	for c in CLI_CASES {
 		args := make([dynamic]string, context.temp_allocator)
 		append(&args, "zelbyn")
 		for a in c.args {
@@ -232,4 +237,67 @@ cli_check_failures :: proc(t: ^testing.T) {
 		want := strings.concatenate({"error: ", c.stderr, "\n"}, context.temp_allocator)
 		testing.expectf(t, r.exit_code == 1 && r.stderr == want && r.stdout == "", "%s: exit code %v, stderr %q; want 1 and %q", c.name, r.exit_code, r.stderr, want)
 	}
+}
+
+// The viewer takes its command line as zelbyn does (view/session): each
+// case of zelbyn's command line but those of the dump's options and its
+// output gives the viewer the same exit code and first line of stderr, or
+// for a decode that fails, a session with the same error, which the viewer
+// shows. A limit reached says which option sets it.
+@(test)
+cli_view_options :: proc(t: ^testing.T) {
+	schema := temp_file(t, ".ksy", PARAMS_SCHEMA)
+	input := temp_file(t, ".bin", PARAMS_INPUT)
+	bad_schema := temp_file(t, ".ksy", "meta:\n  id: p\nseq:\n  - id: a\n    type: nope\n")
+	defer {
+		for path in ([]string{schema, input, bad_schema}) do if path != "" do os.remove(path)
+	}
+	if schema == "" || input == "" || bad_schema == "" do return
+
+	first_line :: proc(s: string) -> string {
+		end := strings.index_byte(s, '\n')
+		return end < 0 ? s : s[:end]
+	}
+	compared := 0
+	cases: for c in CLI_CASES {
+		if c.failing_stdout do continue
+		for a in c.args do if strings.has_prefix(a, "--dump") || a == "--offsets" do continue cases
+		args := make([dynamic]string, context.temp_allocator)
+		append(&args, "zelbyn")
+		for a in c.args {
+			switch a {
+			case "SCHEMA": append(&args, schema)
+			case "BAD":    append(&args, bad_schema)
+			case "INPUT":  append(&args, input)
+			case "NONE":   append(&args, "/nonexistent/zelbyn_cli_test")
+			case:          append(&args, a)
+			}
+		}
+		r := run_cli(args[:])
+
+		out := strings.builder_make(context.temp_allocator)
+		errs := strings.builder_make(context.temp_allocator)
+		s: session.Session
+		code, ok := session.make_session(&s, args[:], strings.to_writer(&out), strings.to_writer(&errs))
+		defer session.destroy(&s)
+		compared += 1
+		switch {
+		case ok && s.err.kind == .None:
+			testing.expectf(t, r.exit_code == 0, "%s: the viewer decodes it, zelbyn exits %v: %s", c.name, r.exit_code, r.stderr)
+			testing.expectf(t, strings.to_string(errs) == "", "%s: the viewer wrote %q", c.name, strings.to_string(errs))
+		case ok:
+			// a failed decode: zelbyn writes its error, the viewer shows it
+			text := session.error_text(&s)
+			testing.expectf(t, r.exit_code == 1 && strings.has_prefix(text, strings.trim_prefix(first_line(r.stderr), "error: ")), "%s: the viewer shows %q; zelbyn exits %v with %q", c.name, text, r.exit_code, r.stderr)
+			if s.err.kind == .Step_Limit do testing.expectf(t, strings.contains(text, "(--max-steps)"), "%s: %q does not name --max-steps", c.name, text)
+		case:
+			testing.expectf(t, code == r.exit_code, "%s: the viewer exits %v, zelbyn %v", c.name, code, r.exit_code)
+			if code == 0 {
+				testing.expectf(t, strings.contains(strings.to_string(out), "--param <string>, multiple"), "%s: the viewer's usage %q has no --param", c.name, strings.to_string(out))
+			} else {
+				testing.expectf(t, first_line(strings.to_string(errs)) == first_line(r.stderr), "%s: the viewer writes %q, zelbyn %q", c.name, first_line(strings.to_string(errs)), first_line(r.stderr))
+			}
+		}
+	}
+	testing.expectf(t, compared >= 20, "only %v cases compared", compared)
 }

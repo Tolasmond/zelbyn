@@ -149,6 +149,48 @@ decode_error_allocates_only_its_strings :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(track.allocation_map), 0)
 }
 
+// As decode_error_allocates_only_its_strings, from a file, with the temp
+// allocator tracked too: the tests' check of the tree a failed decode
+// leaves reads the file again, and must do it in an arena of its own.
+@(test)
+decode_file_error_allocates_only_its_strings :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 10 * time.Second)
+	ff: mdata.File_Format
+	defer mdata.destroy_file_format(&ff)
+	if !load_sample(t, &ff) do return
+
+	text := "hello world, not a sample at all"
+	path, ok := write_temp_file(t, transmute([]byte)text)
+	if !ok do return
+	defer delete(path)
+	defer os.remove(path)
+
+	kind: dat.Read_Error
+	live_with_error, temp_live: int
+	track, temp_track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	mem.tracking_allocator_init(&temp_track, context.allocator)
+	defer mem.tracking_allocator_destroy(&temp_track)
+	{
+		context.allocator = mem.tracking_allocator(&track)
+		context.temp_allocator = mem.tracking_allocator(&temp_track)
+		context.logger = log.nil_logger()
+
+		d: Decoded
+		decode_file(&ff, path, &d)
+		kind = d.err.kind
+		live_with_error = len(track.allocation_map)
+		temp_live = len(temp_track.allocation_map)
+		destroy_decoded(&d)
+	}
+
+	testing.expect_value(t, kind, .Not_Equal)
+	testing.expect_value(t, live_with_error, 3) // only Parse_Error.path, value and expected
+	testing.expect_value(t, temp_live, 0)
+	testing.expect_value(t, len(track.allocation_map), 0)
+}
+
 // Writes data to a new temporary file and returns its path, which the
 // caller deletes, and removes the file. The file is named by the test
 // that makes it (see temp_file in cli_test.odin).
