@@ -6,7 +6,7 @@ The official Kaitai Struct compiler generates a parser for each format, in many 
 
 ## Quick start
 
-Binaries for Linux and Windows (x86-64) are on the [releases page](https://github.com/Tolasmond/zelbyn/releases), the viewer's too on Linux. To build it, with Odin `dev-2026-10` or newer:
+Binaries for Linux and Windows (x86-64) are on the [releases page](https://github.com/Tolasmond/zelbyn/releases), with the viewer's. To build it, with Odin `dev-2026-10` or newer:
 
 ```
 odin build . -out:build/zelbyn
@@ -18,7 +18,7 @@ build/zelbyn ../kaitai_struct_formats/image/png.ksy ../kaitai_struct_samples/ima
 
 To generate a package that decodes PNG files, `build/zelbyn gen ../kaitai_struct_formats/image/png.ksy --out png --import-path ../kaitai_struct_formats`; [doc/usage.md](doc/usage.md#generating-code) says how to build and use it.
 
-To browse a decoded file in the terminal, the decoded tree beside the file's bytes, `zelbyn-view` takes the same command line, on Linux and other POSIX systems: `odin build view -out:build/zelbyn-view`; [doc/usage.md](doc/usage.md#the-viewer) describes it.
+To browse a decoded file in the terminal, the decoded tree beside the file's bytes, `zelbyn-view` takes the same command line, on Linux, other POSIX systems and Windows: `odin build view -out:build/zelbyn-view`; [doc/usage.md](doc/usage.md#the-viewer) describes it.
 
 ![zelbyn-view on atch-plain.png: the tree, with chunks[0].type_raw selected, beside the bytes, its four highlighted and those of chunks[0] shaded](doc/images/zelbyn-view.png)
 

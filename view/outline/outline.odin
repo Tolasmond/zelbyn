@@ -26,7 +26,9 @@ TEXT :: grid.Style{}
 MUTED :: grid.Style{fg = .Bright_Black}
 TITLE :: grid.Style{attrs = {.Bold}}
 ACCENT :: grid.Style{fg = .Cyan}
-SELECTED :: grid.Style{fg = .Black, bg = .Cyan, attrs = {.Bold}}
+// not bold: a terminal that shows bold in the bright colors, as Windows
+// Terminal does by default, would make black text gray
+SELECTED :: grid.Style{fg = .Black, bg = .Cyan}
 SELECTED_UNFOCUSED :: grid.Style{bg = .Bright_Black}
 
 // The hex digits that show every offset of an input of size bytes, at
