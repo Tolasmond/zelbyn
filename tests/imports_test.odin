@@ -21,6 +21,7 @@ IMPORT_NAMES := [?][2]string {
 	{"ksy", "ksy"},
 	{"metadata", "mdata"},
 	{"reader", "rdr"},
+	{"grid", "grid"}, // the viewer's, view/grid
 	{"rows", "rows"}, // the viewer's, view/rows
 	{"outline", "outline"}, // the viewer's, view/outline
 	{"hexdump", "hexdump"}, // the viewer's, view/hexdump
